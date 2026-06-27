@@ -1,0 +1,64 @@
+rules:
+  # Detect eval() usage which can lead to code injection
+  - id: no-eval
+    languages: [javascript, typescript]
+    message: "Avoid eval() — it executes arbitrary code and is a common injection vector."
+    severity: ERROR
+    pattern: eval(...)
+
+  # Detect dangerous innerHTML assignment
+  - id: no-inner-html
+    languages: [javascript, typescript]
+    message: "Direct innerHTML assignment can lead to XSS. Use textContent or a sanitization library."
+    severity: WARNING
+    pattern: $EL.innerHTML = $VAL
+
+  # Detect hardcoded passwords / secrets
+  - id: no-hardcoded-password
+    languages: [javascript, typescript]
+    message: "Possible hardcoded password or secret. Use environment variables instead."
+    severity: ERROR
+    patterns:
+      - pattern: |
+          const $VAR = "..."
+      - metavariable-regex:
+          metavariable: $VAR
+          regex: (?i)(password|passwd|secret|api_key|apikey|token|auth_token|access_token)
+
+  # Detect SQL queries built with string concatenation
+  - id: no-sql-string-concat
+    languages: [javascript, typescript]
+    message: "SQL query built with string concatenation — use parameterized queries to prevent SQL injection."
+    severity: ERROR
+    pattern: $DB.query($X + $Y, ...)
+
+  # Detect use of Math.random() for security/crypto purposes
+  - id: no-math-random-crypto
+    languages: [javascript, typescript]
+    message: "Math.random() is not cryptographically secure. Use crypto.randomBytes() or crypto.randomUUID() instead."
+    severity: WARNING
+    patterns:
+      - pattern: Math.random()
+      - pattern-not-inside: |
+          // ...
+
+  # Detect console.log leaking potential sensitive data
+  - id: no-console-log-sensitive
+    languages: [javascript, typescript]
+    message: "Avoid logging potentially sensitive data. Review what is being logged."
+    severity: INFO
+    patterns:
+      - pattern: console.log(..., $X, ...)
+      - metavariable-regex:
+          metavariable: $X
+          regex: (?i)(password|token|secret|key|credential|auth)
+
+  # Detect process.exit() in library/service code
+  - id: no-process-exit
+    languages: [javascript, typescript]
+    message: "process.exit() in service code is dangerous — it kills the entire process. Use proper error handling."
+    severity: WARNING
+    pattern: process.exit($CODE)
+    paths:
+      include:
+        - "apps/**"
