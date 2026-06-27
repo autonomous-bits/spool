@@ -6,13 +6,23 @@
 
 ## Suggested structure
 
-- `src/main.ts`: application bootstrap.
-- `src/app.module.ts`: root NestJS module and feature wiring.
-- `src/**`: controllers, services, repositories, DTOs, and domain modules.
-- `src/test/**`: shared test setup and helpers.
-- `test/**`: end-to-end and integration tests.
+> The diagram below is a guide only. The actual files on disk are authoritative — always check the filesystem before assuming a file exists or a path is correct.
+
+```
+apps/store/
+├── src/
+│   ├── main.ts              # application bootstrap
+│   ├── app.module.ts        # root NestJS module and feature wiring
+│   ├── **/*.ts              # controllers, services, repositories, DTOs, domain modules
+│   └── test/
+│       └── setup.ts         # shared test setup and helpers
+└── test/
+    └── *.e2e-spec.ts        # end-to-end and integration tests
+```
 
 ## Run tests
+
+Tests use **[Vitest](https://vitest.dev)**. Do not use Jest.
 
 From the repository root:
 
@@ -23,8 +33,10 @@ pnpm test:store
 From `apps/store`:
 
 ```sh
-pnpm test
-pnpm test:e2e
+pnpm test          # vitest run (all unit tests)
+pnpm test:watch    # vitest watch mode
+pnpm test:e2e      # vitest run test/**/*.e2e-spec.ts
+pnpm test:coverage # vitest run --coverage
 ```
 
 ## Docker runtime
