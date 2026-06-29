@@ -48,7 +48,7 @@ import {
   stakeholderId,
   workspaceId,
   type BranchState,
-} from './vocabulary.js';
+} from './types/index.js';
 
 // ─── Test fixtures ────────────────────────────────────────────────────────────
 
