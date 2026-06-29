@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "meridian": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["main.js"],
+      "cwd": "/Users/wernerswart/repos/meridian/apps/mcp/dist",
+      "env": {
+        "AGENT_SHARED_SECRET": "local-agent-shared-secret",
+        "FEEDBACK_ALLOWED_WORKSPACE_IDS": "dbb786ac-1d61-41c9-a46a-2c279dd50cc3",
+        "FEEDBACK_COMMAND_SHARED_SECRET": "local-feedback-shared-secret",
+        "FEEDBACK_COMMAND_SUBMITTER": "local-feedback-submitter",
+        "MCP_SHARED_SECRET": "local-mcp-shared-secret",
+        "MERIDIAN_BASE_URL": "http://localhost:3000",
+        "MCP_ALLOWED_WORKSPACE_IDS": "dbb786ac-1d61-41c9-a46a-2c279dd50cc3"
+      }
+    }
+  }
+}
