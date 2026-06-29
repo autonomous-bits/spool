@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import * as deprecatedVocabulary from './vocabulary.js';
 import {
   VocabularyValidationError,
   workspaceId,
@@ -35,7 +36,19 @@ import {
   type ActorContext,
   type HumanActorContext,
   type WorkspaceScoped,
-} from './vocabulary.js';
+} from './types/index.js';
+
+
+
+describe('deprecated vocabulary module', () => {
+  it('re-exports constructors and guards from the new types API', () => {
+    expect(deprecatedVocabulary.workspaceId).toBe(workspaceId);
+    expect(deprecatedVocabulary.humanActor).toBe(humanActor);
+    expect(deprecatedVocabulary.VocabularyValidationError).toBe(
+      VocabularyValidationError,
+    );
+  });
+});
 
 // ─── Brand safety (type-level) ────────────────────────────────────────────────
 //

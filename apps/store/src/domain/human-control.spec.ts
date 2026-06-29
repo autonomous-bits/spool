@@ -12,26 +12,35 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import * as deprecatedHumanControl from './human-control.js';
 import {
   HumanControlError,
+  VocabularyValidationError,
   acceptSuggestion,
   approveChunk,
   assertHumanActor,
+  delegatedActor,
+  humanActor,
+  ideaLabel,
   rejectSuggestion,
+  stakeholderId,
+  suggestionId,
+  workspaceId,
   type ChunkApprovalRecord,
   type SuggestionAcceptedDecision,
   type SuggestionDecision,
   type SuggestionRejectedDecision,
-} from './human-control.js';
-import {
-  VocabularyValidationError,
-  delegatedActor,
-  humanActor,
-  ideaLabel,
-  stakeholderId,
-  suggestionId,
-  workspaceId,
-} from './vocabulary.js';
+} from './types/index.js';
+
+
+
+describe('deprecated human-control module', () => {
+  it('re-exports protected operation helpers from the new types API', () => {
+    expect(deprecatedHumanControl.approveChunk).toBe(approveChunk);
+    expect(deprecatedHumanControl.acceptSuggestion).toBe(acceptSuggestion);
+    expect(deprecatedHumanControl.HumanControlError).toBe(HumanControlError);
+  });
+});
 
 // ─── Test fixtures ────────────────────────────────────────────────────────────
 

@@ -21,6 +21,7 @@
  * Story: S03 — Keep branch work owned by one discipline.
  */
 
+import { VocabularyValidationError, isHumanActor } from './types/index.js';
 import type {
   ActorContext,
   BranchId,
@@ -29,8 +30,7 @@ import type {
   HumanActorContext,
   StakeholderId,
   WorkspaceId,
-} from './vocabulary.js';
-import { VocabularyValidationError, isHumanActor } from './vocabulary.js';
+} from './types/index.js';
 
 export type { BranchId, StakeholderId, WorkspaceId };
 
