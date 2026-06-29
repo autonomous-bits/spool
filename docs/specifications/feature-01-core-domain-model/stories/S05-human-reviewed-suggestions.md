@@ -25,6 +25,15 @@ If Meridian, the functional spec, and this story disagree, Meridian wins.
 4. A stakeholder can trace accepted branch work back to the suggestion that started it.
 5. An agent can submit useful feedback without gaining authority to approve or merge it.
 
+## Deliverable
+
+TypeScript types, domain invariants, and unit tests in `apps/store/src/domain/` covering
+`SuggestionState` (pending, accepted, rejected), the link between an accepted suggestion and its
+discipline-scoped feedback branch, and the protected operation contracts for accepting and
+rejecting suggestions. Content must align with the "Required lifecycle contracts — Suggestion" and
+"Protected operation contracts — Accept suggestion, Reject suggestion" sections of the technical
+specification and the Meridian neighbourhoods listed above.
+
 ## Out of scope
 
 Suggestion storage, queue implementation, API request shape, and notification delivery are out of

@@ -25,6 +25,14 @@ If Meridian, the functional spec, and this story disagree, Meridian wins.
 4. A stakeholder can tell when an approved or promoted idea has been replaced without losing the
    fact that it previously existed.
 
+## Deliverable
+
+TypeScript types, value objects, and unit tests in `apps/store/src/domain/` covering chunk lifecycle
+stage (`ChunkLifecycleState`: draft, approved, promoted) and chunk activity state
+(`ChunkActivityState`: active, superseded, inactive). Content must align with the
+"Required lifecycle contracts — Chunk" section of the technical specification and the Meridian
+neighbourhoods listed above.
+
 ## Out of scope
 
 Storage strategy, query strategy, API shape, and generated document rendering are out of scope for

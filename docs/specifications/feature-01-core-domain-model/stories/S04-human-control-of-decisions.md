@@ -27,6 +27,15 @@ If Meridian, the functional spec, and this story disagree, Meridian wins.
    branches, verify branches, or merge branches on their own.
 4. A stakeholder can distinguish a delegated contribution from a direct human decision.
 
+## Deliverable
+
+TypeScript types, domain invariants, and unit tests in `apps/store/src/domain/` covering
+`ActorContext` (human vs. delegated), and the protected operation contracts that require a
+direct-human actor for chunk approval, suggestion acceptance/rejection, and branch
+submission/verification/merge. Content must align with the "Human accountability", "Delegated
+agents", and "Protected operation contracts" sections of the technical specification and the
+Meridian neighbourhoods listed above.
+
 ## Out of scope
 
 Authentication-provider integration, credential format, session implementation, and transport
