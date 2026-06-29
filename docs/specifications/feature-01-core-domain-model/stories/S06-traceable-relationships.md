@@ -27,6 +27,16 @@ If Meridian, the functional spec, and this story disagree, Meridian wins.
 5. A stakeholder can confirm that replacing or deactivating a mainline relationship does not erase
    its history.
 
+## Deliverable
+
+TypeScript types, domain invariants, and unit tests in `apps/store/src/domain/` covering
+`IdeaLabel`, `RelationshipType`, `EdgeState` (active, deactivated, superseded), edge determinism
+(at most one active edge per source label–target label–type triple), and the lineage-preservation
+rule that mainline relationship changes must supersede prior versions rather than delete them.
+Content must align with the "Logical edge endpoints", "Edge determinism", "Edge lineage", and
+"Required lifecycle contracts — Edge" sections of the technical specification and the Meridian
+neighbourhoods listed above.
+
 ## Out of scope
 
 Database foreign keys, relationship table design, indexes, merge transactions, and query algorithms

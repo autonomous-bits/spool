@@ -27,6 +27,14 @@ If Meridian, the functional spec, and this story disagree, Meridian wins.
    changes are protected from further changes.
 5. A stakeholder can trace merged work back to the branch that introduced it.
 
+## Deliverable
+
+TypeScript types, domain invariants, and unit tests in `apps/store/src/domain/` covering branch
+lifecycle states (`BranchState`), single-discipline ownership, divergence-point recording, and
+graph write-lock rules for submitted, verified, and merged branches. Content must align with the
+"Branch ownership", "Branch graph view", and "Required lifecycle contracts — Branch" sections of
+the technical specification and the Meridian neighbourhoods listed above.
+
 ## Out of scope
 
 Conflict detection, database transactions, API authentication mechanics, and merge implementation

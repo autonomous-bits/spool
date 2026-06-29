@@ -29,6 +29,14 @@ If Meridian, the functional spec, and this story disagree, Meridian wins.
 5. An implementation agent can use generated context while preserving the business meaning of the
    Meridian-backed ideas it came from.
 
+## Deliverable
+
+TypeScript types and unit tests in `apps/store/src/domain/` covering `GeneratedContextId`,
+`ContextKind`, and the provenance rules that link generated context exclusively to approved or
+promoted chunks and their active, label-based relationships. Content must align with the
+"Generated context" section of the technical specification and the Meridian neighbourhoods listed
+above.
+
 ## Out of scope
 
 Generated document rendering, context package format, caching, delivery mechanics, API shape, and

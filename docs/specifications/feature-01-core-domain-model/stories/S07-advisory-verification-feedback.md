@@ -26,6 +26,13 @@ If Meridian, the functional spec, and this story disagree, Meridian wins.
 5. An implementation agent can provide verification feedback without controlling the branch
    lifecycle.
 
+## Deliverable
+
+TypeScript types and unit tests in `apps/store/src/domain/` covering verification signals as
+advisory-only records associated with a branch, and the domain invariant that signals cannot
+automate any branch state transition. Content must align with the "Verification signals" section
+of the technical specification and the Meridian neighbourhoods listed above.
+
 ## Out of scope
 
 Feedback routing implementation, notification delivery, test runner integration, and branch state
