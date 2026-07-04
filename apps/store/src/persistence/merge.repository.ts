@@ -34,20 +34,32 @@
  * - nestjs-security skill: parameterized queries only, never string
  *   concatenation.
  *
- * Deliberately NOT this story's job (see plan / rubber-duck review):
- * - Write-lock enforcement on branch-scoped writes for non-draft branches
- *   is the NestJS API gateway's responsibility (Meridian `IDEA-35`), not
- *   persistence.
+ * Deliberately NOT this class's job:
+ * - Write-lock enforcement on branch-scoped writes for non-draft branches is
+ *   enforced by `BranchGraphRepository.saveChunkDelta`/`saveEdgeDelta`
+ *   (story S11), which reuse the same `domain/branch-lifecycle.ts` guards
+ *   this file uses for its own state transitions. (This supersedes an
+ *   earlier version of this comment, written during story S07, that
+ *   attributed write-lock enforcement solely to a future NestJS API
+ *   gateway per Meridian `IDEA-35` — see `apps/store/AGENTS.md`.)
  * - Chunk lifecycle promotion (`draft -> approved -> promoted`) is a
  *   separate protected "approve chunk" operation (feature-01 technical
  *   spec §"Protected operation contracts"); merge preserves whatever
  *   `lifecycleState` the branch's chunk delta already carried.
  * - Pre-merge conflict detection is story S06's `ConflictDetectionRepository`
- *   and is not invoked here (out of this story's explicit scope); this
- *   repository does still take `FOR UPDATE` row locks on every mainline
- *   record it touches purely for ordinary transactional read-then-write
- *   safety against concurrent direct mainline writes, which is a different
- *   concern from pre-merge conflict semantics.
+ *   and is deliberately NOT invoked by this class — `MergeRepository` is a
+ *   low-level, unconditional promotion primitive. The canonical, supported
+ *   way to merge a branch is `ConflictGatedMergeService.mergeBranch`
+ *   (`./conflict-gated-merge.service.ts`), which always runs conflict
+ *   detection first and refuses to call this class's `mergeBranch` if any
+ *   conflict is reported (found missing during rubber-duck review of
+ *   Feature 01/02 against Meridian — the feature-01 "merge branch"
+ *   protected-operation contract requires conflict checks, and nothing
+ *   previously enforced that on any real path). This class still takes
+ *   `FOR UPDATE` row locks on every mainline record it touches purely for
+ *   ordinary transactional read-then-write safety against concurrent direct
+ *   mainline writes, which is a different concern from pre-merge conflict
+ *   semantics.
  */
 
 import { Inject, Injectable } from '@nestjs/common';
@@ -86,6 +98,53 @@ import { resolveChunkDelta, resolveEdgeDelta } from './branch-graph.repository.j
 export type BranchLifecycleStatus = 'draft' | 'submitted' | 'verified' | 'merged';
 
 const UNIQUE_VIOLATION = '23505';
+
+/**
+ * One permanent, merge-provenance history row for a chunk (technical spec
+ * §"Pre-merge history reconstruction", `IDEA-69`; see `schema.ts`'s
+ * `chunk_history` table doc comment for why this exists alongside the
+ * mutable `chunks` row).
+ */
+export interface ChunkHistoryEntry {
+  readonly workspaceId: WorkspaceId;
+  readonly ideaLabel: IdeaLabel;
+  readonly originBranchId: BranchId;
+  readonly chunkType: PersistedChunk['chunkType'];
+  readonly discipline: PersistedChunk['discipline'];
+  readonly contextKind: PersistedChunk['contextKind'];
+  readonly content: string;
+  readonly lifecycleState: PersistedChunk['status']['lifecycleState'];
+  readonly activityState: PersistedChunk['status']['activityState'];
+  readonly mergedAt: string;
+}
+
+interface ChunkHistoryRow {
+  readonly workspace_id: string;
+  readonly idea_label: string;
+  readonly origin_branch_id: string;
+  readonly chunk_type: string;
+  readonly discipline: string;
+  readonly context_kind: string;
+  readonly content: string;
+  readonly lifecycle_state: string;
+  readonly activity_state: string;
+  readonly merged_at: string | Date;
+}
+
+function rowToChunkHistoryEntry(row: ChunkHistoryRow): ChunkHistoryEntry {
+  return {
+    workspaceId: row.workspace_id as WorkspaceId,
+    ideaLabel: row.idea_label as IdeaLabel,
+    originBranchId: row.origin_branch_id as BranchId,
+    chunkType: row.chunk_type as PersistedChunk['chunkType'],
+    discipline: row.discipline as PersistedChunk['discipline'],
+    contextKind: row.context_kind as PersistedChunk['contextKind'],
+    content: row.content,
+    lifecycleState: row.lifecycle_state as PersistedChunk['status']['lifecycleState'],
+    activityState: row.activity_state as PersistedChunk['status']['activityState'],
+    mergedAt: row.merged_at instanceof Date ? row.merged_at.toISOString() : row.merged_at,
+  };
+}
 
 export interface MergeOutcome {
   readonly workspaceId: WorkspaceId;
@@ -324,6 +383,12 @@ export class MergeRepository {
    * applied (AC1). Every promoted record is stamped with `origin_branch_id
    * = branchId` so it remains traceable afterward (AC3).
    *
+   * Low-level primitive: this method performs no pre-merge conflict
+   * detection. Production callers (and `MergeDeliveryOrchestrator`) must go
+   * through `ConflictGatedMergeService.mergeBranch` instead, which enforces
+   * the feature-01 "merge branch" protected-operation contract's conflict
+   * checks before ever calling this method.
+   *
    * Throws `BranchLifecycleError('not-found')` if the branch is not
    * registered. Throws `BranchLifecycleError('unauthorized-actor')` if
    * `actor` is not a direct human stakeholder. Throws
@@ -531,20 +596,73 @@ export class MergeRepository {
     const resolved = resolveChunkDelta(mainlineChunk, delta);
     if (resolved) {
       await this.chunkGraphRepository.saveChunk(resolved, { client, originBranchId: branchId });
+      await this.appendChunkHistory(client, branchId, resolved);
       return;
     }
     // 'delete' delta: never a physical row delete (no precedent anywhere in
     // this schema) — deactivate the mainline row instead, preserving
     // lifecycleState and origin provenance. No-op if mainline never had it.
     if (mainlineChunk) {
-      await this.chunkGraphRepository.saveChunk(
-        {
-          ...mainlineChunk,
-          status: chunkLifecycleStatus(mainlineChunk.status.lifecycleState, 'inactive'),
-        },
-        { client, originBranchId: branchId },
-      );
+      const deactivated = {
+        ...mainlineChunk,
+        status: chunkLifecycleStatus(mainlineChunk.status.lifecycleState, 'inactive'),
+      };
+      await this.chunkGraphRepository.saveChunk(deactivated, { client, originBranchId: branchId });
+      await this.appendChunkHistory(client, branchId, deactivated);
     }
+  }
+
+  /**
+   * Appends one permanent `chunk_history` row for this merge's promotion of
+   * `chunk`, so this branch's contribution to `chunk.ideaLabel` remains
+   * independently reconstructable even if a later, unrelated branch merges
+   * the same idea label and overwrites `chunks.origin_branch_id` (technical
+   * spec §"Pre-merge history reconstruction", `IDEA-69`). Insert-only: never
+   * updates or deletes an existing row.
+   */
+  private async appendChunkHistory(
+    client: PoolClient,
+    branchId: BranchId,
+    chunk: PersistedChunk,
+  ): Promise<void> {
+    await client.query(
+      `INSERT INTO chunk_history
+         (workspace_id, idea_label, origin_branch_id, chunk_type, discipline,
+          context_kind, content, lifecycle_state, activity_state)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [
+        chunk.workspaceId,
+        chunk.ideaLabel,
+        branchId,
+        chunk.chunkType,
+        chunk.discipline,
+        chunk.contextKind,
+        chunk.content,
+        chunk.status.lifecycleState,
+        chunk.status.activityState,
+      ],
+    );
+  }
+
+  /**
+   * Reconstructs the full sequence of merges that have ever promoted a
+   * chunk delta for `ideaLabel`, oldest first, independent of what the
+   * current mutable `chunks` row shows (technical spec §"Pre-merge history
+   * reconstruction", `IDEA-69`).
+   */
+  async listChunkHistoryByIdeaLabel(
+    workspaceId: WorkspaceId,
+    ideaLabel: IdeaLabel,
+  ): Promise<ChunkHistoryEntry[]> {
+    const result = await this.pool.query<ChunkHistoryRow>(
+      `SELECT workspace_id, idea_label, origin_branch_id, chunk_type, discipline,
+              context_kind, content, lifecycle_state, activity_state, merged_at
+       FROM chunk_history
+       WHERE workspace_id = $1 AND idea_label = $2
+       ORDER BY merged_at ASC, id ASC`,
+      [workspaceId, ideaLabel],
+    );
+    return result.rows.map(rowToChunkHistoryEntry);
   }
 
   private async promoteEdgeDelta(
