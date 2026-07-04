@@ -131,6 +131,29 @@ This constitution supersedes ad-hoc convention where they conflict. Exceptions r
 approval from maintainers and MUST document the tradeoff, affected principles, and a follow-up
 plan when the exception is temporary.
 
+### Meridian authority
+
+Feature specifications in `docs/specifications/` treat a linked Meridian workspace as their
+authoritative source and state "if Meridian and this file disagree, Meridian wins." That rule
+needs one clarification and one enforcement mechanism, both added after a rubber-duck review of
+Feature 01/02 found repo code and specs silently diverging from an unresolved Meridian chunk
+without ever raising the disagreement back to Meridian:
+
+- **Draft chunks are not automatically binding.** A Meridian chunk's own `status` field
+  distinguishes `draft` (proposed direction, not yet ratified) from `approved`/`promoted`
+  (ratified). Only `approved`/`promoted` chunks are binding on repo specs and code by default. A
+  technical or functional spec that depends on a still-`draft` chunk MUST say so explicitly (e.g.
+  "per Meridian `IDEA-NN`, currently `draft`") so implementers know the constraint may still
+  change upstream, and MUST NOT treat that draft text as settled simply because it is the only
+  available source.
+- **An unresolved Meridian-vs-repo conflict MUST be escalated, not just noted.** If a spec records
+  an unresolved disagreement between Meridian and repo code/specs (as Feature 01's functional spec
+  does for `IDEA-35`), that note MUST be paired with an actual outgoing Meridian action — feedback,
+  a suggested chunk revision, or an equivalent Meridian-side artifact — not left as prose in this
+  repository alone. A conflict note with no corresponding Meridian-side action is treated as
+  incomplete work, not as a resolved decision, even if the repo has already implemented one side of
+  the disagreement for practical reasons.
+
 Amendments require:
 
 1. A documented proposal describing the changed principle or governance rule.
@@ -138,6 +161,6 @@ Amendments require:
 3. Updates to affected documentation, templates, tests, or workflow gates.
 4. A constitution version bump using semantic versioning.
 
-**Version:** 1.0.0  
+**Version:** 1.1.0  
 **Ratified:** 2026-06-27  
-**Last Amended:** 2026-06-27
+**Last Amended:** 2026-07-04

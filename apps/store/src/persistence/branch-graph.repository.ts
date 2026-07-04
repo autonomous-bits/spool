@@ -164,7 +164,17 @@ function rowToBranchEdgeDelta(row: BranchEdgeDeltaRow): BranchEdgeDelta {
  * - no delta -> mainline chunk unchanged (or absent).
  * - `upsert` delta -> the branch's own chunk overrides/adds; mainline is
  *   never mutated.
- * - `delete` delta -> omitted from the resolved view regardless of mainline.
+ * - `delete` delta -> omitted from the *resolved* view regardless of
+ *   mainline, since that view models "what is currently visible in this
+ *   branch". This does not lose the branch's explicit deactivation intent:
+ *   `branch_chunk_deltas` still persists a `delta_kind = 'delete'` row for
+ *   the idea label (Meridian `IDEA-32`: "branch-specific chunk row with
+ *   status set to 'deactivated'"), distinguishable from an idea label the
+ *   branch never touched at all (no row). `BranchGraphRepository.
+ *   listChunkDeltas`/`listDeactivatedIdeaLabels` surface that explicit
+ *   record for a caller that needs to show "this branch deactivates X"
+ *   rather than only the net resolved view (fixes an ambiguity flagged
+ *   during rubber-duck review of Feature 01/02 against Meridian).
  */
 export function resolveChunkDelta(
   mainlineChunk: PersistedChunk | undefined,
@@ -430,6 +440,29 @@ export class BranchGraphRepository {
     return result.rows.map(rowToBranchChunkDelta);
   }
 
+  /**
+   * Lists the idea labels this branch explicitly deactivates
+   * (`delta_kind = 'delete'` rows in `branch_chunk_deltas`), distinguishing
+   * "this branch proposes deactivating this idea" from "this idea simply
+   * isn't in the branch's resolved view" — the latter is also true for an
+   * idea label the branch never touched at all. `resolveChunks` (the net
+   * "what's currently visible" view) omits deactivated labels entirely by
+   * design; this method is the explicit, purpose-built counterpart for a
+   * caller (e.g. branch review UI) that needs to show deactivation intent
+   * rather than only the net resolved view (fixes an ambiguity flagged
+   * during rubber-duck review of Feature 01/02 against Meridian `IDEA-32`).
+   */
+  async listDeactivatedIdeaLabels(
+    workspaceId: WorkspaceId,
+    branchId: BranchId,
+  ): Promise<IdeaLabel[]> {
+    const deltas = await this.listChunkDeltas(workspaceId, branchId);
+    return deltas
+      .filter((delta) => delta.deltaKind === 'delete')
+      .map((delta) => delta.ideaLabel)
+      .sort((a, b) => a.localeCompare(b));
+  }
+
   async saveEdgeDelta(delta: BranchEdgeDelta): Promise<void> {
     // Story S11, technical spec §"Discipline boundary": "A branch may
     // modify chunks and edges owned by its discipline. It may create
@@ -501,7 +534,10 @@ export class BranchGraphRepository {
    * Computes a branch's resolved chunk view: mainline chunks (read via
    * `ChunkGraphRepository`, untouched by this method) overridden or added to
    * by this branch's own deltas, with `'delete'` deltas omitted. Never
-   * writes to the mainline `chunks` table (AC2).
+   * writes to the mainline `chunks` table (AC2). Pair with
+   * `listDeactivatedIdeaLabels` when a caller needs to distinguish "this
+   * branch deactivates idea X" from "idea X isn't in this branch's view" —
+   * this method alone only reflects the net result, by design.
    */
   async resolveChunks(
     workspaceId: WorkspaceId,

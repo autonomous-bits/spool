@@ -149,12 +149,15 @@ describe.skipIf(!hasDatabaseConfig)(
           relationshipType: 'depends-on',
           deltaKind: 'upsert',
         });
-      });
-      await associations.createAssociation({
-        workspaceId: ws,
-        chunkLabel,
-        artifactId: artifact,
-        branchId: branch,
+        // Association writes must happen while the branch is still 'draft'
+        // (branch write-lock enforcement now covers chunk_artifacts too —
+        // fixes rubber-duck-review gap found against Meridian IDEA-35).
+        await associations.createAssociation({
+          workspaceId: ws,
+          chunkLabel,
+          artifactId: artifact,
+          branchId: branch,
+        });
       });
 
       const outcome = await merges.mergeBranch(ws, branch, actor);
@@ -194,12 +197,13 @@ describe.skipIf(!hasDatabaseConfig)(
 
       // Case A: mainline never had it — branch's active association appends fresh.
       const branchA = `branch-${randomUUID()}` as BranchId;
-      const mergesA = await registerVerifiedBranch(pool, ws, branchA);
-      await associations.createAssociation({
-        workspaceId: ws,
-        chunkLabel,
-        artifactId: artifactFreshMainline,
-        branchId: branchA,
+      const mergesA = await registerVerifiedBranch(pool, ws, branchA, async () => {
+        await associations.createAssociation({
+          workspaceId: ws,
+          chunkLabel,
+          artifactId: artifactFreshMainline,
+          branchId: branchA,
+        });
       });
       await mergesA.mergeBranch(ws, branchA, actor);
       const afterFresh = await mergesA.listArtifactAssociationsByOriginBranch(ws, branchA);
@@ -215,12 +219,13 @@ describe.skipIf(!hasDatabaseConfig)(
         chunkLabel,
         artifactId: artifactBothActive,
       });
-      const mergesB = await registerVerifiedBranch(pool, ws, branchB);
-      await associations.createAssociation({
-        workspaceId: ws,
-        chunkLabel,
-        artifactId: artifactBothActive,
-        branchId: branchB,
+      const mergesB = await registerVerifiedBranch(pool, ws, branchB, async () => {
+        await associations.createAssociation({
+          workspaceId: ws,
+          chunkLabel,
+          artifactId: artifactBothActive,
+          branchId: branchB,
+        });
       });
       await expect(mergesB.mergeBranch(ws, branchB, actor)).resolves.toBeDefined();
       const bothActiveAfter = await mergesB.listArtifactAssociationsByOriginBranch(ws, branchB);
@@ -236,14 +241,15 @@ describe.skipIf(!hasDatabaseConfig)(
         chunkLabel,
         artifactId: artifactDeactivateOverActive,
       });
-      const mergesC = await registerVerifiedBranch(pool, ws, branchC);
-      await associations.createAssociation({
-        workspaceId: ws,
-        chunkLabel,
-        artifactId: artifactDeactivateOverActive,
-        branchId: branchC,
+      const mergesC = await registerVerifiedBranch(pool, ws, branchC, async () => {
+        await associations.createAssociation({
+          workspaceId: ws,
+          chunkLabel,
+          artifactId: artifactDeactivateOverActive,
+          branchId: branchC,
+        });
+        await associations.deactivateAssociation(ws, chunkLabel, artifactDeactivateOverActive, branchC);
       });
-      await associations.deactivateAssociation(ws, chunkLabel, artifactDeactivateOverActive, branchC);
       await mergesC.mergeBranch(ws, branchC, actor);
       const deactivateAfter = await mergesC.listArtifactAssociationsByOriginBranch(ws, branchC);
       await pool.end();
@@ -305,12 +311,12 @@ describe.skipIf(!hasDatabaseConfig)(
           relationshipType: 'depends-on',
           deltaKind: 'upsert',
         });
-      });
-      await associations.createAssociation({
-        workspaceId: ws,
-        chunkLabel,
-        artifactId: artifact,
-        branchId: branch,
+        await associations.createAssociation({
+          workspaceId: ws,
+          chunkLabel,
+          artifactId: artifact,
+          branchId: branch,
+        });
       });
 
       await expect(merges.mergeBranch(ws, branch, actor)).rejects.toMatchObject({

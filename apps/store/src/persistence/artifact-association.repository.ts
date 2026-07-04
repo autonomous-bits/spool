@@ -14,9 +14,10 @@
  *   `originBranchId` provenance must survive independent of `branchId`.
  * - Technical spec §"Tenant isolation": every method takes a `workspaceId`
  *   and every SQL predicate filters on it explicitly.
- * - Technical spec §"Required domain error categories": no new categories —
- *   `not-found`, `invalid-state-transition`, `duplicate-active-relationship`
- *   only.
+ * - Technical spec §"Required domain error categories": `not-found`,
+ *   `invalid-state-transition`, `duplicate-active-relationship`, and (as of
+ *   the branch write-lock fix below) `write-locked` — no other new
+ *   categories.
  * - Meridian (verified live against workspace
  *   `dbb786ac-1d61-41c9-a46a-2c279dd50cc3`): `IDEA-60`, `IDEA-62`, `IDEA-64`.
  * - nestjs-security skill: parameterized queries only, never string
@@ -35,6 +36,19 @@
  * back this up at the database level for any race that would otherwise slip
  * past the advisory lock (e.g. a lock-key hash collision, astronomically
  * unlikely but not impossible).
+ *
+ * Branch write-lock enforcement: for a branch-scoped write (`branchId`
+ * provided), both `createAssociation` and `deactivateAssociation` lock the
+ * branch's `branches` registration row (`SELECT ... FOR UPDATE`) and call
+ * `assertGraphWriteAllowed` (`domain/branch-lifecycle.ts`) inside the same
+ * transaction, before touching `chunk_artifacts` — mirroring
+ * `BranchGraphRepository.assertWritableBranch`. This closes a gap found
+ * during rubber-duck review of Feature 01/02 against Meridian: write-lock
+ * enforcement previously covered `branch_chunk_deltas`/`branch_edge_deltas`
+ * but not `chunk_artifacts`, so a branch's artifact associations could still
+ * be written after the branch was `submitted`/`verified`/`merged`. A
+ * mainline write (`branchId` omitted) has no branch lifecycle state to
+ * check and is unaffected.
  */
 
 import { createHash } from 'node:crypto';
@@ -47,6 +61,11 @@ import {
   ArtifactAssociationError,
   type ArtifactAssociationState,
 } from '../domain/artifact-association-lineage.js';
+import {
+  assertGraphWriteAllowed,
+  BranchLifecycleError,
+  type BranchState,
+} from '../domain/branch-lifecycle.js';
 import type {
   ArtifactId,
   BranchId,
@@ -173,6 +192,9 @@ export class ArtifactAssociationRepository {
    * if an inactive (superseded/deactivated) association already exists for
    * the same identity in the same scope — recreating/reactivating it is out
    * of this story's scope.
+   * For a branch-scoped write, throws `BranchLifecycleError` with code
+   * `not-found` if the branch is not registered, or `write-locked` if the
+   * branch is not `draft`.
    */
   async createAssociation(
     input: NewArtifactAssociationInput,
@@ -192,6 +214,8 @@ export class ArtifactAssociationRepository {
       await client.query('SELECT pg_advisory_xact_lock($1)', [
         identityLockKey(input.workspaceId, input.chunkLabel, input.artifactId, input.branchId),
       ]);
+
+      await this.assertWritableBranch(client, input.workspaceId, input.branchId);
 
       const existing = await this.lockCurrentRow(
         client,
@@ -272,6 +296,9 @@ export class ArtifactAssociationRepository {
    * scope) mainline has none active to shadow either.
    * Throws `ArtifactAssociationError` with code `invalid-state-transition`
    * if the current version in scope is not `active`.
+   * For a branch-scoped write, throws `BranchLifecycleError` with code
+   * `not-found` if the branch is not registered, or `write-locked` if the
+   * branch is not `draft`.
    */
   async deactivateAssociation(
     workspaceId: WorkspaceId,
@@ -289,6 +316,8 @@ export class ArtifactAssociationRepository {
       await client.query('SELECT pg_advisory_xact_lock($1)', [
         identityLockKey(workspaceId, chunkLabel, artifactId, branchId),
       ]);
+
+      await this.assertWritableBranch(client, workspaceId, branchId);
 
       let currentRow = await this.lockCurrentRow(
         client,
@@ -508,6 +537,48 @@ export class ArtifactAssociationRepository {
       params,
     );
     return result.rows.map(rowToPersistedAssociation);
+  }
+
+  /**
+   * Locks the target branch's registration row with `SELECT ... FOR UPDATE`
+   * inside the caller's transaction and enforces the write-lock guard
+   * before a branch-scoped association write (fixes a gap found in
+   * rubber-duck review of Feature 01/02 against Meridian `IDEA-35`: branch
+   * write-lock enforcement previously covered `branch_chunk_deltas`/
+   * `branch_edge_deltas` via `BranchGraphRepository` but not
+   * `chunk_artifacts`, so a branch's associations could still be written
+   * after `submitted`/`verified`/`merged`).
+   *
+   * Mirrors `BranchGraphRepository.assertWritableBranch`'s row-lock pattern
+   * so a concurrent `submitBranch`/`verifyBranch` cannot flip the branch
+   * out of `draft` between this check and the write that follows in the
+   * same transaction. No-op for a mainline write (`branchId === undefined`)
+   * — mainline has no lifecycle state to lock against.
+   *
+   * Throws `BranchLifecycleError('not-found')` if no branch is registered
+   * for this workspace/branch identity. Throws
+   * `BranchLifecycleError('write-locked')` if the branch is not `draft`.
+   */
+  private async assertWritableBranch(
+    client: PoolClient,
+    workspaceId: WorkspaceId,
+    branchId: BranchId | undefined,
+  ): Promise<void> {
+    if (branchId === undefined) {
+      return;
+    }
+    const result = await client.query<{ status: string }>(
+      `SELECT status FROM branches WHERE workspace_id = $1 AND branch_id = $2 FOR UPDATE`,
+      [workspaceId, branchId],
+    );
+    const row = result.rows[0];
+    if (!row) {
+      throw new BranchLifecycleError(
+        'not-found',
+        `no branch registered for workspace '${workspaceId}' and branch '${branchId}'`,
+      );
+    }
+    assertGraphWriteAllowed(row.status as BranchState);
   }
 
   private async lockCurrentRow(

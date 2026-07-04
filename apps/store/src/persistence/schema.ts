@@ -152,6 +152,16 @@ const MIGRATE_EDGE_VERSIONS_ORIGIN_BRANCH_ID = `
  * chunk from the branch's resolved view without mutating the mainline
  * `chunks` row. Entirely separate from `chunks` so mainline reads never
  * observe branch drafts (AC1/AC3).
+ *
+ * Meridian `IDEA-32`: "branch-specific chunk row with status set to
+ * 'deactivated'" — this row *is* that explicit deactivation record: a
+ * `delta_kind = 'delete'` row is a distinguishable, queryable fact ("this
+ * branch deactivates this idea"), separate from the idea label having no
+ * row at all ("this branch never touched this idea"). `resolveChunks`
+ * collapses `'delete'` to "absent" for its net resolved view by design;
+ * `BranchGraphRepository.listChunkDeltas`/`listDeactivatedIdeaLabels`
+ * expose the explicit record for a caller that needs it (e.g. branch review
+ * UI) rather than only the net view.
  */
 const CREATE_BRANCH_CHUNK_DELTAS_TABLE = `
   CREATE TABLE IF NOT EXISTS branch_chunk_deltas (

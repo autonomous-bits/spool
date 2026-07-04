@@ -57,6 +57,9 @@ class NoopDeliveryPushPort implements DeliveryPushPort {
     SuggestionRepository,
     ArtifactAssociationRepository,
     ConflictDetectionRepository,
+    // MergeRepository stays a provider (ConflictGatedMergeService injects
+    // it) but is deliberately NOT re-exported below — see the note on
+    // `exports`.
     MergeRepository,
     ConflictGatedMergeService,
     DeliverySubscriptionRepository,
@@ -71,7 +74,18 @@ class NoopDeliveryPushPort implements DeliveryPushPort {
     SuggestionRepository,
     ArtifactAssociationRepository,
     ConflictDetectionRepository,
-    MergeRepository,
+    // `MergeRepository` is intentionally NOT exported here (fixes a gap
+    // found during rubber-duck review of Feature 01/02 against Meridian:
+    // `MergeRepository.mergeBranch` is an unconditional promotion
+    // primitive with no pre-merge conflict check of its own, and remaining
+    // freely DI-injectable made it too easy for a future consuming module
+    // to bypass `ConflictGatedMergeService`'s required conflict gate
+    // without noticing). A consuming module that needs to merge a branch
+    // must inject `ConflictGatedMergeService`, which always runs
+    // `ConflictDetectionRepository.detectConflicts` first and only then
+    // delegates to `MergeRepository.mergeBranch` internally. Direct
+    // construction of `MergeRepository` (bypassing Nest DI entirely, e.g.
+    // in this module's own adapter tests) is unaffected by this change.
     ConflictGatedMergeService,
     DeliverySubscriptionRepository,
     MergeDeliveryDispatcher,
