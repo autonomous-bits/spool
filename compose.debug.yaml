@@ -6,7 +6,34 @@ services:
       dockerfile: ./Dockerfile
     environment:
       NODE_ENV: development
+      STORE_DB_HOST: postgres
+      STORE_DB_PORT: "5432"
+      STORE_DB_USER: spool
+      STORE_DB_PASSWORD: spool_dev
+      STORE_DB_NAME: spool
     ports:
       - 3000:3000
       - 9229:9229
     command: ["node", "--inspect=0.0.0.0:9229", "./dist/main.js"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: spool
+      POSTGRES_PASSWORD: spool_dev
+      POSTGRES_DB: spool
+    ports:
+      - 5433:5432
+    volumes:
+      - spoolstore-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U spool -d spool"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  spoolstore-postgres-data:

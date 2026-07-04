@@ -6,3 +6,5 @@ export * from './workspace/index.js';
 export * from './errors/index.js';
 export * from './approvals/index.js';
 export * from './suggestions/index.js';
+export * from './verification/index.js';
+export * from './notifications/index.js';

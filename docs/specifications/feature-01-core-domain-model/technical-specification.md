@@ -34,7 +34,7 @@ Implementation decisions must be resolved in this order:
 | Discipline boundary | A branch may modify chunks and edges owned by its discipline. It may create cross-disciplinary edges to other disciplines' chunks only when it does not modify those target chunks. | `IDEA-35` |
 | Logical edge endpoints | Edges identify chunks by logical idea labels, not storage-row UUIDs. Label-based relationships must survive branch overrides and mainline promotions without endpoint rewrites. | `IDEA-36`, `IDEA-37` |
 | Edge determinism | After branch overrides and deactivations are applied, a resolved graph view may contain at most one active edge for the same source label, target label, and relationship type. | `IDEA-38` |
-| Edge lineage | Mainline edges are immutable. Mainline relationship changes must supersede prior edge versions and preserve lineage; promoted edge history must not be deleted. | `IDEA-38` |
+| Edge lineage | Mainline edges are immutable. Mainline relationship changes must supersede prior edge versions and preserve lineage; promoted edge history must not be deleted. Deactivation is a supersession too: `deactivateEdge` appends a new `deactivated` version rather than mutating the current version's state in place (clarified during feature-02 story S03; see feature-02 technical spec §"Edge lineage persistence"). | `IDEA-38` |
 | Human accountability | Every graph modification, approval, suggestion decision, verification decision, and merge decision must be attributable to a human stakeholder ID. | `IDEA-28`, `IDEA-40`, `IDEA-42`, `IDEA-57` |
 | Delegated agents | AI agents and external systems may submit feedback and act as supervised delegates, but delegated sessions cannot approve chunks, accept or reject suggestions, submit branches, verify branches, or merge branches. | `IDEA-28`, `IDEA-40`, `IDEA-42`, `IDEA-57` |
 | Verification signals | Verification feedback is advisory history only. Signals must never automatically verify, unverify, merge, reject, reopen, or otherwise transition a branch. | `IDEA-43` |
@@ -51,7 +51,7 @@ first.
 | Chunk | Draft to Approved to Promoted. Approved or Promoted chunks may become Superseded or inactive according to later persistence/merge behavior. Approval state and activity state are separate. |
 | Branch | Draft to Submitted; Submitted to Verified or human-initiated return to Draft; Verified to Merged or human-initiated return to Draft. Return-to-Draft transitions are never automated. Merged is terminal. Submitted, Verified, and Merged branches are graph-write locked, though verification signals, status logs, and audit metadata may still be appended. |
 | Suggestion | Pending to Accepted or Rejected. Accepted and Rejected are terminal. Accepted suggestions must remain linked to the feedback branch they initialize. |
-| Edge | Active, Deactivated, or Superseded. Mainline edges cannot be destructively deleted; changes create lineage-preserving supersession records. |
+| Edge | Active, Deactivated, or Superseded. Mainline edges cannot be destructively deleted; changes create lineage-preserving supersession records. A single version can only be `Active`; both `Deactivated` and `Superseded` are always produced by appending a new version onto a prior `Active` one, never by mutating a stored version's state in place. |
 
 ## Protected operation contracts
 

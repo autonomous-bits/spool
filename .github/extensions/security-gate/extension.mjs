@@ -8,9 +8,11 @@ const execAsync = promisify(exec);
 const PROJECT_NAME = "Spool";
 const MAX_FIX_ATTEMPTS = 3;
 const SCAN_TIMEOUT_MS = 5 * 60 * 1000;
+const BASELINE_WAIT_MS = 15 * 1000;
 
 const state = {
     baselineSignatures: null,   // Set<string> captured at session start; null = not yet captured
+    baselineCapture: null,      // Promise resolved once the background baseline scan finishes
     fixAttempts: 0,
     scanInFlight: null,
     pendingFixTimer: null,      // setTimeout handle — cleared on session end to prevent late sends
@@ -119,6 +121,45 @@ function runSemgrepOnce(cwd) {
     return state.scanInFlight;
 }
 
+/**
+ * Kick off the baseline scan in the background without blocking the caller.
+ * `onSessionStart` must return quickly (a slow, awaited scan risks the
+ * platform dropping the hook's `additionalContext` — the failure mode this
+ * fix addresses), so the scan runs fire-and-forget here and other hooks
+ * await `state.baselineCapture` before comparing findings.
+ */
+function startBaselineCapture(cwd, log) {
+    state.baselineCapture = runSemgrep(cwd)
+        .then(async ({ ok, findings, error }) => {
+            if (ok) {
+                state.baselineSignatures = new Set(findings.map(findingKey));
+                await safeLog(log, `🔒 Security Gate: baseline captured (${state.baselineSignatures.size} pre-existing finding(s) excluded)`);
+            } else {
+                state.baselineSignatures = new Set(); // treat as clean baseline; log the tooling problem
+                await safeLog(log, `⚠️  Security Gate: baseline scan failed (${error}) — all findings will be treated as new`, { level: "warning" });
+            }
+        })
+        .catch(() => {
+            state.baselineSignatures = new Set();
+        });
+    return state.baselineCapture;
+}
+
+/**
+ * Wait for the background baseline capture to finish, but never block a gate
+ * indefinitely — if the baseline is still in flight after `BASELINE_WAIT_MS`,
+ * proceed with whatever is available (empty baseline = treat everything as
+ * new) rather than hang the tool call.
+ */
+async function awaitBaseline() {
+    if (state.baselineSignatures !== null) return;
+    if (!state.baselineCapture) return;
+    await Promise.race([
+        state.baselineCapture,
+        new Promise((r) => setTimeout(r, BASELINE_WAIT_MS)),
+    ]);
+}
+
 /** Filter findings to only those not present in the session baseline. */
 function newFindings(findings) {
     if (!state.baselineSignatures) return findings;
@@ -173,48 +214,114 @@ function scheduleFixDispatch(findings, attempt) {
     }, 0);
 }
 
+/** Extract tool name(s) from a hook input, handling both single and batched calls. */
+function resolveToolNames(input) {
+    if (Array.isArray(input.toolCalls)) {
+        return input.toolCalls.map((tc) => tc.name);
+    }
+    return input.toolName ? [input.toolName] : [];
+}
+
+/**
+ * Run a semgrep scan, compute novel findings against the baseline, and either
+ * clear the fix-attempt counter (clean) or schedule a fix sub-agent dispatch
+ * (novel findings found). Shared by the `task`-completion gate and the
+ * `task_complete` pre-check.
+ *
+ * @returns {{ novel: object[], ok: boolean, error?: string }}
+ */
+async function gateOnSemgrep(cwd, log, { blocking }) {
+    await safeLog(log, "🔍 Security Gate: running semgrep scan…", { ephemeral: true });
+    await awaitBaseline();
+
+    const { ok, findings, error } = await runSemgrepOnce(cwd);
+    if (!ok) {
+        await safeLog(log, `⚠️  Security Gate: semgrep scan failed — ${error}`, { level: "warning" });
+        return { ok: false, novel: [], error };
+    }
+
+    const novel = newFindings(findings);
+    if (novel.length === 0) {
+        await safeLog(log, `✅ Security Gate: semgrep clean — no new findings`);
+        state.fixAttempts = 0;
+        state.lastDispatchedSignatures = null;
+        return { ok: true, novel: [] };
+    }
+
+    await safeLog(log, `❌ Security Gate: ${novel.length} new finding(s)${blocking ? " — blocking task_complete" : ""}`, { level: "error" });
+    return { ok: true, novel };
+}
+
 const session = await joinSession({
     hooks: {
         onSessionStart: async (input) => {
             const log = session.log.bind(session);
-            await safeLog(log, `🔒 Security Gate active for ${PROJECT_NAME} — semgrep scan gates task_complete`, { ephemeral: true });
+            await safeLog(log, `🔒 Security Gate active for ${PROJECT_NAME} — semgrep scan gates every task sub-agent and task_complete`, { ephemeral: true });
 
-            // Capture baseline so we only block on findings introduced this session
-            const { ok, findings, error } = await runSemgrep(hookCwd(input));
-            if (ok) {
-                state.baselineSignatures = new Set(findings.map(findingKey));
-                await safeLog(log, `🔒 Security Gate: baseline captured (${state.baselineSignatures.size} pre-existing finding(s) excluded)`);
-            } else {
-                state.baselineSignatures = new Set(); // treat as clean baseline; log the tooling problem
-                await safeLog(log, `⚠️  Security Gate: baseline scan failed (${error}) — all findings will be treated as new`, { level: "warning" });
-            }
+            // Fire-and-forget: capture baseline in the background so this hook returns
+            // immediately. Awaiting a multi-second scan here risks the platform dropping
+            // this hook's additionalContext before it's delivered (see MAX_FIX_ATTEMPTS
+            // gates below for where the scan result is actually consumed).
+            startBaselineCapture(hookCwd(input), log).catch(() => {});
 
             return {
                 additionalContext: [
                     `Security Gate extension is active for ${PROJECT_NAME}.`,
                     "",
                     "Automated behavior — DO NOT bypass:",
-                    "1. Before task_complete is allowed, this extension runs `semgrep scan --config .semgrep.yml` from the Spool workspace root to check for new security issues.",
-                    "2. If new issues are found, you will receive a new user turn instructing you to dispatch a fix sub-agent. Do so immediately.",
-                    `3. The \`task_complete\` tool is gated: it will be denied until semgrep reports no new findings (up to ${MAX_FIX_ATTEMPTS} automated fix attempts).`,
+                    "1. After every `task` tool call returns, this extension runs `semgrep scan --config .semgrep.yml` from the Spool workspace root to check for new security issues.",
+                    "2. If new issues are found, you will receive a new user turn instructing you to dispatch a fix sub-agent. Do so immediately, without further confirmation.",
+                    `3. If a \`task_complete\` tool is available in this session, it is also gated and will be denied until semgrep reports no new findings (up to ${MAX_FIX_ATTEMPTS} automated fix attempts).`,
                 ].join("\n"),
             };
         },
 
-        onPreToolUse: async (input) => {
-            const toolNames = Array.isArray(input.toolCalls)
-                ? input.toolCalls.map(tc => tc.name)
-                : input.toolName ? [input.toolName] : [];
+        // Primary enforcement point: run semgrep after every sub-agent dispatch,
+        // mirroring the CI gate's `task`-keyed hook. This does not depend on a
+        // `task_complete` tool existing in the session's tool surface.
+        onPostToolUse: async (input) => {
+            const toolNames = resolveToolNames(input);
+            if (!toolNames.includes("task")) return;
 
-            if (!toolNames.includes("task_complete")) return;
-
+            const cwd = hookCwd(input);
             const log = session.log.bind(session);
-            await safeLog(log, "🔍 Security Gate: running semgrep scan before completion…", { ephemeral: true });
-
-            const { ok, findings, error } = await runSemgrepOnce(hookCwd(input));
+            const { ok, novel, error } = await gateOnSemgrep(cwd, log, { blocking: false });
 
             if (!ok) {
-                await safeLog(log, `⚠️  Security Gate: semgrep scan failed — ${error}`, { level: "warning" });
+                return {
+                    additionalContext:
+                        `Security Gate: semgrep scan failed and could not verify security posture.\n` +
+                        `Error: ${error}\n\n` +
+                        `Resolve the scan failure before continuing.`,
+                };
+            }
+            if (novel.length === 0) return;
+
+            if (state.fixAttempts >= MAX_FIX_ATTEMPTS) {
+                await safeLog(log, `🛑 Security Gate: ${MAX_FIX_ATTEMPTS} fix attempts exhausted — escalating to user`, { level: "error" });
+                return {
+                    additionalContext:
+                        `Security Gate exhausted ${MAX_FIX_ATTEMPTS} automated fix attempts. ` +
+                        `Stop dispatching fix sub-agents and report the remaining findings to the user with recommendations:\n\n` +
+                        novel.map(formatFinding).join("\n"),
+                };
+            }
+
+            state.fixAttempts++;
+            await safeLog(log, `❌ Security Gate: ${novel.length} new finding(s) — dispatching fix sub-agent (attempt ${state.fixAttempts}/${MAX_FIX_ATTEMPTS})`, { level: "warning" });
+            scheduleFixDispatch(novel, state.fixAttempts);
+        },
+
+        // Defense in depth for sessions where a `task_complete` tool exists.
+        onPreToolUse: async (input) => {
+            const toolNames = resolveToolNames(input);
+            if (!toolNames.includes("task_complete")) return;
+
+            const cwd = hookCwd(input);
+            const log = session.log.bind(session);
+            const { ok, novel, error } = await gateOnSemgrep(cwd, log, { blocking: true });
+
+            if (!ok) {
                 return {
                     permissionDecision: "deny",
                     permissionDecisionReason:
@@ -223,19 +330,9 @@ const session = await joinSession({
                         `Resolve the scan failure before calling task_complete.`,
                 };
             }
-
-            const novel = newFindings(findings);
-            if (novel.length === 0) {
-                await safeLog(log, `✅ Security Gate: semgrep clean — no new findings`);
-                state.fixAttempts = 0;
-                state.lastDispatchedSignatures = null;
-                return;
-            }
-
-            await safeLog(log, `❌ Security Gate: ${novel.length} new finding(s) — blocking task_complete`, { level: "error" });
+            if (novel.length === 0) return;
 
             if (state.fixAttempts >= MAX_FIX_ATTEMPTS) {
-                await safeLog(log, `🛑 Security Gate: ${MAX_FIX_ATTEMPTS} fix attempts exhausted — escalating to user`, { level: "error" });
                 return {
                     permissionDecision: "deny",
                     permissionDecisionReason:
@@ -264,6 +361,7 @@ const session = await joinSession({
                 state.pendingFixTimer = null;
             }
             state.baselineSignatures = null;
+            state.baselineCapture = null;
             state.fixAttempts = 0;
             state.scanInFlight = null;
             state.lastDispatchedSignatures = null;
