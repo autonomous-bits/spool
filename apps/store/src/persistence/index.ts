@@ -41,11 +41,15 @@ export {
   type ConflictReport,
 } from './conflict-detection.repository.js';
 export {
-  MergeRepository,
+  MergeRepository as MergeRepositoryUnsafeSkipConflictCheck,
   resolveArtifactAssociationPromotion,
   type BranchLifecycleStatus,
   type MergeOutcome,
 } from './merge.repository.js';
+// The canonical, conflict-gated merge entrypoint: always runs pre-merge
+// conflict detection before delegating to `MergeRepository.mergeBranch`
+// internally. Prefer this over the unsafe re-export above.
+export { ConflictGatedMergeService } from './conflict-gated-merge.service.js';
 export {
   DeliverySubscriptionRepository,
   type PersistedDeliverySubscription,

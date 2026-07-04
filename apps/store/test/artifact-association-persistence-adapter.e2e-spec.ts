@@ -24,6 +24,7 @@ import { loadDatabaseConfig } from '../src/persistence/database-config.js';
 import { ensureSchema } from '../src/persistence/schema.js';
 import { ArtifactAssociationRepository } from '../src/persistence/artifact-association.repository.js';
 import { ArtifactAssociationError } from '../src/domain/artifact-association-lineage.js';
+import { ConflictDetectionRepository } from '../src/persistence/conflict-detection.repository.js';
 import {
   artifactId,
   ideaLabel,
@@ -61,6 +62,14 @@ describe.skipIf(!hasDatabaseConfig)(
     beforeAll(async () => {
       const bootstrapPool = openPool();
       await ensureSchema(bootstrapPool);
+      const conflicts = new ConflictDetectionRepository(bootstrapPool);
+      // Registers branchA/branchB (fixes rubber-duck-review gap: branch
+      // write-lock enforcement now applies to chunk-artifact-association
+      // writes too, so every branch used by a write in this suite must be
+      // a registered 'draft' branch, mirroring
+      // branch-graph-persistence-adapter.e2e-spec.ts's convention).
+      await conflicts.registerBranch(workspaceA, branchA, 'engineering');
+      await conflicts.registerBranch(workspaceA, branchB, 'engineering');
       await bootstrapPool.end();
     });
 
@@ -68,6 +77,10 @@ describe.skipIf(!hasDatabaseConfig)(
       const cleanupPool = openPool();
       await cleanupPool.query(
         'DELETE FROM chunk_artifacts WHERE workspace_id = $1 OR workspace_id = $2',
+        [workspaceA, workspaceB],
+      );
+      await cleanupPool.query(
+        'DELETE FROM branches WHERE workspace_id = $1 OR workspace_id = $2',
         [workspaceA, workspaceB],
       );
       await cleanupPool.end();
@@ -387,5 +400,76 @@ describe.skipIf(!hasDatabaseConfig)(
       // hidden from the branch's resolved view even though mainline is active.
       expect(resolved.some((a) => a.artifactId === artifact)).toBe(false);
     });
+
+    it(
+      'write-lock: creating or deactivating an association against a non-draft branch throws ' +
+        "BranchLifecycleError(write-locked) (fixes rubber-duck-review gap: branch write-lock " +
+        'enforcement previously covered branch_chunk_deltas/branch_edge_deltas but not chunk_artifacts)',
+      async () => {
+        const pool = openPool();
+        const repo = new ArtifactAssociationRepository(pool);
+        const conflicts = new ConflictDetectionRepository(pool);
+        const lockedBranch = `branch-${randomUUID()}` as BranchId;
+        const chunkLabel = ideaLabel('IDEA-artifact-write-lock');
+        const artifact = artifactId(`artifact-${randomUUID()}`);
+
+        await conflicts.registerBranch(workspaceA, lockedBranch, 'engineering');
+        // Seed an active branch-scoped association while still draft, then
+        // advance the branch past 'draft' directly, mirroring
+        // branch-graph-persistence-adapter.e2e-spec.ts's "story S11" test.
+        await repo.createAssociation({
+          workspaceId: workspaceA,
+          chunkLabel,
+          artifactId: artifact,
+          branchId: lockedBranch,
+        });
+        await pool.query(
+          `UPDATE branches SET status = 'submitted' WHERE workspace_id = $1 AND branch_id = $2`,
+          [workspaceA, lockedBranch],
+        );
+
+        await expect(
+          repo.createAssociation({
+            workspaceId: workspaceA,
+            chunkLabel: ideaLabel('IDEA-artifact-write-lock-2'),
+            artifactId: artifactId(`artifact-${randomUUID()}`),
+            branchId: lockedBranch,
+          }),
+        ).rejects.toMatchObject({ name: 'BranchLifecycleError', code: 'write-locked' });
+
+        await expect(
+          repo.deactivateAssociation(workspaceA, chunkLabel, artifact, lockedBranch),
+        ).rejects.toMatchObject({ name: 'BranchLifecycleError', code: 'write-locked' });
+
+        await pool.end();
+      },
+    );
+
+    it(
+      'not-found: creating or deactivating a branch-scoped association against an unregistered ' +
+        'branch throws BranchLifecycleError(not-found)',
+      async () => {
+        const pool = openPool();
+        const repo = new ArtifactAssociationRepository(pool);
+        const unregisteredBranch = `branch-${randomUUID()}` as BranchId;
+        const chunkLabel = ideaLabel('IDEA-artifact-unregistered-branch');
+        const artifact = artifactId(`artifact-${randomUUID()}`);
+
+        await expect(
+          repo.createAssociation({
+            workspaceId: workspaceA,
+            chunkLabel,
+            artifactId: artifact,
+            branchId: unregisteredBranch,
+          }),
+        ).rejects.toMatchObject({ name: 'BranchLifecycleError', code: 'not-found' });
+
+        await expect(
+          repo.deactivateAssociation(workspaceA, chunkLabel, artifact, unregisteredBranch),
+        ).rejects.toMatchObject({ name: 'BranchLifecycleError', code: 'not-found' });
+
+        await pool.end();
+      },
+    );
   },
 );

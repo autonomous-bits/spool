@@ -809,6 +809,55 @@ describe.skipIf(!hasDatabaseConfig)(
       },
     );
 
+    it(
+      'listDeactivatedIdeaLabels: an explicit delete delta is distinguishable from an idea the ' +
+        "branch never touched, even though resolveChunks omits both from its net resolved view " +
+        '(fixes rubber-duck-review ambiguity found against Meridian IDEA-32)',
+      async () => {
+        const pool = openPool();
+        const chunkRepo = new ChunkGraphRepository(pool);
+        const branchRepo = new BranchGraphRepository(pool, chunkRepo);
+        const conflicts = new ConflictDetectionRepository(pool);
+        const deactivationBranch = `branch-${randomUUID()}` as BranchId;
+        const deactivatedLabel = ideaLabel('IDEA-branch-explicit-deactivation');
+        const untouchedLabel = ideaLabel('IDEA-branch-never-touched');
+
+        await conflicts.registerBranch(workspaceA, deactivationBranch, 'engineering');
+        await chunkRepo.saveChunk({
+          workspaceId: workspaceA,
+          ideaLabel: deactivatedLabel,
+          chunkType: 'feature',
+          discipline: 'engineering',
+          contextKind: 'permanent',
+          content: 'Mainline chunk this branch proposes to deactivate.',
+          status: chunkLifecycleStatus('approved', 'active'),
+        });
+        await branchRepo.saveChunkDelta({
+          workspaceId: workspaceA,
+          branchId: deactivationBranch,
+          ideaLabel: deactivatedLabel,
+          deltaKind: 'delete',
+        });
+
+        const deactivated = await branchRepo.listDeactivatedIdeaLabels(
+          workspaceA,
+          deactivationBranch,
+        );
+        const resolved = await branchRepo.resolveChunks(workspaceA, deactivationBranch);
+        await pool.end();
+
+        // The explicit deactivation is queryable...
+        expect(deactivated).toContain(deactivatedLabel);
+        // ...and distinguishable from an idea label the branch never
+        // mentioned at all (not present in either list).
+        expect(deactivated).not.toContain(untouchedLabel);
+        // resolveChunks's net view omits both, by design — that ambiguity
+        // is exactly what listDeactivatedIdeaLabels resolves.
+        expect(resolved.some((chunk) => chunk.ideaLabel === deactivatedLabel)).toBe(false);
+        expect(resolved.some((chunk) => chunk.ideaLabel === untouchedLabel)).toBe(false);
+      },
+    );
+
     it('ensureSchema is safe to run concurrently from separate pools without racing on DDL creation', async () => {
       // Regression test for the `pg_advisory_lock` fix in schema.ts: two
       // pools calling `ensureSchema` at the same moment previously could
