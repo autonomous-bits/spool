@@ -7,7 +7,8 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { MergeDeliveryOrchestrator } from './merge-delivery-orchestrator.js';
-import type { MergeRepository, MergeOutcome } from './merge.repository.js';
+import type { MergeOutcome } from './merge.repository.js';
+import type { ConflictGatedMergeService } from './conflict-gated-merge.service.js';
 import type { MergeDeliveryDispatcher } from './merge-delivery-dispatcher.js';
 import type { HumanActorContext } from '../domain/branch-lifecycle.js';
 import type {
@@ -39,7 +40,7 @@ describe('MergeDeliveryOrchestrator', () => {
     const mergeBranch = vi.fn().mockResolvedValue(outcome);
     const dispatchMergeCompleted = vi.fn();
     const orchestrator = new MergeDeliveryOrchestrator(
-      { mergeBranch } as unknown as MergeRepository,
+      { mergeBranch } as unknown as ConflictGatedMergeService,
       { dispatchMergeCompleted } as unknown as MergeDeliveryDispatcher,
     );
 
@@ -60,7 +61,7 @@ describe('MergeDeliveryOrchestrator', () => {
     const mergeBranch = vi.fn().mockRejectedValue(mergeError);
     const dispatchMergeCompleted = vi.fn();
     const orchestrator = new MergeDeliveryOrchestrator(
-      { mergeBranch } as unknown as MergeRepository,
+      { mergeBranch } as unknown as ConflictGatedMergeService,
       { dispatchMergeCompleted } as unknown as MergeDeliveryDispatcher,
     );
 
@@ -84,7 +85,7 @@ describe('MergeDeliveryOrchestrator', () => {
       // Intentionally returns undefined synchronously, per DeliveryDispatcher contract.
     });
     const orchestrator = new MergeDeliveryOrchestrator(
-      { mergeBranch } as unknown as MergeRepository,
+      { mergeBranch } as unknown as ConflictGatedMergeService,
       { dispatchMergeCompleted } as unknown as MergeDeliveryDispatcher,
     );
 

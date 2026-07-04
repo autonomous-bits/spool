@@ -47,8 +47,19 @@ export interface FeedbackTargetBranch {
  *
  * AC1: carries `workspaceId`/`branchId` so a stakeholder can see feedback
  * associated with the branch it evaluated.
+ *
+ * The `__tag` field is a nominal-typing brand (matching this codebase's
+ * `string & { readonly __tag: ... }` identifier-branding convention, e.g.
+ * `BranchId`/`WorkspaceId`) that only `recordFeedbackItem` below can
+ * produce. Without it, a hand-built object literal matching this shape does
+ * not structurally satisfy `FeedbackItem` and cannot be passed to
+ * `NotificationRepository.submitFeedbackItem` without an explicit,
+ * deliberate `as unknown as FeedbackItem` cast — closing a gap found during
+ * rubber-duck review of Feature 01/02 against Meridian, where the plain
+ * structural interface let a caller construct a spoofed
+ * `authoredByStakeholderId` without going through the actor-derived factory.
  */
-export interface FeedbackItem {
+export type FeedbackItem = {
   readonly workspaceId: WorkspaceId;
   readonly branchId: BranchId;
   readonly feedbackItemId: FeedbackItemId;
@@ -56,7 +67,7 @@ export interface FeedbackItem {
   readonly authoredByActorKind: ActorKind;
   readonly submittedAt: string;
   readonly content: string;
-}
+} & { readonly __tag: 'FeedbackItem' };
 
 /**
  * Records an evaluation feedback item against a branch.
@@ -99,5 +110,5 @@ export function recordFeedbackItem(
     authoredByActorKind: actor.kind,
     submittedAt: trimmedAt,
     content: trimmedContent,
-  });
+  }) as FeedbackItem;
 }

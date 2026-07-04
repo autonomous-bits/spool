@@ -558,6 +558,44 @@ const CREATE_NOTIFICATIONS_RECIPIENT_INDEX = `
  */
 const SCHEMA_BOOTSTRAP_LOCK_KEY = 875_302_114;
 
+/**
+ * Append-only merge-provenance history for chunks (added after rubber-duck
+ * review of Feature 01/02 against Meridian `IDEA-69`): `chunks` itself is a
+ * single mutable row per `(workspace_id, idea_label)` (story S01), so its
+ * own `origin_branch_id` column is last-writer-wins — a later, unrelated
+ * branch merge that touches the same idea label overwrites an earlier
+ * branch's provenance for that label. This table fixes that gap without
+ * redesigning `chunks`: every chunk-delta promotion during a merge
+ * (`MergeRepository.promoteChunkDelta`) additionally appends one permanent
+ * row here, so the full sequence of merges that ever touched an idea label
+ * remains reconstructable via `merged_at` order, independent of what the
+ * current mutable `chunks` row shows. Rows are never updated or deleted.
+ */
+const CREATE_CHUNK_HISTORY_TABLE = `
+  CREATE TABLE IF NOT EXISTS chunk_history (
+    id BIGSERIAL PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    idea_label TEXT NOT NULL,
+    origin_branch_id TEXT NOT NULL,
+    chunk_type TEXT NOT NULL,
+    discipline TEXT NOT NULL,
+    context_kind TEXT NOT NULL,
+    content TEXT NOT NULL,
+    lifecycle_state TEXT NOT NULL,
+    activity_state TEXT NOT NULL,
+    merged_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+`;
+
+/**
+ * Supports `listChunkHistoryByIdeaLabel` (reconstructing merge order for one
+ * idea label) without a sequential scan of the whole table as history grows.
+ */
+const CREATE_CHUNK_HISTORY_IDEA_LABEL_INDEX = `
+  CREATE INDEX IF NOT EXISTS idx_chunk_history_idea_label
+    ON chunk_history (workspace_id, idea_label, merged_at);
+`;
+
 export async function ensureSchema(pool: Pool): Promise<void> {
   const client = await pool.connect();
   try {
@@ -585,6 +623,8 @@ export async function ensureSchema(pool: Pool): Promise<void> {
     await client.query(CREATE_VERIFICATION_SIGNALS_TABLE);
     await client.query(CREATE_NOTIFICATIONS_TABLE);
     await client.query(CREATE_NOTIFICATIONS_RECIPIENT_INDEX);
+    await client.query(CREATE_CHUNK_HISTORY_TABLE);
+    await client.query(CREATE_CHUNK_HISTORY_IDEA_LABEL_INDEX);
   } finally {
     await client.query('SELECT pg_advisory_unlock($1)', [SCHEMA_BOOTSTRAP_LOCK_KEY]);
     client.release();

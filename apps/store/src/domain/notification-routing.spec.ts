@@ -255,3 +255,24 @@ describe('AC4: feedback/signal/notification recording cannot automate a branch l
     expect(notifications).toHaveLength(2);
   });
 });
+
+// ─── Brand safety (type-level) ────────────────────────────────────────────────
+//
+// `FeedbackItem` and `VerificationSignal` (added after rubber-duck review of
+// Feature 01/02 against Meridian) carry a compile-time `__tag` brand, so only
+// `recordFeedbackItem`/`recordVerificationSignal` can produce a value that
+// structurally satisfies either type — the same pattern this codebase already
+// uses for `WorkspaceId`/`StakeholderId`/`BranchId` (see
+// `vocabulary.spec.ts`). A hand-built object literal that merely matches the
+// field shape (e.g. with a spoofed `authoredByStakeholderId`) is rejected
+// without an explicit `as unknown as FeedbackItem` cast:
+//
+//   const spoofed: FeedbackItem = {           // @ts-expect-error
+//     workspaceId: WS,
+//     branchId: BRANCH,
+//     feedbackItemId: feedbackItemId('spoofed'),
+//     authoredByStakeholderId: stakeholderId('someone-else'),
+//     authoredByActorKind: 'human',
+//     submittedAt: TS,
+//     content: 'not actually reviewed by someone-else',
+//   };

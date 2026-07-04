@@ -6,6 +6,7 @@ import { SuggestionRepository } from './suggestion.repository.js';
 import { ArtifactAssociationRepository } from './artifact-association.repository.js';
 import { ConflictDetectionRepository } from './conflict-detection.repository.js';
 import { MergeRepository } from './merge.repository.js';
+import { ConflictGatedMergeService } from './conflict-gated-merge.service.js';
 import { DeliverySubscriptionRepository } from './delivery-subscription.repository.js';
 import {
   DELIVERY_PUSH_PORT,
@@ -36,8 +37,11 @@ class NoopDeliveryPushPort implements DeliveryPushPort {
  * association lineages (story S05), pre-merge conflict detection
  * (story S06), atomic branch-merge execution (story S07), durable
  * downstream delivery subscriptions plus async merge-triggered dispatch
- * (story S08), and evaluation feedback / verification signal notification
- * routing with non-destructive acknowledgement (story S09).
+ * (story S08), evaluation feedback / verification signal notification
+ * routing with non-destructive acknowledgement (story S09), and a
+ * conflict-gated canonical merge entrypoint (`ConflictGatedMergeService`)
+ * added after rubber-duck review of Feature 01/02 against Meridian found
+ * that no production merge path enforced pre-merge conflict detection.
  *
  * Not imported by `AppModule` yet: this feature's functional spec lists API
  * design as a non-goal, and this story's deliverable is explicitly "a
@@ -54,6 +58,7 @@ class NoopDeliveryPushPort implements DeliveryPushPort {
     ArtifactAssociationRepository,
     ConflictDetectionRepository,
     MergeRepository,
+    ConflictGatedMergeService,
     DeliverySubscriptionRepository,
     { provide: DELIVERY_PUSH_PORT, useClass: NoopDeliveryPushPort },
     MergeDeliveryDispatcher,
@@ -67,6 +72,7 @@ class NoopDeliveryPushPort implements DeliveryPushPort {
     ArtifactAssociationRepository,
     ConflictDetectionRepository,
     MergeRepository,
+    ConflictGatedMergeService,
     DeliverySubscriptionRepository,
     MergeDeliveryDispatcher,
     MergeDeliveryOrchestrator,

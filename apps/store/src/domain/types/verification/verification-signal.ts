@@ -44,8 +44,19 @@ export interface VerificationTargetBranch {
  * AC5: `reportedByActorKind` may be `'delegated'` — an implementation agent
  * can contribute a signal without being treated as the human decision maker
  * (technical spec §"Delegated agents").
+ *
+ * The `__tag` field is a nominal-typing brand (matching this codebase's
+ * `string & { readonly __tag: ... }` identifier-branding convention) that
+ * only `recordVerificationSignal` below can produce. Without it, a
+ * hand-built object literal matching this shape does not structurally
+ * satisfy `VerificationSignal` and cannot be passed to
+ * `NotificationRepository.submitVerificationSignal` without an explicit,
+ * deliberate `as unknown as VerificationSignal` cast — closing a gap found
+ * during rubber-duck review of Feature 01/02 against Meridian, where the
+ * plain structural interface let a caller construct a spoofed
+ * `reportedByStakeholderId` without going through the actor-derived factory.
  */
-export interface VerificationSignal {
+export type VerificationSignal = {
   readonly workspaceId: WorkspaceId;
   readonly branchId: BranchId;
   readonly signalId: VerificationSignalId;
@@ -54,7 +65,7 @@ export interface VerificationSignal {
   readonly reportedByActorKind: ActorKind;
   readonly reportedAt: string;
   readonly summary: string;
-}
+} & { readonly __tag: 'VerificationSignal' };
 
 /**
  * Records a verification signal against a branch.
@@ -112,5 +123,5 @@ export function recordVerificationSignal(
     reportedByActorKind: actor.kind,
     reportedAt: trimmedAt,
     summary: trimmedSummary,
-  });
+  }) as VerificationSignal;
 }

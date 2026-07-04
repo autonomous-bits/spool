@@ -31,7 +31,7 @@ label and UUID ever disagree, re-resolve the UUID in Meridian before using the r
 | --- | --- |
 | `IDEA-17` / `0a5e83d4-1838-42da-902b-5a12cd70bff8` | Branches are single-discipline units that preserve provenance and merge lineage. |
 | `IDEA-28` / `a5e98493-1e78-47fc-b64e-c77283635f06` | AI/external feedback becomes human-reviewed suggestions and branches. |
-| `IDEA-35` / `7db48f74-ed75-45a0-a178-5532f8396ce9` | The domain boundary must enforce branch, discipline, write-lock, and human-control invariants. |
+| `IDEA-35` / `7db48f74-ed75-45a0-a178-5532f8396ce9` | Enforces branch, discipline, write-lock, and human-control invariants. **Conflict flag (unresolved, added after rubber-duck review):** Meridian's chunk text names "the NestJS API gateway" as the responsible enforcement layer, while this feature's technical spec's "Store owns domain rules" decision requires `apps/store`'s domain layer to own invariant enforcement and forbids controllers/adapters from carrying business rules. The current implementation enforces these invariants in the store's domain/persistence layers (see `apps/store/AGENTS.md`), not a gateway. This disagreement has not been reconciled in Meridian and needs an architect decision there — do not silently pick a side in future specs without updating Meridian first. |
 | `IDEA-36` / `bd8c932c-3fd0-43fa-9405-4a386942f12b` | Relationships use logical idea labels. |
 | `IDEA-37` / `a5f79498-4db7-4767-af87-1efdab40921b` | Label-based relationships survive branch overrides and promotions. |
 | `IDEA-38` / `ce7fc52f-1d8f-428d-b7af-8d454a059aaa` | Relationship changes preserve lineage instead of destroying history. |
