@@ -50,6 +50,11 @@ export type { ActorContext, BranchState, Discipline, HumanActorContext };
  * - `discipline-boundary-violation`  — submit attempted by wrong-discipline actor
  * - `branch-isolation-violation`     — graph write targets a different discipline
  * - `tenant-boundary-violation`      — operation crosses workspace boundaries
+ * - `not-found`                     — no branch registration exists for the
+ *   requested workspace/branch identity (story S06, technical spec
+ *   §"Required domain error categories": this feature adds no new
+ *   categories — `not-found` is already canonical and this class simply
+ *   gains it, same precedent as `ArtifactAssociationError`)
  */
 export type BranchLifecycleErrorCode =
   | 'write-locked'
@@ -57,7 +62,8 @@ export type BranchLifecycleErrorCode =
   | 'discipline-boundary-violation'
   | 'invalid-state-transition'
   | 'branch-isolation-violation'
-  | 'tenant-boundary-violation';
+  | 'tenant-boundary-violation'
+  | 'not-found';
 
 /**
  * Thrown when a branch lifecycle invariant is violated.

@@ -6,5 +6,34 @@ services:
       dockerfile: ./Dockerfile
     environment:
       NODE_ENV: production
+      STORE_DB_HOST: postgres
+      STORE_DB_PORT: "5432"
+      STORE_DB_USER: spool
+      STORE_DB_PASSWORD: spool_dev
+      STORE_DB_NAME: spool
     ports:
       - 3000:3000
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: spool
+      POSTGRES_PASSWORD: spool_dev
+      POSTGRES_DB: spool
+    ports:
+      # Host-side integration tests connect via localhost:5433; the store
+      # container connects over the compose network at postgres:5432.
+      - 5433:5432
+    volumes:
+      - spoolstore-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U spool -d spool"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  spoolstore-postgres-data:

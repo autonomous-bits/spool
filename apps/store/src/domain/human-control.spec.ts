@@ -32,8 +32,6 @@ import {
   type SuggestionRejectedDecision,
 } from './types/index.js';
 
-
-
 describe('deprecated human-control module', () => {
   it('re-exports protected operation helpers from the new types API', () => {
     expect(deprecatedHumanControl.approveChunk).toBe(approveChunk);
@@ -79,9 +77,7 @@ describe('assertHumanActor', () => {
   });
 
   it('throws HumanControlError for a delegated actor', () => {
-    expect(() => assertHumanActor(DELEGATED, 'approve a chunk')).toThrow(
-      HumanControlError,
-    );
+    expect(() => assertHumanActor(DELEGATED, 'approve a chunk')).toThrow(HumanControlError);
   });
 
   it('error code is unauthorized-actor for delegated actor', () => {
@@ -155,21 +151,15 @@ describe('approveChunk', () => {
     });
 
     it('rejects a whitespace-only approvedAt', () => {
-      expect(() => approveChunk(HUMAN, WS, LABEL, '   ')).toThrow(
-        VocabularyValidationError,
-      );
+      expect(() => approveChunk(HUMAN, WS, LABEL, '   ')).toThrow(VocabularyValidationError);
     });
 
     it('rejects a non-ISO string', () => {
-      expect(() => approveChunk(HUMAN, WS, LABEL, 'not-a-date')).toThrow(
-        VocabularyValidationError,
-      );
+      expect(() => approveChunk(HUMAN, WS, LABEL, 'not-a-date')).toThrow(VocabularyValidationError);
     });
 
     it('rejects a numeric string without date prefix', () => {
-      expect(() => approveChunk(HUMAN, WS, LABEL, '12345')).toThrow(
-        VocabularyValidationError,
-      );
+      expect(() => approveChunk(HUMAN, WS, LABEL, '12345')).toThrow(VocabularyValidationError);
     });
   });
 });
@@ -180,6 +170,7 @@ describe('acceptSuggestion', () => {
   describe('with a human actor', () => {
     it('returns a SuggestionAcceptedDecision with all required fields', () => {
       const decision: SuggestionAcceptedDecision = acceptSuggestion(
+        'pending',
         HUMAN,
         WS,
         SUGG_ID,
@@ -195,33 +186,34 @@ describe('acceptSuggestion', () => {
     });
 
     it('carries the feedback branch discipline identifying which discipline should be initialised (Meridian IDEA-28)', () => {
-      const decision = acceptSuggestion(HUMAN, WS, SUGG_ID, 'product', TS);
+      const decision = acceptSuggestion('pending', HUMAN, WS, SUGG_ID, 'product', TS);
       expect(decision.feedbackBranchDiscipline).toBe('product');
     });
 
     it('trims surrounding whitespace from decidedAt', () => {
-      const decision = acceptSuggestion(HUMAN, WS, SUGG_ID, 'engineering', `  ${TS}  `);
+      const decision = acceptSuggestion('pending', HUMAN, WS, SUGG_ID, 'engineering', `  ${TS}  `);
       expect(decision.decidedAt).toBe(TS);
     });
 
     it('returns a frozen (immutable) record', () => {
-      const decision = acceptSuggestion(HUMAN, WS, SUGG_ID, 'architecture', TS);
+      const decision = acceptSuggestion('pending', HUMAN, WS, SUGG_ID, 'architecture', TS);
       expect(Object.isFrozen(decision)).toBe(true);
     });
 
     it('AC1: the decision carries the human stakeholder ID so ownership is traceable', () => {
-      const decision = acceptSuggestion(HUMAN, WS, SUGG_ID, 'engineering', TS);
+      const decision = acceptSuggestion('pending', HUMAN, WS, SUGG_ID, 'engineering', TS);
       expect(decision.decidedByStakeholderId).toBe(STAKEHOLDER);
     });
 
     it('records are scoped to a workspace so the same suggestion in different workspaces is distinguishable', () => {
-      const inWsA = acceptSuggestion(HUMAN, WS, SUGG_ID, 'engineering', TS);
-      const inWsB = acceptSuggestion(HUMAN, WS2, SUGG_ID, 'engineering', TS);
+      const inWsA = acceptSuggestion('pending', HUMAN, WS, SUGG_ID, 'engineering', TS);
+      const inWsB = acceptSuggestion('pending', HUMAN, WS2, SUGG_ID, 'engineering', TS);
       expect(inWsA.workspaceId).not.toBe(inWsB.workspaceId);
     });
 
     it('AC4: decision discriminant is "accepted" distinguishing acceptance from rejection', () => {
       const decision: SuggestionDecision = acceptSuggestion(
+        'pending',
         HUMAN,
         WS,
         SUGG_ID,
@@ -234,28 +226,28 @@ describe('acceptSuggestion', () => {
 
   describe('with a delegated actor', () => {
     it('AC3: throws HumanControlError — delegated agents cannot accept suggestions', () => {
-      expect(() =>
-        acceptSuggestion(DELEGATED, WS, SUGG_ID, 'engineering', TS),
-      ).toThrow(HumanControlError);
+      expect(() => acceptSuggestion('pending', DELEGATED, WS, SUGG_ID, 'engineering', TS)).toThrow(
+        HumanControlError,
+      );
     });
 
     it('error code is unauthorized-actor', () => {
-      expect(() =>
-        acceptSuggestion(DELEGATED, WS, SUGG_ID, 'engineering', TS),
-      ).toThrow(expect.objectContaining({ code: 'unauthorized-actor' }));
+      expect(() => acceptSuggestion('pending', DELEGATED, WS, SUGG_ID, 'engineering', TS)).toThrow(
+        expect.objectContaining({ code: 'unauthorized-actor' }),
+      );
     });
   });
 
   describe('timestamp validation', () => {
     it('rejects an empty decidedAt', () => {
-      expect(() =>
-        acceptSuggestion(HUMAN, WS, SUGG_ID, 'engineering', ''),
-      ).toThrow(VocabularyValidationError);
+      expect(() => acceptSuggestion('pending', HUMAN, WS, SUGG_ID, 'engineering', '')).toThrow(
+        VocabularyValidationError,
+      );
     });
 
     it('rejects a non-ISO string', () => {
       expect(() =>
-        acceptSuggestion(HUMAN, WS, SUGG_ID, 'engineering', 'not-a-date'),
+        acceptSuggestion('pending', HUMAN, WS, SUGG_ID, 'engineering', 'not-a-date'),
       ).toThrow(VocabularyValidationError);
     });
   });
@@ -267,6 +259,7 @@ describe('rejectSuggestion', () => {
   describe('with a human actor', () => {
     it('returns a SuggestionRejectedDecision with all required fields', () => {
       const decision: SuggestionRejectedDecision = rejectSuggestion(
+        'pending',
         HUMAN,
         WS,
         SUGG_ID,
@@ -280,46 +273,46 @@ describe('rejectSuggestion', () => {
     });
 
     it('does not carry a feedbackBranchDiscipline — rejection does not modify graph state', () => {
-      const decision = rejectSuggestion(HUMAN, WS, SUGG_ID, TS);
+      const decision = rejectSuggestion('pending', HUMAN, WS, SUGG_ID, TS);
       expect('feedbackBranchDiscipline' in decision).toBe(false);
     });
 
     it('trims surrounding whitespace from decidedAt', () => {
-      const decision = rejectSuggestion(HUMAN, WS, SUGG_ID, `  ${TS}  `);
+      const decision = rejectSuggestion('pending', HUMAN, WS, SUGG_ID, `  ${TS}  `);
       expect(decision.decidedAt).toBe(TS);
     });
 
     it('returns a frozen (immutable) record', () => {
-      const decision = rejectSuggestion(HUMAN, WS, SUGG_ID, TS);
+      const decision = rejectSuggestion('pending', HUMAN, WS, SUGG_ID, TS);
       expect(Object.isFrozen(decision)).toBe(true);
     });
 
     it('AC1: the decision carries the human stakeholder ID so ownership is traceable', () => {
-      const decision = rejectSuggestion(HUMAN, WS, SUGG_ID, TS);
+      const decision = rejectSuggestion('pending', HUMAN, WS, SUGG_ID, TS);
       expect(decision.decidedByStakeholderId).toBe(STAKEHOLDER);
     });
 
     it('records are scoped to a workspace so the same suggestion in different workspaces is distinguishable', () => {
-      const inWsA = rejectSuggestion(HUMAN, WS, SUGG_ID, TS);
-      const inWsB = rejectSuggestion(HUMAN, WS2, SUGG_ID, TS);
+      const inWsA = rejectSuggestion('pending', HUMAN, WS, SUGG_ID, TS);
+      const inWsB = rejectSuggestion('pending', HUMAN, WS2, SUGG_ID, TS);
       expect(inWsA.workspaceId).not.toBe(inWsB.workspaceId);
     });
 
     it('AC4: decision discriminant is "rejected" distinguishing rejection from acceptance', () => {
-      const decision: SuggestionDecision = rejectSuggestion(HUMAN, WS, SUGG_ID, TS);
+      const decision: SuggestionDecision = rejectSuggestion('pending', HUMAN, WS, SUGG_ID, TS);
       expect(decision.decision).toBe('rejected');
     });
   });
 
   describe('with a delegated actor', () => {
     it('AC3: throws HumanControlError — delegated agents cannot reject suggestions', () => {
-      expect(() => rejectSuggestion(DELEGATED, WS, SUGG_ID, TS)).toThrow(
+      expect(() => rejectSuggestion('pending', DELEGATED, WS, SUGG_ID, TS)).toThrow(
         HumanControlError,
       );
     });
 
     it('error code is unauthorized-actor', () => {
-      expect(() => rejectSuggestion(DELEGATED, WS, SUGG_ID, TS)).toThrow(
+      expect(() => rejectSuggestion('pending', DELEGATED, WS, SUGG_ID, TS)).toThrow(
         expect.objectContaining({ code: 'unauthorized-actor' }),
       );
     });
@@ -327,13 +320,13 @@ describe('rejectSuggestion', () => {
 
   describe('timestamp validation', () => {
     it('rejects an empty decidedAt', () => {
-      expect(() => rejectSuggestion(HUMAN, WS, SUGG_ID, '')).toThrow(
+      expect(() => rejectSuggestion('pending', HUMAN, WS, SUGG_ID, '')).toThrow(
         VocabularyValidationError,
       );
     });
 
     it('rejects a non-ISO string', () => {
-      expect(() => rejectSuggestion(HUMAN, WS, SUGG_ID, 'bad-date')).toThrow(
+      expect(() => rejectSuggestion('pending', HUMAN, WS, SUGG_ID, 'bad-date')).toThrow(
         VocabularyValidationError,
       );
     });
@@ -356,13 +349,13 @@ describe('AC2: delegated actors can contribute feedback but cannot make protecte
   });
 
   it('a delegated actor cannot accept suggestions', () => {
-    expect(() =>
-      acceptSuggestion(DELEGATED, WS, SUGG_ID, 'engineering', TS),
-    ).toThrow(HumanControlError);
+    expect(() => acceptSuggestion('pending', DELEGATED, WS, SUGG_ID, 'engineering', TS)).toThrow(
+      HumanControlError,
+    );
   });
 
   it('a delegated actor cannot reject suggestions', () => {
-    expect(() => rejectSuggestion(DELEGATED, WS, SUGG_ID, TS)).toThrow(
+    expect(() => rejectSuggestion('pending', DELEGATED, WS, SUGG_ID, TS)).toThrow(
       HumanControlError,
     );
   });
@@ -381,6 +374,7 @@ describe('AC4: actor kind distinguishes a delegated contribution from a direct h
 
   it('accepted suggestion decision has decision "accepted" (human-only outcome)', () => {
     const accepted: SuggestionDecision = acceptSuggestion(
+      'pending',
       HUMAN,
       WS,
       SUGG_ID,
@@ -391,19 +385,20 @@ describe('AC4: actor kind distinguishes a delegated contribution from a direct h
   });
 
   it('rejected suggestion decision has decision "rejected" (human-only outcome)', () => {
-    const rejected: SuggestionDecision = rejectSuggestion(HUMAN, WS, SUGG_ID, TS);
+    const rejected: SuggestionDecision = rejectSuggestion('pending', HUMAN, WS, SUGG_ID, TS);
     expect(rejected.decision).toBe('rejected');
   });
 
   it('accepted and rejected decisions are distinguishable by their "decision" discriminant', () => {
     const accepted: SuggestionDecision = acceptSuggestion(
+      'pending',
       HUMAN,
       WS,
       SUGG_ID,
       'architecture',
       TS,
     );
-    const rejected: SuggestionDecision = rejectSuggestion(HUMAN, WS, SUGG_ID, TS);
+    const rejected: SuggestionDecision = rejectSuggestion('pending', HUMAN, WS, SUGG_ID, TS);
     expect(accepted.decision).not.toBe(rejected.decision);
   });
 });

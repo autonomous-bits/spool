@@ -7,3 +7,5 @@ export * from './feedback-item-id.js';
 export * from './artifact-id.js';
 export * from './notification-id.js';
 export * from './generated-context-id.js';
+export * from './verification-signal-id.js';
+export * from './consumer-id.js';
