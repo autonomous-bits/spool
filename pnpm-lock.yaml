@@ -80,6 +80,12 @@ importers:
       '@types/pg':
         specifier: ^8.20.0
         version: 8.20.0
+      '@types/supertest':
+        specifier: ^7.0.0
+        version: 7.2.0
+      supertest:
+        specifier: ^7.0.0
+        version: 7.2.2
 
 packages:
 

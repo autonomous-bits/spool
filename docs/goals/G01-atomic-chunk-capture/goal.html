@@ -26,7 +26,7 @@
 <body>
 
 <h1>G01 — Atomic Chunk Capture &amp; Retrieval
-  <span class="badge badge-open" id="header-status">open</span>
+  <span class="badge badge-done" id="header-status">done</span>
 </h1>
 <p><strong>Size:</strong> 5 — introduces multiple new domain concepts (Chunk entity, ChunkType/ContextKind/Discipline vocab, minimal Stakeholder identity) plus a repo-local schema migration and cross-layer contracts (API + domain + persistence + MCP).</p>
 
@@ -105,7 +105,7 @@ graph TD
 </details>
 
 <details>
-<summary>SG2 — Persistence: ChunkRepository <span class="badge badge-open sg-badge" data-sg="SG2">open</span></summary>
+<summary>SG2 — Persistence: ChunkRepository <span class="badge badge-done sg-badge" data-sg="SG2">done</span></summary>
 <p><strong>Depends on:</strong> SG0, SG1</p>
 <p><strong>Objective:</strong> Implement a Postgres-backed <code>ChunkRepository</code> with <code>create(chunk)</code> and <code>findById(id)</code>, mapping domain invariants to/from the extended <code>chunks</code> table.</p>
 <ul>
@@ -117,7 +117,7 @@ graph TD
 </details>
 
 <details>
-<summary>SG3 — API surface: ChunksController <span class="badge badge-open sg-badge" data-sg="SG3">open</span></summary>
+<summary>SG3 — API surface: ChunksController <span class="badge badge-done sg-badge" data-sg="SG3">done</span></summary>
 <p><strong>Depends on:</strong> SG2</p>
 <p><strong>Objective:</strong> Expose <code>POST /chunks</code> and <code>GET /chunks/:id</code> on the NestJS store, wired through a <code>ChunkService</code> to SG2's repository, per IDEA-52/IDEA-34.</p>
 <ul>
@@ -129,7 +129,7 @@ graph TD
 </details>
 
 <details>
-<summary>SG4 — MCP exposure: capture-chunk tool <span class="badge badge-open sg-badge" data-sg="SG4">open</span></summary>
+<summary>SG4 — MCP exposure: capture-chunk tool <span class="badge badge-done sg-badge" data-sg="SG4">done</span></summary>
 <p><strong>Depends on:</strong> SG3</p>
 <p><strong>Objective:</strong> Add an MCP tool (e.g. <code>capture-chunk</code>) in <code>apps/mcp</code> that calls the store's <code>POST /chunks</code> over HTTP on behalf of a human stakeholder, acting as a delegated actor per IDEA-9.</p>
 <ul>
@@ -141,7 +141,7 @@ graph TD
 </details>
 
 <details>
-<summary>SG5 — Docker end-to-end verification <span class="badge badge-open sg-badge" data-sg="SG5">open</span></summary>
+<summary>SG5 — Docker end-to-end verification <span class="badge badge-done sg-badge" data-sg="SG5">done</span></summary>
 <p><strong>Depends on:</strong> SG4</p>
 <p><strong>Objective:</strong> Bring the store up in Docker (per <code>apps/store/AGENTS.md</code>, the store always runs via Compose, never directly on host) and exercise the real capability end to end, not just in-process tests. The MCP server is a separate Node process (<code>node apps/mcp/dist/main.js</code>, not part of <code>compose.yaml</code>) started with <code>HARNESS_URL</code> pointed at the running containerized store.</p>
 <ul>
@@ -174,7 +174,7 @@ graph TD
   "goalId": "G01",
   "slug": "atomic-chunk-capture",
   "title": "Atomic Chunk Capture & Retrieval",
-  "status": "open",
+  "status": "done",
   "size": 5,
   "sizeJustification": "Introduces multiple new domain concepts (Chunk entity, ChunkType/ContextKind/Discipline vocab, minimal Stakeholder identity) plus a repo-local schema migration and cross-layer contracts across API, domain, persistence, and MCP layers.",
   "meridianChunks": [
@@ -236,7 +236,7 @@ graph TD
         "Integration tests run against containerized Postgres, not an in-memory substitute."
       ],
       "verification": "pnpm test:store",
-      "status": "open"
+      "status": "done"
     },
     {
       "id": "SG3",
@@ -249,7 +249,7 @@ graph TD
         "GET /chunks/:id returns 200 with the chunk for a known id and 404 for an unknown id."
       ],
       "verification": "pnpm test:store",
-      "status": "open"
+      "status": "done"
     },
     {
       "id": "SG4",
@@ -262,7 +262,7 @@ graph TD
         "Tool response includes the created chunk's id on success."
       ],
       "verification": "pnpm test:mcp",
-      "status": "open"
+      "status": "done"
     },
     {
       "id": "SG5",
@@ -275,7 +275,7 @@ graph TD
         "apps/mcp is built and started as its own Node process (node apps/mcp/dist/main.js) with HARNESS_URL=http://localhost:3000; a real capture-chunk tool call against it creates a chunk retrievable via the store's GET /chunks/:id."
       ],
       "verification": "docker compose up --build spoolstore (store/Postgres) plus a separately started apps/mcp process, exercised with real HTTP + MCP calls",
-      "status": "open"
+      "status": "done"
     }
   ],
   "openQuestions": [
