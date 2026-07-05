@@ -25,6 +25,8 @@
   },
   "devDependencies": {
     "@nestjs/testing": "^11.0.0",
-    "@types/pg": "^8.20.0"
+    "@types/pg": "^8.20.0",
+    "@types/supertest": "^7.0.0",
+    "supertest": "^7.0.0"
   }
 }
