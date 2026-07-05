@@ -29,7 +29,7 @@ describe('ChunkRepository (containerized Postgres)', () => {
   });
 
   afterAll(async () => {
-    await database.close();
+    await database?.close();
   });
 
   it('create persists a chunk with status draft, branch_id NULL, and chunk_type/context_kind populated', async () => {

@@ -1,5 +1,6 @@
 import { Injectable, Module, type OnApplicationShutdown } from '@nestjs/common';
 import { Pool } from 'pg';
+import { BranchRepository } from './branch.repository.js';
 import { ChunkRepository } from './chunk.repository.js';
 import { loadDatabaseConfig } from './database-config.js';
 import { PG_POOL } from './pg-pool.token.js';
@@ -27,8 +28,9 @@ class PgPoolProvider implements OnApplicationShutdown {
       inject: [PgPoolProvider],
     },
     ChunkRepository,
+    BranchRepository,
   ],
-  exports: [PG_POOL, ChunkRepository],
+  exports: [PG_POOL, ChunkRepository, BranchRepository],
 })
 // eslint-disable-next-line @typescript-eslint/no-extraneous-class -- NestJS module classes are intentionally empty; behavior comes entirely from the @Module decorator.
 export class PersistenceModule {}

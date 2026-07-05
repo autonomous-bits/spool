@@ -9,7 +9,8 @@ import { isDiscipline } from '../domain/types/vocabulary/discipline.js';
 /**
  * Validated shape of a `POST /chunks` request body, per Meridian IDEA-52/IDEA-34 (chunk capture
  * API). Stakeholder registration is out of scope for G01 (Meridian IDEA-11 attribution still
- * requires stakeholderId to already exist).
+ * requires stakeholderId to already exist). `branchId` is optional (G02): when present, the
+ * chunk is attached to that draft branch; when absent, capture is branchless as in G01.
  */
 export interface CreateChunkRequest {
   label: string;
@@ -18,6 +19,7 @@ export interface CreateChunkRequest {
   chunkType: ChunkType;
   contextKind: ContextKind;
   stakeholderId: string;
+  branchId?: string;
 }
 
 function requireStringField(body: Record<string, unknown>, field: string): string {
@@ -58,6 +60,22 @@ export function parseCreateChunkRequest(body: unknown): CreateChunkRequest {
   const contextKind = record['contextKind'];
   if (!isContextKind(contextKind)) {
     throw new BadRequestException(`Invalid contextKind: ${JSON.stringify(contextKind)}`);
+  }
+
+  const branchIdValue = record['branchId'];
+  if (branchIdValue !== undefined) {
+    if (typeof branchIdValue !== 'string' || branchIdValue.trim().length === 0) {
+      throw new BadRequestException('branchId must be a non-empty string when provided');
+    }
+    return {
+      label,
+      content,
+      discipline,
+      chunkType,
+      contextKind,
+      stakeholderId,
+      branchId: branchIdValue,
+    } satisfies CreateChunkRequest;
   }
 
   return {

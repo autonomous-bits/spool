@@ -50,6 +50,47 @@ describe('parseCaptureChunkInput', () => {
 
     expect(() => parseCaptureChunkInput(body)).toThrow(/label/);
   });
+
+  it('accepts an optional branchId and forwards it as-is', () => {
+    const body = {
+      label: 'ATOMIC-1',
+      content: 'content',
+      discipline: 'product',
+      chunkType: 'feature',
+      contextKind: 'permanent',
+      stakeholderId: 'stakeholder-1',
+      branchId: 'branch-1',
+    };
+
+    expect(parseCaptureChunkInput(body)).toEqual(body);
+  });
+
+  it('omits branchId entirely when absent, preserving the branchless path', () => {
+    const body = {
+      label: 'ATOMIC-1',
+      content: 'content',
+      discipline: 'product',
+      chunkType: 'feature',
+      contextKind: 'permanent',
+      stakeholderId: 'stakeholder-1',
+    };
+
+    expect(parseCaptureChunkInput(body)).not.toHaveProperty('branchId');
+  });
+
+  it('rejects a blank branchId when present', () => {
+    const body = {
+      label: 'ATOMIC-1',
+      content: 'content',
+      discipline: 'product',
+      chunkType: 'feature',
+      contextKind: 'permanent',
+      stakeholderId: 'stakeholder-1',
+      branchId: '   ',
+    };
+
+    expect(() => parseCaptureChunkInput(body)).toThrow(/branchId/);
+  });
 });
 
 describe('captureChunk', () => {
@@ -79,6 +120,8 @@ describe('captureChunk', () => {
       updatedByStakeholderId: input.stakeholderId,
       createdAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',
+      branchId: null,
+      originBranchId: null,
     };
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -96,6 +139,41 @@ describe('captureChunk', () => {
     });
     expect(result).toEqual(expected);
     expect(result.id).toBe('chunk-1');
+  });
+
+  it('forwards an optional branchId as-is and reflects it in the result', async () => {
+    const inputWithBranch: CaptureChunkInput = { ...input, branchId: 'branch-1' };
+    const expected: CaptureChunkResult = {
+      id: 'chunk-2',
+      label: inputWithBranch.label,
+      content: inputWithBranch.content,
+      discipline: inputWithBranch.discipline,
+      chunkType: inputWithBranch.chunkType,
+      contextKind: inputWithBranch.contextKind,
+      status: 'draft',
+      createdByStakeholderId: inputWithBranch.stakeholderId,
+      updatedByStakeholderId: inputWithBranch.stakeholderId,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      branchId: 'branch-1',
+      originBranchId: 'branch-1',
+    };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      json: () => Promise.resolve(expected),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await captureChunk(inputWithBranch, 'http://harness.test');
+
+    expect(fetchMock).toHaveBeenCalledWith('http://harness.test/chunks', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(inputWithBranch),
+    });
+    expect(result.branchId).toBe('branch-1');
+    expect(result.originBranchId).toBe('branch-1');
   });
 
   it('surfaces the store 400 validation error without swallowing it', async () => {

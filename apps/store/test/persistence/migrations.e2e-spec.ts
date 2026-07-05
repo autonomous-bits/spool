@@ -14,7 +14,7 @@ describe('store migrations (containerized Postgres)', () => {
   });
 
   afterAll(async () => {
-    await database.close();
+    await database?.close();
   });
 
   it('creates the stakeholders table with the expected columns', async () => {
@@ -98,6 +98,6 @@ describe('store migrations (containerized Postgres)', () => {
     const migrationRows = await pool.query<{ count: string }>(
       'SELECT COUNT(*)::text AS count FROM schema_migrations',
     );
-    expect(migrationRows.rows[0]?.count).toBe('2');
+    expect(migrationRows.rows[0]?.count).toBe('3');
   });
 });

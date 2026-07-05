@@ -12,6 +12,8 @@ interface ChunkRow extends QueryResultRow {
   chunk_type: string;
   context_kind: string;
   status: string;
+  branch_id: string | null;
+  origin_branch_id: string | null;
   created_by_stakeholder_id: string;
   updated_by_stakeholder_id: string;
   created_at: Date;
@@ -27,6 +29,8 @@ function toChunk(row: ChunkRow): Chunk {
     chunkType: row.chunk_type as Chunk['chunkType'],
     contextKind: row.context_kind as Chunk['contextKind'],
     status: row.status as ChunkStatus,
+    ...(row.branch_id === null ? {} : { branchId: row.branch_id }),
+    ...(row.origin_branch_id === null ? {} : { originBranchId: row.origin_branch_id }),
     createdByStakeholderId: row.created_by_stakeholder_id,
     updatedByStakeholderId: row.updated_by_stakeholder_id,
     createdAt: row.created_at,
@@ -36,17 +40,17 @@ function toChunk(row: ChunkRow): Chunk {
 
 /**
  * Postgres-backed repository for the Chunk aggregate (Meridian IDEA-31, amended by IDEA-77's
- * chunk_type/context_kind columns and IDEA-78's branchless/draft capture path). G01 only ever
- * persists branchless drafts: branch_id/origin_branch_id are always NULL and status is always
- * 'draft' on create, per IDEA-78.
+ * chunk_type/context_kind columns and IDEA-78's branchless/draft capture path). branch_id and
+ * origin_branch_id are NULL for a branchless capture (G01) or both set to the same branch's id
+ * when the chunk is attached to a draft branch at creation time (G02).
  */
 @Injectable()
 export class ChunkRepository {
   constructor(@Inject(PG_POOL) private readonly pool: Pool) {}
 
   /**
-   * Persists a newly-constructed Chunk as a branchless mainline draft and returns the persisted
-   * entity (round-tripped from the database row, not the in-memory instance).
+   * Persists a newly-constructed Chunk and returns the persisted entity (round-tripped from the
+   * database row, not the in-memory instance).
    */
   async create(chunk: Chunk): Promise<Chunk> {
     const result: QueryResult<ChunkRow> = await this.pool.query<ChunkRow>(
@@ -55,7 +59,7 @@ export class ChunkRepository {
          branch_id, origin_branch_id,
          created_by_stakeholder_id, updated_by_stakeholder_id,
          created_at, updated_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, NULL, $8, $9, $10, $11)
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
        RETURNING *`,
       [
         chunk.id,
@@ -65,6 +69,8 @@ export class ChunkRepository {
         chunk.chunkType,
         chunk.contextKind,
         chunk.status,
+        chunk.branchId ?? null,
+        chunk.originBranchId ?? null,
         chunk.createdByStakeholderId,
         chunk.updatedByStakeholderId,
         chunk.createdAt,
