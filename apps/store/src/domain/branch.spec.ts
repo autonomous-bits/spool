@@ -25,6 +25,14 @@ describe('Branch', () => {
     expect(branch.updatedAt).toEqual(branch.createdAt);
   });
 
+  it('round-trips an explicit submittedAt when provided', () => {
+    const submittedAt = new Date('2026-07-05T12:34:56.789Z');
+
+    const branch = new Branch(validProps({ status: 'submitted', submittedAt }));
+
+    expect(branch.submittedAt).toEqual(submittedAt);
+  });
+
   it.each(['', '   '])('rejects blank name %j', (name) => {
     expect(() => new Branch(validProps({ name }))).toThrow(TypeError);
   });

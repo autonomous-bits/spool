@@ -1,5 +1,5 @@
-import type { Pool, QueryResult, QueryResultRow } from 'pg';
-import { Inject, Injectable } from '@nestjs/common';
+import type { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
+import { ConflictException, Inject, Injectable } from '@nestjs/common';
 import { Chunk } from '../domain/chunk.js';
 import type { ChunkStatus } from '../domain/chunk.js';
 import { PG_POOL } from './pg-pool.token.js';
@@ -38,11 +38,64 @@ function toChunk(row: ChunkRow): Chunk {
   });
 }
 
+type Queryable = Pick<Pool, 'query'>;
+
+function createNonDraftBranchConflict(branchId: string): ConflictException {
+  return new ConflictException(`Branch ${branchId} is not in draft status`);
+}
+
+async function insertChunk(queryable: Queryable, chunk: Chunk): Promise<Chunk> {
+  const result: QueryResult<ChunkRow> = await queryable.query<ChunkRow>(
+    `INSERT INTO chunks (
+       id, label, content, discipline, chunk_type, context_kind, status,
+       branch_id, origin_branch_id,
+       created_by_stakeholder_id, updated_by_stakeholder_id,
+       created_at, updated_at
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+     RETURNING *`,
+    [
+      chunk.id,
+      chunk.label,
+      chunk.content,
+      chunk.discipline,
+      chunk.chunkType,
+      chunk.contextKind,
+      chunk.status,
+      chunk.branchId ?? null,
+      chunk.originBranchId ?? null,
+      chunk.createdByStakeholderId,
+      chunk.updatedByStakeholderId,
+      chunk.createdAt,
+      chunk.updatedAt,
+    ],
+  );
+
+  const row = result.rows[0];
+  if (row === undefined) {
+    throw new Error('ChunkRepository.create: INSERT ... RETURNING * produced no row');
+  }
+
+  return toChunk(row);
+}
+
+async function assertDraftBranchLock(client: PoolClient, branchId: string): Promise<void> {
+  const result: QueryResult<{ status: string } & QueryResultRow> = await client.query(
+    'SELECT status FROM branches WHERE id = $1 FOR UPDATE',
+    [branchId],
+  );
+
+  const row = result.rows[0];
+  if (row === undefined || row.status !== 'draft') {
+    throw createNonDraftBranchConflict(branchId);
+  }
+}
+
 /**
  * Postgres-backed repository for the Chunk aggregate (Meridian IDEA-31, amended by IDEA-77's
  * chunk_type/context_kind columns and IDEA-78's branchless/draft capture path). branch_id and
  * origin_branch_id are NULL for a branchless capture (G01) or both set to the same branch's id
- * when the chunk is attached to a draft branch at creation time (G02).
+ * when the chunk is attached to a draft branch at creation time (G02). G04 hardens branch-scoped
+ * writes by re-checking the branch's draft status under a row lock inside the insert transaction.
  */
 @Injectable()
 export class ChunkRepository {
@@ -53,37 +106,35 @@ export class ChunkRepository {
    * database row, not the in-memory instance).
    */
   async create(chunk: Chunk): Promise<Chunk> {
-    const result: QueryResult<ChunkRow> = await this.pool.query<ChunkRow>(
-      `INSERT INTO chunks (
-         id, label, content, discipline, chunk_type, context_kind, status,
-         branch_id, origin_branch_id,
-         created_by_stakeholder_id, updated_by_stakeholder_id,
-         created_at, updated_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-       RETURNING *`,
-      [
-        chunk.id,
-        chunk.label,
-        chunk.content,
-        chunk.discipline,
-        chunk.chunkType,
-        chunk.contextKind,
-        chunk.status,
-        chunk.branchId ?? null,
-        chunk.originBranchId ?? null,
-        chunk.createdByStakeholderId,
-        chunk.updatedByStakeholderId,
-        chunk.createdAt,
-        chunk.updatedAt,
-      ],
-    );
-
-    const row = result.rows[0];
-    if (row === undefined) {
-      throw new Error('ChunkRepository.create: INSERT ... RETURNING * produced no row');
+    if (chunk.branchId === undefined) {
+      return insertChunk(this.pool, chunk);
     }
 
-    return toChunk(row);
+    const client = await this.pool.connect();
+    let transactionOpen = false;
+
+    try {
+      await client.query('BEGIN');
+      transactionOpen = true;
+
+      await assertDraftBranchLock(client, chunk.branchId);
+      await client.query('UPDATE branches SET updated_at = clock_timestamp() WHERE id = $1', [
+        chunk.branchId,
+      ]);
+
+      const created = await insertChunk(client, chunk);
+
+      await client.query('COMMIT');
+      transactionOpen = false;
+      return created;
+    } catch (error) {
+      if (transactionOpen) {
+        await client.query('ROLLBACK');
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   /**

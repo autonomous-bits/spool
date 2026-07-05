@@ -64,4 +64,35 @@ describe('BranchRepository (containerized Postgres)', () => {
 
     expect(found).toBeUndefined();
   });
+
+  it('submit transitions a draft branch once and returns undefined on repeat submit', async () => {
+    const created = await repository.create(buildBranch());
+
+    const submitted = await repository.submit(created.id);
+    const repeated = await repository.submit(created.id);
+
+    expect(submitted).toBeDefined();
+    expect(submitted?.status).toBe('submitted');
+    expect(submitted?.submittedAt).toBeInstanceOf(Date);
+    expect(repeated).toBeUndefined();
+  });
+
+  it('submit persists submitted_at and round-trips it through the branch mapper', async () => {
+    const created = await repository.create(buildBranch());
+
+    const submitted = await repository.submit(created.id);
+    const found = await repository.findById(created.id);
+    const row = await pool.query<{ submitted_at: Date | null; status: string }>(
+      'SELECT submitted_at, status FROM branches WHERE id = $1',
+      [created.id],
+    );
+
+    expect(submitted).toBeDefined();
+    expect(found).toBeDefined();
+    expect(row.rows).toHaveLength(1);
+    expect(row.rows[0]?.status).toBe('submitted');
+    expect(row.rows[0]?.submitted_at).toBeInstanceOf(Date);
+    expect(submitted?.submittedAt?.toISOString()).toBe(row.rows[0]?.submitted_at?.toISOString());
+    expect(found?.submittedAt?.toISOString()).toBe(row.rows[0]?.submitted_at?.toISOString());
+  });
 });

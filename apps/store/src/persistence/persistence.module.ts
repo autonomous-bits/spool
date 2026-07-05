@@ -3,6 +3,7 @@ import { Pool } from 'pg';
 import { BranchRepository } from './branch.repository.js';
 import { ChunkRepository } from './chunk.repository.js';
 import { EdgeRepository } from './edge.repository.js';
+import { StakeholderRepository } from './stakeholder.repository.js';
 import { loadDatabaseConfig } from './database-config.js';
 import { PG_POOL } from './pg-pool.token.js';
 
@@ -31,8 +32,9 @@ class PgPoolProvider implements OnApplicationShutdown {
     ChunkRepository,
     BranchRepository,
     EdgeRepository,
+    StakeholderRepository,
   ],
-  exports: [PG_POOL, ChunkRepository, BranchRepository, EdgeRepository],
+  exports: [PG_POOL, ChunkRepository, BranchRepository, EdgeRepository, StakeholderRepository],
 })
 // eslint-disable-next-line @typescript-eslint/no-extraneous-class -- NestJS module classes are intentionally empty; behavior comes entirely from the @Module decorator.
 export class PersistenceModule {}

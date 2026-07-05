@@ -5,8 +5,9 @@ import type { Discipline } from '../domain/types/vocabulary/discipline.js';
 /**
  * HTTP-facing shape of a persisted Branch, per Meridian IDEA-52/IDEA-34. Kept as an explicit
  * interface (rather than returning the `Branch` domain entity directly) so the API response
- * contract is typed independently of the domain entity's internal shape. `divergedAt` is
- * serialized as its ISO-8601 string (DivergencePoint is opaque internally).
+ * contract is typed independently of the domain entity's internal shape. `divergedAt` and
+ * `submittedAt` are serialized as ISO-8601 strings (`submittedAt` is nullable when the branch has
+ * not been submitted yet).
  */
 export interface BranchResponse {
   id: string;
@@ -14,6 +15,7 @@ export interface BranchResponse {
   discipline: Discipline;
   status: BranchStatus;
   divergedAt: string;
+  submittedAt: string | null;
   createdAt: Date;
   updatedAt: Date;
   createdByStakeholderId: string;
@@ -26,6 +28,7 @@ export function toBranchResponse(branch: Branch): BranchResponse {
     discipline: branch.discipline,
     status: branch.status,
     divergedAt: branch.divergedAt.toISOString(),
+    submittedAt: branch.submittedAt?.toISOString() ?? null,
     createdAt: branch.createdAt,
     updatedAt: branch.updatedAt,
     createdByStakeholderId: branch.createdByStakeholderId,

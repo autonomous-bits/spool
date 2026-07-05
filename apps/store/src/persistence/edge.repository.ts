@@ -1,5 +1,5 @@
-import type { Pool, QueryResult, QueryResultRow } from 'pg';
-import { Inject, Injectable } from '@nestjs/common';
+import type { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
+import { ConflictException, Inject, Injectable } from '@nestjs/common';
 import { Edge } from '../domain/edge.js';
 import { PG_POOL } from './pg-pool.token.js';
 
@@ -37,11 +37,65 @@ function toEdge(row: EdgeRow): Edge {
   });
 }
 
+type Queryable = Pick<Pool, 'query'>;
+
+function createNonDraftBranchConflict(branchId: string): ConflictException {
+  return new ConflictException(`Branch ${branchId} is not in draft status`);
+}
+
+async function insertEdge(queryable: Queryable, edge: Edge): Promise<Edge> {
+  const result: QueryResult<EdgeRow> = await queryable.query<EdgeRow>(
+    `INSERT INTO edges (
+       id, from_chunk_label, to_chunk_label, type, status, discipline,
+       branch_id, origin_branch_id, superseded_by_edge_id,
+       created_by_stakeholder_id, updated_by_stakeholder_id,
+       created_at, updated_at
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+     RETURNING *`,
+    [
+      edge.id,
+      edge.fromChunkLabel,
+      edge.toChunkLabel,
+      edge.type,
+      edge.status,
+      edge.discipline,
+      edge.branchId ?? null,
+      edge.originBranchId ?? null,
+      edge.supersededByEdgeId ?? null,
+      edge.createdByStakeholderId,
+      edge.updatedByStakeholderId,
+      edge.createdAt,
+      edge.updatedAt,
+    ],
+  );
+
+  const row = result.rows[0];
+  if (row === undefined) {
+    throw new Error('EdgeRepository.create: INSERT ... RETURNING * produced no row');
+  }
+
+  return toEdge(row);
+}
+
+async function assertDraftBranchLock(client: PoolClient, branchId: string): Promise<void> {
+  const result: QueryResult<{ status: string } & QueryResultRow> = await client.query(
+    'SELECT status FROM branches WHERE id = $1 FOR UPDATE',
+    [branchId],
+  );
+
+  const row = result.rows[0];
+  if (row === undefined || row.status !== 'draft') {
+    throw createNonDraftBranchConflict(branchId);
+  }
+}
+
 /**
  * Postgres-backed repository for the Edge aggregate (Meridian IDEA-31/IDEA-32/IDEA-33/IDEA-44).
  * G03 only ever creates 'active' edges; supersededByEdgeId is always NULL on create. No generic
  * list/overlay-read method is exposed this goal (Meridian IDEA-33's branch-overlay UNION read is
- * out of scope until a future goal), so only create/findById are provided.
+ * out of scope until a future goal), so only create/findById are provided. G04 hardens
+ * branch-scoped writes by re-checking the branch's draft status under a row lock inside the insert
+ * transaction.
  */
 @Injectable()
 export class EdgeRepository {
@@ -52,37 +106,35 @@ export class EdgeRepository {
    * database row, not the in-memory instance).
    */
   async create(edge: Edge): Promise<Edge> {
-    const result: QueryResult<EdgeRow> = await this.pool.query<EdgeRow>(
-      `INSERT INTO edges (
-         id, from_chunk_label, to_chunk_label, type, status, discipline,
-         branch_id, origin_branch_id, superseded_by_edge_id,
-         created_by_stakeholder_id, updated_by_stakeholder_id,
-         created_at, updated_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-       RETURNING *`,
-      [
-        edge.id,
-        edge.fromChunkLabel,
-        edge.toChunkLabel,
-        edge.type,
-        edge.status,
-        edge.discipline,
-        edge.branchId ?? null,
-        edge.originBranchId ?? null,
-        edge.supersededByEdgeId ?? null,
-        edge.createdByStakeholderId,
-        edge.updatedByStakeholderId,
-        edge.createdAt,
-        edge.updatedAt,
-      ],
-    );
-
-    const row = result.rows[0];
-    if (row === undefined) {
-      throw new Error('EdgeRepository.create: INSERT ... RETURNING * produced no row');
+    if (edge.branchId === undefined) {
+      return insertEdge(this.pool, edge);
     }
 
-    return toEdge(row);
+    const client = await this.pool.connect();
+    let transactionOpen = false;
+
+    try {
+      await client.query('BEGIN');
+      transactionOpen = true;
+
+      await assertDraftBranchLock(client, edge.branchId);
+      await client.query('UPDATE branches SET updated_at = clock_timestamp() WHERE id = $1', [
+        edge.branchId,
+      ]);
+
+      const created = await insertEdge(client, edge);
+
+      await client.query('COMMIT');
+      transactionOpen = false;
+      return created;
+    } catch (error) {
+      if (transactionOpen) {
+        await client.query('ROLLBACK');
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   /**
