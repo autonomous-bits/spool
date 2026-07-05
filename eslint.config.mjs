@@ -5,7 +5,7 @@ import tseslint from 'typescript-eslint';
 import eslintConfigPrettier from 'eslint-config-prettier/flat';
 
 export default defineConfig({
-  ignores: ['dist/**', 'node_modules/**'],
+  ignores: ['**/dist/**', '**/node_modules/**', '.github/extensions/**'],
   files: ['**/*.{js,mjs,cjs,ts,mts,cts}'],
   extends: [
     js.configs.recommended,
@@ -15,7 +15,11 @@ export default defineConfig({
   ],
   languageOptions: {
     parserOptions: {
-      projectService: true,
+      project: [
+        './tsconfig.eslint.json',
+        './apps/store/tsconfig.eslint.json',
+        './apps/mcp/tsconfig.eslint.json',
+      ],
       tsconfigRootDir: import.meta.dirname,
     },
   },
