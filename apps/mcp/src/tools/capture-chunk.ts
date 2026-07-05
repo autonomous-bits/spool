@@ -13,6 +13,7 @@ export interface CaptureChunkInput {
   chunkType: string;
   contextKind: string;
   stakeholderId: string;
+  branchId?: string;
 }
 
 /** Chunk as returned by the store's `POST /chunks` on success. */
@@ -28,6 +29,8 @@ export interface CaptureChunkResult {
   updatedByStakeholderId: string;
   createdAt: string;
   updatedAt: string;
+  branchId: string | null;
+  originBranchId: string | null;
 }
 
 /** Raised when the store rejects the request with a 4xx; carries the store's own message. */
@@ -50,10 +53,24 @@ function requireStringField(record: Record<string, unknown>, field: string): str
 }
 
 /**
+ * Validates the optional `branchId` field, if present. When present it must be a non-empty
+ * string; when absent it is omitted entirely (not set to `undefined`) so callers preserve
+ * G01's branchless-path behavior unchanged.
+ */
+function optionalStringField(record: Record<string, unknown>, field: string): string | undefined {
+  if (!(field in record) || record[field] === undefined) {
+    return undefined;
+  }
+  return requireStringField(record, field);
+}
+
+/**
  * Validates that an untrusted tool-call body has the expected shape before it is forwarded to
  * the store. Vocabulary values (discipline/chunkType/contextKind) are intentionally not
  * re-validated here: the store is the authoritative source for those invariants, and this tool
  * must surface the store's own validation errors rather than duplicate or pre-empt them.
+ * `branchId` is likewise forwarded as-is: branch existence/discipline/status invariants are the
+ * store's responsibility (Meridian IDEA-52/IDEA-34/G02 SG3).
  */
 export function parseCaptureChunkInput(body: unknown): CaptureChunkInput {
   if (typeof body !== 'object' || body === null) {
@@ -62,6 +79,8 @@ export function parseCaptureChunkInput(body: unknown): CaptureChunkInput {
 
   const record = body as Record<string, unknown>;
 
+  const branchId = optionalStringField(record, 'branchId');
+
   return {
     label: requireStringField(record, 'label'),
     content: requireStringField(record, 'content'),
@@ -69,6 +88,7 @@ export function parseCaptureChunkInput(body: unknown): CaptureChunkInput {
     chunkType: requireStringField(record, 'chunkType'),
     contextKind: requireStringField(record, 'contextKind'),
     stakeholderId: requireStringField(record, 'stakeholderId'),
+    ...(branchId !== undefined ? { branchId } : {}),
   } satisfies CaptureChunkInput;
 }
 

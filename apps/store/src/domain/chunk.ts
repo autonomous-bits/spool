@@ -22,6 +22,8 @@ export interface ChunkProps {
   createdByStakeholderId: string;
   updatedByStakeholderId?: string;
   status?: ChunkStatus;
+  branchId?: string;
+  originBranchId?: string;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -34,10 +36,12 @@ function requireNonBlank(value: string, fieldName: string): string {
 }
 
 /**
- * Chunk entity: an atomic idea chunk captured directly as a mainline draft (branch_id NULL,
- * status 'draft'), per Meridian IDEA-78. Enforces the capture invariants ratified for G01:
- * non-blank label/content, a valid closed vocabulary for discipline/chunkType/contextKind, and a
- * required authoring stakeholder (Meridian IDEA-11: every chunk is attributed to a stakeholder).
+ * Chunk entity: an atomic idea chunk, captured either as a branchless mainline draft
+ * (branchId/originBranchId undefined, per Meridian IDEA-78) or attached to an existing draft
+ * branch (branchId/originBranchId both set to that branch's id, per G02/IDEA-40). Enforces the
+ * capture invariants ratified for G01: non-blank label/content, a valid closed vocabulary for
+ * discipline/chunkType/contextKind, and a required authoring stakeholder (Meridian IDEA-11: every
+ * chunk is attributed to a stakeholder).
  */
 export class Chunk {
   readonly id: string;
@@ -49,6 +53,8 @@ export class Chunk {
   readonly status: ChunkStatus;
   readonly createdByStakeholderId: string;
   readonly updatedByStakeholderId: string;
+  readonly branchId: string | undefined;
+  readonly originBranchId: string | undefined;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 
@@ -67,6 +73,8 @@ export class Chunk {
     this.createdByStakeholderId = props.createdByStakeholderId;
     this.updatedByStakeholderId = props.updatedByStakeholderId ?? props.createdByStakeholderId;
     this.status = props.status ?? 'draft';
+    this.branchId = props.branchId;
+    this.originBranchId = props.originBranchId;
     this.createdAt = props.createdAt ?? new Date();
     this.updatedAt = props.updatedAt ?? this.createdAt;
   }

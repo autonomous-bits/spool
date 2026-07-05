@@ -7,7 +7,7 @@ import type { PoolConfig } from 'pg';
  * `postgres` service published on localhost:5433.
  */
 export function loadDatabaseConfig(env: NodeJS.ProcessEnv = process.env): PoolConfig {
-  const host = env.STORE_DB_HOST ?? 'localhost';
+  const host = env.STORE_DB_HOST ?? '127.0.0.1';
   const port = Number.parseInt(env.STORE_DB_PORT ?? '5433', 10);
   const user = env.STORE_DB_USER ?? 'spool';
   const password = env.STORE_DB_PASSWORD ?? 'spool_dev';

@@ -60,4 +60,28 @@ describe('parseCreateChunkRequest', () => {
       BadRequestException,
     );
   });
+
+  it('parses an optional branchId when present', () => {
+    const parsed = parseCreateChunkRequest(
+      validBody({ branchId: '00000000-0000-0000-0000-0000000000b1' }),
+    );
+
+    expect(parsed.branchId).toBe('00000000-0000-0000-0000-0000000000b1');
+  });
+
+  it('omits branchId when absent', () => {
+    const parsed = parseCreateChunkRequest(validBody());
+
+    expect(parsed.branchId).toBeUndefined();
+  });
+
+  it.each(['', '   '])('rejects a blank branchId %j', (branchId) => {
+    expect(() => parseCreateChunkRequest(validBody({ branchId }))).toThrow(BadRequestException);
+  });
+
+  it('rejects a non-string branchId', () => {
+    expect(() => parseCreateChunkRequest(validBody({ branchId: 42 }))).toThrow(
+      BadRequestException,
+    );
+  });
 });

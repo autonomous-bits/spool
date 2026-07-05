@@ -26,6 +26,20 @@ describe('Chunk', () => {
     expect(chunk.createdByStakeholderId).toBe('00000000-0000-0000-0000-000000000001');
     expect(chunk.updatedByStakeholderId).toBe('00000000-0000-0000-0000-000000000001');
     expect(chunk.id).toBeTruthy();
+    expect(chunk.branchId).toBeUndefined();
+    expect(chunk.originBranchId).toBeUndefined();
+  });
+
+  it('constructs a branch-scoped chunk with branchId and originBranchId set', () => {
+    const chunk = new Chunk(
+      validProps({
+        branchId: '00000000-0000-0000-0000-0000000000b1',
+        originBranchId: '00000000-0000-0000-0000-0000000000b1',
+      }),
+    );
+
+    expect(chunk.branchId).toBe('00000000-0000-0000-0000-0000000000b1');
+    expect(chunk.originBranchId).toBe('00000000-0000-0000-0000-0000000000b1');
   });
 
   it.each(['', '   '])('rejects blank label %j', (label) => {

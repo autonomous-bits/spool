@@ -19,6 +19,8 @@ export interface ChunkResponse {
   status: ChunkStatus;
   createdByStakeholderId: string;
   updatedByStakeholderId: string;
+  branchId: string | null;
+  originBranchId: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -34,6 +36,8 @@ export function toChunkResponse(chunk: Chunk): ChunkResponse {
     status: chunk.status,
     createdByStakeholderId: chunk.createdByStakeholderId,
     updatedByStakeholderId: chunk.updatedByStakeholderId,
+    branchId: chunk.branchId ?? null,
+    originBranchId: chunk.originBranchId ?? null,
     createdAt: chunk.createdAt,
     updatedAt: chunk.updatedAt,
   } satisfies ChunkResponse;

@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { captureChunk, CaptureChunkValidationError, parseCaptureChunkInput } from './tools/capture-chunk.js';
+import { createBranch, CreateBranchValidationError, parseCreateBranchInput } from './tools/create-branch.js';
 
 interface McpHealthResponse {
   status: 'ok';
@@ -18,12 +19,24 @@ export function createMcpHealthResponse(
 }
 
 const CAPTURE_CHUNK_ROUTE = '/tools/capture-chunk';
+const CREATE_BRANCH_ROUTE = '/tools/create-branch';
 // Bounds the in-memory body buffer for a single tool call (node-memory-management: avoid
 // unbounded buffering of untrusted input).
 const MAX_BODY_BYTES = 1_000_000;
 
 function logDiagnostic(level: 'info' | 'error', msg: string, extra?: Record<string, unknown>): void {
   process.stderr.write(`${JSON.stringify({ level, msg, ...extra })}\n`);
+}
+
+/** Generic 4xx error raised for malformed/oversized request bodies, before tool-specific parsing. */
+class RequestBodyError extends Error {
+  constructor(
+    message: string,
+    public readonly statusCode: number,
+  ) {
+    super(message);
+    this.name = 'RequestBodyError';
+  }
 }
 
 async function readRequestBody(request: IncomingMessage): Promise<string> {
@@ -34,7 +47,7 @@ async function readRequestBody(request: IncomingMessage): Promise<string> {
     const buffer = chunk as Buffer;
     totalBytes += buffer.length;
     if (totalBytes > MAX_BODY_BYTES) {
-      throw new CaptureChunkValidationError('Request body too large', 413);
+      throw new RequestBodyError('Request body too large', 413);
     }
     chunks.push(buffer);
   }
@@ -65,7 +78,7 @@ async function handleCaptureChunk(
     const chunk = await captureChunk(input, harnessUrl);
     sendJson(response, 201, chunk);
   } catch (error) {
-    if (error instanceof CaptureChunkValidationError) {
+    if (error instanceof RequestBodyError || error instanceof CaptureChunkValidationError) {
       sendJson(response, error.statusCode, { message: error.message });
       return;
     }
@@ -76,12 +89,46 @@ async function handleCaptureChunk(
   }
 }
 
+async function handleCreateBranch(
+  request: IncomingMessage,
+  response: ServerResponse,
+  harnessUrl: string,
+): Promise<void> {
+  try {
+    const raw = await readRequestBody(request);
+    let parsedBody: unknown;
+    try {
+      parsedBody = raw.length === 0 ? undefined : JSON.parse(raw);
+    } catch {
+      throw new CreateBranchValidationError('Request body must be valid JSON', 400);
+    }
+
+    const input = parseCreateBranchInput(parsedBody);
+    const branch = await createBranch(input, harnessUrl);
+    sendJson(response, 201, branch);
+  } catch (error) {
+    if (error instanceof RequestBodyError || error instanceof CreateBranchValidationError) {
+      sendJson(response, error.statusCode, { message: error.message });
+      return;
+    }
+
+    const reason = error instanceof Error ? error.message : 'Unknown error';
+    logDiagnostic('error', 'create-branch tool call failed', { reason });
+    sendJson(response, 502, { message: 'Failed to reach the store' });
+  }
+}
+
 export function createMcpHttpServer(
   harnessUrl = process.env.HARNESS_URL ?? 'http://localhost:3000',
 ): Server {
   return createServer((request: IncomingMessage, response: ServerResponse) => {
     if (request.method === 'POST' && request.url === CAPTURE_CHUNK_ROUTE) {
       void handleCaptureChunk(request, response, harnessUrl);
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === CREATE_BRANCH_ROUTE) {
+      void handleCreateBranch(request, response, harnessUrl);
       return;
     }
 
