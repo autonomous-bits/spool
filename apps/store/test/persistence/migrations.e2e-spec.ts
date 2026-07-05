@@ -24,7 +24,7 @@ describe('store migrations (containerized Postgres)', () => {
     const columns = result.rows.map((row) => row.column_name).sort();
 
     expect(columns).toEqual(
-      ['created_at', 'discipline', 'email', 'id', 'name', 'role'].sort(),
+      ['created_at', 'discipline', 'email', 'github_login', 'id', 'name', 'role'].sort(),
     );
   });
 
@@ -98,7 +98,7 @@ describe('store migrations (containerized Postgres)', () => {
     const migrationRows = await pool.query<{ count: string }>(
       'SELECT COUNT(*)::text AS count FROM schema_migrations',
     );
-    expect(migrationRows.rows[0]?.count).toBe('4');
+    expect(migrationRows.rows[0]?.count).toBe('6');
   });
 
   it('creates the edges table with the expected columns', async () => {

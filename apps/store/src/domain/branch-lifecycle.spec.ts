@@ -1,0 +1,99 @@
+import { describe, expect, it } from 'vitest';
+import { Branch, type BranchProps } from './branch.js';
+import {
+  BranchLifecycleError,
+  assertDraftStatus,
+  assertIsHumanActor,
+  assertSubmitDiscipline,
+} from './branch-lifecycle.js';
+import type {
+  DelegatedActorContext,
+  HumanActorContext,
+} from './types/actor/actor-context.js';
+
+function validBranchProps(overrides: Partial<BranchProps> = {}): BranchProps {
+  return {
+    name: 'feature/branch-submission',
+    discipline: 'product',
+    createdByStakeholderId: '00000000-0000-0000-0000-000000000001',
+    ...overrides,
+  };
+}
+
+function createBranch(overrides: Partial<BranchProps> = {}): Branch {
+  return new Branch(validBranchProps(overrides));
+}
+
+function createHumanActor(
+  overrides: Partial<HumanActorContext> = {},
+): HumanActorContext {
+  return {
+    kind: 'human',
+    stakeholderId: '00000000-0000-0000-0000-000000000001',
+    discipline: 'product',
+    ...overrides,
+  };
+}
+
+function createDelegatedActor(
+  overrides: Partial<DelegatedActorContext> = {},
+): DelegatedActorContext {
+  return {
+    kind: 'delegated',
+    stakeholderId: '00000000-0000-0000-0000-000000000001',
+    discipline: 'product',
+    ...overrides,
+  };
+}
+
+describe('branch lifecycle assertions', () => {
+  describe('assertIsHumanActor', () => {
+    it('accepts a human actor', () => {
+      const actor = createHumanActor();
+
+      expect(() => assertIsHumanActor(actor)).not.toThrow();
+    });
+
+    it('throws when the actor is delegated', () => {
+      const actor = createDelegatedActor();
+
+      expect(() => assertIsHumanActor(actor)).toThrow(BranchLifecycleError);
+      expect(() => assertIsHumanActor(actor)).toThrow('expected human actor');
+    });
+  });
+
+  describe('assertSubmitDiscipline', () => {
+    it('accepts an actor whose discipline matches the branch', () => {
+      const actor = createHumanActor({ discipline: 'product' });
+      const branch = createBranch({ discipline: 'product' });
+
+      expect(() => assertSubmitDiscipline(actor, branch)).not.toThrow();
+    });
+
+    it('throws when the actor discipline does not match the branch', () => {
+      const actor = createHumanActor({ discipline: 'engineering' });
+      const branch = createBranch({ discipline: 'product' });
+
+      expect(() => assertSubmitDiscipline(actor, branch)).toThrow(BranchLifecycleError);
+      expect(() => assertSubmitDiscipline(actor, branch)).toThrow('does not match branch discipline');
+    });
+  });
+
+  describe('assertDraftStatus', () => {
+    it('accepts a draft branch', () => {
+      const branch = createBranch({ status: 'draft' });
+
+      expect(() => assertDraftStatus(branch)).not.toThrow();
+    });
+
+    it.each(['submitted', 'verified', 'merged'] as const)(
+      'throws when the branch status is %s',
+      (status) => {
+        const branch = createBranch({ status });
+
+        expect(() => assertDraftStatus(branch)).toThrow(BranchLifecycleError);
+        expect(() => assertDraftStatus(branch)).toThrow(`expected draft branch, received ${status}`);
+      },
+    );
+  });
+});

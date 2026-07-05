@@ -11,6 +11,8 @@ services:
       STORE_DB_USER: spool
       STORE_DB_PASSWORD: spool_dev
       STORE_DB_NAME: spool
+      GITHUB_OAUTH_TOKEN_URL: http://github-oauth-stub:4001/login/oauth/access_token
+      GITHUB_USER_API_URL: http://github-oauth-stub:4001/user
     ports:
       - 3000:3000
       - 9229:9229
@@ -18,6 +20,18 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      github-oauth-stub:
+        condition: service_started
+
+  github-oauth-stub:
+    image: spool-github-oauth-stub
+    build:
+      context: apps/store/docker/github-oauth-stub
+    environment:
+      PORT: "4001"
+      OAUTH_STUB_GITHUB_LOGIN: spool-e2e-oauth-fixture
+    ports:
+      - 4001:4001
 
   postgres:
     image: postgres:16-alpine

@@ -1,3 +1,5 @@
+import { setTimeout as delay } from 'node:timers/promises';
+import { ConflictException } from '@nestjs/common';
 import type { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Branch } from '../../src/domain/branch.js';
@@ -134,6 +136,95 @@ describe('EdgeRepository (containerized Postgres)', () => {
         }),
       ),
     ).rejects.toThrow();
+  });
+
+  it('rejects a branch-scoped create when the branch has already been submitted', async () => {
+    const branch = await branchRepository.create(buildBranch());
+    const fromChunk = await chunkRepository.create(
+      buildChunk({
+        label: `from-${Math.random().toString(36).slice(2, 10)}`,
+        branchId: branch.id,
+        originBranchId: branch.id,
+      }),
+    );
+    const toChunk = await chunkRepository.create(
+      buildChunk({
+        label: `to-${Math.random().toString(36).slice(2, 10)}`,
+        branchId: branch.id,
+        originBranchId: branch.id,
+      }),
+    );
+    await branchRepository.submit(branch.id);
+
+    await expect(
+      edgeRepository.create(
+        buildEdge({
+          fromChunkLabel: fromChunk.label,
+          toChunkLabel: toChunk.label,
+          branchId: branch.id,
+          originBranchId: branch.id,
+        }),
+      ),
+    ).rejects.toThrowError(new ConflictException(`Branch ${branch.id} is not in draft status`));
+  });
+
+  it('serializes a racing submit and branch-scoped create so the create wins and submit loses', async () => {
+    const branch = await branchRepository.create(buildBranch());
+    const fromChunk = await chunkRepository.create(
+      buildChunk({
+        label: `from-${Math.random().toString(36).slice(2, 10)}`,
+        branchId: branch.id,
+        originBranchId: branch.id,
+      }),
+    );
+    const toChunk = await chunkRepository.create(
+      buildChunk({
+        label: `to-${Math.random().toString(36).slice(2, 10)}`,
+        branchId: branch.id,
+        originBranchId: branch.id,
+      }),
+    );
+    const edge = buildEdge({
+      fromChunkLabel: fromChunk.label,
+      toChunkLabel: toChunk.label,
+      branchId: branch.id,
+      originBranchId: branch.id,
+    });
+    const lockClient = await pool.connect();
+    let transactionOpen = false;
+
+    try {
+      await lockClient.query('BEGIN');
+      transactionOpen = true;
+      await lockClient.query('SELECT id FROM branches WHERE id = $1 FOR UPDATE', [branch.id]);
+
+      const createPromise = edgeRepository.create(edge);
+      await delay(25);
+      const submitPromise = branchRepository.submit(branch.id);
+
+      await delay(50);
+      await lockClient.query('COMMIT');
+      transactionOpen = false;
+
+      const [submitResult, createResult] = await Promise.allSettled([submitPromise, createPromise]);
+      expect(createResult.status).toBe('fulfilled');
+      expect(submitResult).toEqual({ status: 'fulfilled', value: undefined });
+
+      const branchAfterRace = await branchRepository.findById(branch.id);
+      expect(branchAfterRace).toBeDefined();
+
+      const edgeRow = await pool.query<{ exists: boolean }>(
+        'SELECT EXISTS(SELECT 1 FROM edges WHERE id = $1) AS exists',
+        [edge.id],
+      );
+      expect(branchAfterRace?.status).toBe('draft');
+      expect(edgeRow.rows[0]?.exists).toBe(true);
+    } finally {
+      if (transactionOpen) {
+        await lockClient.query('ROLLBACK');
+      }
+      lockClient.release();
+    }
   });
 
   describe('ChunkRepository.findByLabel', () => {

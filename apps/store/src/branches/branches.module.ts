@@ -1,10 +1,11 @@
 import { Module } from '@nestjs/common';
+import { AuthModule } from '../auth/auth.module.js';
 import { PersistenceModule } from '../persistence/persistence.module.js';
 import { BranchesController } from './branches.controller.js';
 import { BranchesService } from './branches.service.js';
 
 @Module({
-  imports: [PersistenceModule],
+  imports: [PersistenceModule, AuthModule],
   controllers: [BranchesController],
   providers: [BranchesService],
 })
