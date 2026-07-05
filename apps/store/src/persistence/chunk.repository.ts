@@ -99,4 +99,27 @@ export class ChunkRepository {
     const row = result.rows[0];
     return row === undefined ? undefined : toChunk(row);
   }
+
+  /**
+   * Looks up a chunk by its logical label, scoped to a single branch (or to the branchless-draft
+   * scope when `branchId` is omitted). This is a narrow existence-check for edge-endpoint
+   * validation (Meridian IDEA-36/IDEA-37); it is not a generic branch-overlay/UNION read, which
+   * remains out of scope until a future goal. Returns `undefined` as an explicit not-found result
+   * rather than throwing.
+   */
+  async findByLabel(label: string, branchId: string | undefined): Promise<Chunk | undefined> {
+    const result: QueryResult<ChunkRow> =
+      branchId === undefined
+        ? await this.pool.query<ChunkRow>(
+            'SELECT * FROM chunks WHERE label = $1 AND branch_id IS NULL',
+            [label],
+          )
+        : await this.pool.query<ChunkRow>(
+            'SELECT * FROM chunks WHERE label = $1 AND branch_id = $2',
+            [label, branchId],
+          );
+
+    const row = result.rows[0];
+    return row === undefined ? undefined : toChunk(row);
+  }
 }

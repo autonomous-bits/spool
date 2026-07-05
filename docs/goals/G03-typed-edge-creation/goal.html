@@ -26,7 +26,7 @@
 
 <h1>G03 — Typed Edge Creation Between Chunks</h1>
 <p>
-  Status: <span id="goal-status-badge" class="badge badge-open">open</span> &middot;
+  Status: <span id="goal-status-badge" class="badge badge-done">done</span> &middot;
   Size: <strong>4/5</strong> — touches every layer (API, domain, persistence, MCP), introduces one new domain
   concept (<code>Edge</code> + its 8-value type vocabulary), and a new schema/migration, but scopes out
   generic branch-overlay graph reads and the supersede/deactivate lifecycle to future goals.
@@ -97,7 +97,7 @@ flowchart TD
 <h2>Sub-goal detail</h2>
 
 <details id="d-SG1">
-<summary>SG1 — domain: Edge entity + EdgeType/EdgeStatus vocab <span class="badge badge-open">open</span></summary>
+<summary>SG1 — domain: Edge entity + EdgeType/EdgeStatus vocab <span class="badge badge-done">done</span></summary>
 <p><strong>Depends on:</strong> none</p>
 <p><strong>Objective:</strong> Model <code>Edge</code> as a validated domain entity with its closed type/status vocabularies, per IDEA-36/IDEA-37/IDEA-38.</p>
 <ul>
@@ -112,7 +112,7 @@ flowchart TD
 </details>
 
 <details id="d-SG2">
-<summary>SG2 — persistence/infra: edges schema + EdgeRepository + label lookup <span class="badge badge-open">open</span></summary>
+<summary>SG2 — persistence/infra: edges schema + EdgeRepository + label lookup <span class="badge badge-done">done</span></summary>
 <p><strong>Depends on:</strong> SG1</p>
 <p><strong>Objective:</strong> Add the authoritative <code>edges</code> table and the minimal persistence needed to create and read edges, plus a narrow chunk-label-existence check.</p>
 <ul>
@@ -126,7 +126,7 @@ flowchart TD
 </details>
 
 <details id="d-SG3">
-<summary>SG3 — API: Edges controller/service <span class="badge badge-open">open</span></summary>
+<summary>SG3 — API: Edges controller/service <span class="badge badge-done">done</span></summary>
 <p><strong>Depends on:</strong> SG2</p>
 <p><strong>Objective:</strong> Expose <code>POST /edges</code> and <code>GET /edges/:id</code>, enforcing branch-local endpoint-existence and the single-active-edge invariant.</p>
 <ul>
@@ -142,7 +142,7 @@ flowchart TD
 </details>
 
 <details id="d-SG4">
-<summary>SG4 — MCP exposure <span class="badge badge-open">open</span></summary>
+<summary>SG4 — MCP exposure <span class="badge badge-done">done</span></summary>
 <p><strong>Depends on:</strong> SG3</p>
 <p><strong>Objective:</strong> Let an ideation assistant create a typed edge between two existing chunks, per IDEA-9.</p>
 <ul>
@@ -154,7 +154,7 @@ flowchart TD
 </details>
 
 <details id="d-SG5">
-<summary>SG5 — Docker end-to-end verification <span class="badge badge-open">open</span></summary>
+<summary>SG5 — Docker end-to-end verification <span class="badge badge-done">done</span></summary>
 <p><strong>Depends on:</strong> SG4</p>
 <p><strong>Objective:</strong> Prove the full four-layer slice (MCP → API → domain → persistence) works against the real containerized system, not just in-process tests.</p>
 <ul>
@@ -182,7 +182,7 @@ flowchart TD
   "goalId": "G03",
   "slug": "typed-edge-creation",
   "title": "Typed Edge Creation Between Chunks",
-  "status": "open",
+  "status": "done",
   "size": 4,
   "sizeJustification": "Touches every layer (API, domain, persistence, MCP) and introduces one new domain concept (Edge + 8-value EdgeType vocab) plus a new schema/migration, but scopes out generic branch-overlay graph reads and the supersede/deactivate lifecycle to future goals.",
   "meridianChunks": [
@@ -219,7 +219,7 @@ flowchart TD
         "Unit tests cover valid construction and each rejection case."
       ],
       "verification": "pnpm test:store",
-      "status": "open"
+      "status": "done"
     },
     {
       "id": "SG2",
@@ -234,7 +234,7 @@ flowchart TD
         "Integration tests against containerized Postgres cover migration apply, create/findById round-trip, unique-index rejection of a duplicate active edge, and findByLabel branch-scoped/branchless/not-found cases."
       ],
       "verification": "pnpm test:store",
-      "status": "open"
+      "status": "done"
     },
     {
       "id": "SG3",
@@ -251,7 +251,7 @@ flowchart TD
         "e2e tests cover successful branch-scoped creation, successful branchless creation, and each 400/404/409 case."
       ],
       "verification": "pnpm test:store",
-      "status": "open"
+      "status": "done"
     },
     {
       "id": "SG4",
@@ -265,7 +265,7 @@ flowchart TD
         "Unit tests cover valid parsing, missing-field rejection, and mocked success/error forwarding."
       ],
       "verification": "pnpm test:mcp",
-      "status": "open"
+      "status": "done"
     },
     {
       "id": "SG5",
@@ -280,7 +280,7 @@ flowchart TD
         "With spoolstore running via compose, a separately-started apps/mcp process (pointed at that store via HARNESS_URL) runs the create-edge MCP tool to create an edge between two chunks created via the capture-chunk MCP tool, confirmed via HTTP readback."
       ],
       "verification": "manual/scripted HTTP exercise (curl or equivalent) plus MCP tool invocation against the running spoolstore container (not satisfied by unit/in-process tests alone)",
-      "status": "open"
+      "status": "done"
     }
   ]
 }

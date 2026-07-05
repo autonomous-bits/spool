@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { captureChunk, CaptureChunkValidationError, parseCaptureChunkInput } from './tools/capture-chunk.js';
 import { createBranch, CreateBranchValidationError, parseCreateBranchInput } from './tools/create-branch.js';
+import { createEdge, CreateEdgeValidationError, parseCreateEdgeInput } from './tools/create-edge.js';
 
 interface McpHealthResponse {
   status: 'ok';
@@ -20,6 +21,7 @@ export function createMcpHealthResponse(
 
 const CAPTURE_CHUNK_ROUTE = '/tools/capture-chunk';
 const CREATE_BRANCH_ROUTE = '/tools/create-branch';
+const CREATE_EDGE_ROUTE = '/tools/create-edge';
 // Bounds the in-memory body buffer for a single tool call (node-memory-management: avoid
 // unbounded buffering of untrusted input).
 const MAX_BODY_BYTES = 1_000_000;
@@ -118,6 +120,35 @@ async function handleCreateBranch(
   }
 }
 
+async function handleCreateEdge(
+  request: IncomingMessage,
+  response: ServerResponse,
+  harnessUrl: string,
+): Promise<void> {
+  try {
+    const raw = await readRequestBody(request);
+    let parsedBody: unknown;
+    try {
+      parsedBody = raw.length === 0 ? undefined : JSON.parse(raw);
+    } catch {
+      throw new CreateEdgeValidationError('Request body must be valid JSON', 400);
+    }
+
+    const input = parseCreateEdgeInput(parsedBody);
+    const edge = await createEdge(input, harnessUrl);
+    sendJson(response, 201, edge);
+  } catch (error) {
+    if (error instanceof RequestBodyError || error instanceof CreateEdgeValidationError) {
+      sendJson(response, error.statusCode, { message: error.message });
+      return;
+    }
+
+    const reason = error instanceof Error ? error.message : 'Unknown error';
+    logDiagnostic('error', 'create-edge tool call failed', { reason });
+    sendJson(response, 502, { message: 'Failed to reach the store' });
+  }
+}
+
 export function createMcpHttpServer(
   harnessUrl = process.env.HARNESS_URL ?? 'http://localhost:3000',
 ): Server {
@@ -129,6 +160,11 @@ export function createMcpHttpServer(
 
     if (request.method === 'POST' && request.url === CREATE_BRANCH_ROUTE) {
       void handleCreateBranch(request, response, harnessUrl);
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === CREATE_EDGE_ROUTE) {
+      void handleCreateEdge(request, response, harnessUrl);
       return;
     }
 

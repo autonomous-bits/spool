@@ -98,6 +98,54 @@ describe('store migrations (containerized Postgres)', () => {
     const migrationRows = await pool.query<{ count: string }>(
       'SELECT COUNT(*)::text AS count FROM schema_migrations',
     );
-    expect(migrationRows.rows[0]?.count).toBe('3');
+    expect(migrationRows.rows[0]?.count).toBe('4');
+  });
+
+  it('creates the edges table with the expected columns', async () => {
+    const result = await pool.query<{ column_name: string }>(
+      `SELECT column_name FROM information_schema.columns WHERE table_name = 'edges'`,
+    );
+    const columns = result.rows.map((row) => row.column_name).sort();
+
+    expect(columns).toEqual(
+      [
+        'branch_id',
+        'created_at',
+        'created_by_stakeholder_id',
+        'discipline',
+        'from_chunk_label',
+        'id',
+        'origin_branch_id',
+        'status',
+        'superseded_by_edge_id',
+        'to_chunk_label',
+        'type',
+        'updated_at',
+        'updated_by_stakeholder_id',
+      ].sort(),
+    );
+  });
+
+  it('creates the idx_edges_branch_lookup, idx_edges_mainline, and idx_edges_branch_active indexes per the authoritative schema', async () => {
+    const result = await pool.query<{ indexname: string; indexdef: string }>(
+      `SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'edges'`,
+    );
+    const byName = new Map(result.rows.map((row) => [row.indexname, row.indexdef]));
+
+    expect(byName.has('idx_edges_branch_lookup')).toBe(true);
+    expect(byName.get('idx_edges_branch_lookup')).toContain(
+      '(branch_id, from_chunk_label, to_chunk_label)',
+    );
+
+    expect(byName.has('idx_edges_mainline')).toBe(true);
+    const mainlineDef = byName.get('idx_edges_mainline') ?? '';
+    expect(mainlineDef).toContain('UNIQUE INDEX idx_edges_mainline');
+    expect(mainlineDef).toContain('branch_id IS NULL');
+    expect(mainlineDef).toContain("(status)::text = 'active'::text");
+
+    expect(byName.has('idx_edges_branch_active')).toBe(true);
+    const branchActiveDef = byName.get('idx_edges_branch_active') ?? '';
+    expect(branchActiveDef).toContain('UNIQUE INDEX idx_edges_branch_active');
+    expect(branchActiveDef).toContain("(status)::text = 'active'::text");
   });
 });

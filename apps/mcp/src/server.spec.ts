@@ -215,4 +215,91 @@ describe('MCP HTTP server scaffold', () => {
       expect(fetchMock).not.toHaveBeenCalled();
     });
   });
+
+  describe('POST /tools/create-edge', () => {
+    const originalFetch = fetch;
+    const createEdgeInput = {
+      fromChunkLabel: 'IDEA-1',
+      toChunkLabel: 'IDEA-2',
+      type: 'refines',
+      discipline: 'product',
+      stakeholderId: 'stakeholder-1',
+    };
+
+    async function startServer(): Promise<number> {
+      server = createMcpHttpServer('http://harness.test');
+      await new Promise<void>((resolve) => server?.listen(0, resolve));
+      return (server.address() as AddressInfo).port;
+    }
+
+    async function postCreateEdge(port: number, body: unknown): Promise<Response> {
+      return originalFetch(`http://127.0.0.1:${String(port)}/tools/create-edge`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    }
+
+    it('forwards to HARNESS_URL and returns the created edge with its id', async () => {
+      const createdEdge = { id: 'edge-1', ...createEdgeInput, status: 'active', supersededByEdgeId: null };
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: string, init?: RequestInit) => {
+          if (url === 'http://harness.test/edges') {
+            return new Response(JSON.stringify(createdEdge), {
+              status: 201,
+              headers: { 'content-type': 'application/json' },
+            });
+          }
+          return originalFetch(url, init);
+        }),
+      );
+
+      const port = await startServer();
+      const response = await postCreateEdge(port, createEdgeInput);
+
+      expect(response.status).toBe(201);
+      await expect(response.json()).resolves.toEqual(createdEdge);
+    });
+
+    it('surfaces the store 409 conflict error without swallowing it', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: string, init?: RequestInit) => {
+          if (url === 'http://harness.test/edges') {
+            return new Response(
+              JSON.stringify({
+                statusCode: 409,
+                message: 'An active edge already exists for this from/to/type/branch scope',
+              }),
+              { status: 409, headers: { 'content-type': 'application/json' } },
+            );
+          }
+          return originalFetch(url, init);
+        }),
+      );
+
+      const port = await startServer();
+      const response = await postCreateEdge(port, createEdgeInput);
+
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toEqual({
+        message: 'An active edge already exists for this from/to/type/branch scope',
+      });
+    });
+
+    it('rejects a malformed body with 400 before contacting the store', async () => {
+      const fetchMock = vi.fn(originalFetch);
+      vi.stubGlobal('fetch', fetchMock);
+
+      const port = await startServer();
+      const response = await postCreateEdge(port, { toChunkLabel: 'IDEA-2', discipline: 'product' });
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({
+        message: 'fromChunkLabel must be a non-empty string',
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+  });
 });
