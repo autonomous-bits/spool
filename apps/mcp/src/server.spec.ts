@@ -399,4 +399,180 @@ describe('MCP HTTP server scaffold', () => {
       expect(fetchMock).not.toHaveBeenCalled();
     });
   });
+
+  describe('POST /tools/upload-artifact', () => {
+    const originalFetch = fetch;
+    const uploadArtifactInput = {
+      content: Buffer.from('hello world').toString('base64'),
+      mimeType: 'text/plain',
+      stakeholderId: 'stakeholder-1',
+    };
+
+    async function startServer(): Promise<number> {
+      server = createMcpHttpServer('http://harness.test');
+      await new Promise<void>((resolve) => server?.listen(0, resolve));
+      return (server.address() as AddressInfo).port;
+    }
+
+    async function postUploadArtifact(port: number, body: unknown): Promise<Response> {
+      return originalFetch(`http://127.0.0.1:${String(port)}/tools/upload-artifact`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    }
+
+    it('forwards to HARNESS_URL and returns the created artifact with its id', async () => {
+      const createdArtifact = {
+        id: 'artifact-1',
+        uri: 'file:///artifacts/artifact-1',
+        mimeType: uploadArtifactInput.mimeType,
+        createdByStakeholderId: uploadArtifactInput.stakeholderId,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      };
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: string, init?: RequestInit) => {
+          if (url === 'http://harness.test/artifacts') {
+            return new Response(JSON.stringify(createdArtifact), {
+              status: 201,
+              headers: { 'content-type': 'application/json' },
+            });
+          }
+          return originalFetch(url, init);
+        }),
+      );
+
+      const port = await startServer();
+      const response = await postUploadArtifact(port, uploadArtifactInput);
+
+      expect(response.status).toBe(201);
+      await expect(response.json()).resolves.toEqual(createdArtifact);
+    });
+
+    it('rejects decoded content exceeding the max artifact size with a clear 400, before contacting the store', async () => {
+      const fetchMock = vi.fn(originalFetch);
+      vi.stubGlobal('fetch', fetchMock);
+
+      const oversized = Buffer.alloc(700_001, 'a').toString('base64');
+      const port = await startServer();
+      const response = await postUploadArtifact(port, { ...uploadArtifactInput, content: oversized });
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({
+        message: expect.stringContaining('exceeds the maximum artifact size'),
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('rejects a malformed body with 400 before contacting the store', async () => {
+      const fetchMock = vi.fn(originalFetch);
+      vi.stubGlobal('fetch', fetchMock);
+
+      const port = await startServer();
+      const response = await postUploadArtifact(port, { mimeType: 'text/plain' });
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({
+        message: 'content must be a non-empty string',
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('POST /tools/attach-artifact-to-chunk', () => {
+    const originalFetch = fetch;
+    const attachArtifactToChunkInput = {
+      chunkLabel: 'IDEA-1',
+      artifactId: 'artifact-1',
+      stakeholderId: 'stakeholder-1',
+    };
+
+    async function startServer(): Promise<number> {
+      server = createMcpHttpServer('http://harness.test');
+      await new Promise<void>((resolve) => server?.listen(0, resolve));
+      return (server.address() as AddressInfo).port;
+    }
+
+    async function postAttachArtifactToChunk(port: number, body: unknown): Promise<Response> {
+      return originalFetch(`http://127.0.0.1:${String(port)}/tools/attach-artifact-to-chunk`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    }
+
+    it('forwards to HARNESS_URL and returns the created association', async () => {
+      const createdAssociation = {
+        id: 'assoc-1',
+        chunkLabel: attachArtifactToChunkInput.chunkLabel,
+        artifactId: attachArtifactToChunkInput.artifactId,
+        status: 'active',
+        branchId: null,
+        originBranchId: null,
+        createdByStakeholderId: attachArtifactToChunkInput.stakeholderId,
+        updatedByStakeholderId: attachArtifactToChunkInput.stakeholderId,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      };
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: string, init?: RequestInit) => {
+          if (url === 'http://harness.test/chunks/IDEA-1/artifacts') {
+            return new Response(JSON.stringify(createdAssociation), {
+              status: 201,
+              headers: { 'content-type': 'application/json' },
+            });
+          }
+          return originalFetch(url, init);
+        }),
+      );
+
+      const port = await startServer();
+      const response = await postAttachArtifactToChunk(port, attachArtifactToChunkInput);
+
+      expect(response.status).toBe(201);
+      await expect(response.json()).resolves.toEqual(createdAssociation);
+    });
+
+    it('surfaces the store 404 error without swallowing it', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: string, init?: RequestInit) => {
+          if (url === 'http://harness.test/chunks/IDEA-1/artifacts') {
+            return new Response(
+              JSON.stringify({
+                statusCode: 404,
+                message: 'Chunk with label IDEA-1 not found in this scope',
+              }),
+              { status: 404, headers: { 'content-type': 'application/json' } },
+            );
+          }
+          return originalFetch(url, init);
+        }),
+      );
+
+      const port = await startServer();
+      const response = await postAttachArtifactToChunk(port, attachArtifactToChunkInput);
+
+      expect(response.status).toBe(404);
+      await expect(response.json()).resolves.toEqual({
+        message: 'Chunk with label IDEA-1 not found in this scope',
+      });
+    });
+
+    it('rejects a malformed body with 400 before contacting the store', async () => {
+      const fetchMock = vi.fn(originalFetch);
+      vi.stubGlobal('fetch', fetchMock);
+
+      const port = await startServer();
+      const response = await postAttachArtifactToChunk(port, { chunkLabel: 'IDEA-1' });
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({
+        message: 'artifactId must be a non-empty string',
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+  });
 });

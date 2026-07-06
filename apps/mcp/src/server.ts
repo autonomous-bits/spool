@@ -1,4 +1,9 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import {
+  attachArtifactToChunk,
+  AttachArtifactToChunkValidationError,
+  parseAttachArtifactToChunkInput,
+} from './tools/attach-artifact-to-chunk.js';
 import { captureChunk, CaptureChunkValidationError, parseCaptureChunkInput } from './tools/capture-chunk.js';
 import { createBranch, CreateBranchValidationError, parseCreateBranchInput } from './tools/create-branch.js';
 import { createEdge, CreateEdgeValidationError, parseCreateEdgeInput } from './tools/create-edge.js';
@@ -7,6 +12,7 @@ import {
   SubmitSuggestionValidationError,
   parseSubmitSuggestionInput,
 } from './tools/submit-suggestion.js';
+import { uploadArtifact, UploadArtifactValidationError, parseUploadArtifactInput } from './tools/upload-artifact.js';
 
 interface McpHealthResponse {
   status: 'ok';
@@ -28,6 +34,8 @@ const CAPTURE_CHUNK_ROUTE = '/tools/capture-chunk';
 const CREATE_BRANCH_ROUTE = '/tools/create-branch';
 const CREATE_EDGE_ROUTE = '/tools/create-edge';
 const SUBMIT_SUGGESTION_ROUTE = '/tools/submit-suggestion';
+const UPLOAD_ARTIFACT_ROUTE = '/tools/upload-artifact';
+const ATTACH_ARTIFACT_TO_CHUNK_ROUTE = '/tools/attach-artifact-to-chunk';
 // Bounds the in-memory body buffer for a single tool call (node-memory-management: avoid
 // unbounded buffering of untrusted input).
 const MAX_BODY_BYTES = 1_000_000;
@@ -184,6 +192,64 @@ async function handleSubmitSuggestion(
   }
 }
 
+async function handleUploadArtifact(
+  request: IncomingMessage,
+  response: ServerResponse,
+  harnessUrl: string,
+): Promise<void> {
+  try {
+    const raw = await readRequestBody(request);
+    let parsedBody: unknown;
+    try {
+      parsedBody = raw.length === 0 ? undefined : JSON.parse(raw);
+    } catch {
+      throw new UploadArtifactValidationError('Request body must be valid JSON', 400);
+    }
+
+    const input = parseUploadArtifactInput(parsedBody);
+    const artifact = await uploadArtifact(input, harnessUrl);
+    sendJson(response, 201, artifact);
+  } catch (error) {
+    if (error instanceof RequestBodyError || error instanceof UploadArtifactValidationError) {
+      sendJson(response, error.statusCode, { message: error.message });
+      return;
+    }
+
+    const reason = error instanceof Error ? error.message : 'Unknown error';
+    logDiagnostic('error', 'upload-artifact tool call failed', { reason });
+    sendJson(response, 502, { message: 'Failed to reach the store' });
+  }
+}
+
+async function handleAttachArtifactToChunk(
+  request: IncomingMessage,
+  response: ServerResponse,
+  harnessUrl: string,
+): Promise<void> {
+  try {
+    const raw = await readRequestBody(request);
+    let parsedBody: unknown;
+    try {
+      parsedBody = raw.length === 0 ? undefined : JSON.parse(raw);
+    } catch {
+      throw new AttachArtifactToChunkValidationError('Request body must be valid JSON', 400);
+    }
+
+    const input = parseAttachArtifactToChunkInput(parsedBody);
+    const association = await attachArtifactToChunk(input, harnessUrl);
+    sendJson(response, 201, association);
+  } catch (error) {
+    if (error instanceof RequestBodyError || error instanceof AttachArtifactToChunkValidationError) {
+      sendJson(response, error.statusCode, { message: error.message });
+      return;
+    }
+
+    const reason = error instanceof Error ? error.message : 'Unknown error';
+    logDiagnostic('error', 'attach-artifact-to-chunk tool call failed', { reason });
+    sendJson(response, 502, { message: 'Failed to reach the store' });
+  }
+}
+
 export function createMcpHttpServer(
   harnessUrl = process.env.HARNESS_URL ?? 'http://localhost:3000',
 ): Server {
@@ -205,6 +271,16 @@ export function createMcpHttpServer(
 
     if (request.method === 'POST' && request.url === SUBMIT_SUGGESTION_ROUTE) {
       void handleSubmitSuggestion(request, response, harnessUrl);
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === UPLOAD_ARTIFACT_ROUTE) {
+      void handleUploadArtifact(request, response, harnessUrl);
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === ATTACH_ARTIFACT_TO_CHUNK_ROUTE) {
+      void handleAttachArtifactToChunk(request, response, harnessUrl);
       return;
     }
 

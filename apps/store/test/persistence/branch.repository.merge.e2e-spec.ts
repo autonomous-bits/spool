@@ -1,12 +1,20 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { Pool, PoolClient, QueryResult } from 'pg';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import type { Artifact } from '../../src/domain/artifact.js';
 import { Branch } from '../../src/domain/branch.js';
 import { Chunk } from '../../src/domain/chunk.js';
+import { ChunkArtifactAssociation } from '../../src/domain/chunk-artifact-association.js';
 import { Edge } from '../../src/domain/edge.js';
+import { ArtifactRepository } from '../../src/persistence/artifact.repository.js';
 import { BranchRepository } from '../../src/persistence/branch.repository.js';
+import { ChunkArtifactRepository } from '../../src/persistence/chunk-artifact.repository.js';
 import { ChunkRepository } from '../../src/persistence/chunk.repository.js';
 import { EdgeRepository } from '../../src/persistence/edge.repository.js';
 import { BOOTSTRAP_STAKEHOLDER_ID } from '../../src/persistence/bootstrap-stakeholder.js';
+import { LocalFileBlobStore } from '../../src/persistence/local-file-blob-store.js';
 import { setUpTestDatabase, type TestDatabase } from '../support/test-database.js';
 
 function buildBranch(overrides: Partial<ConstructorParameters<typeof Branch>[0]> = {}): Branch {
@@ -41,12 +49,26 @@ function buildEdge(overrides: Partial<ConstructorParameters<typeof Edge>[0]> = {
   });
 }
 
+function buildAssociation(
+  overrides: Partial<ConstructorParameters<typeof ChunkArtifactAssociation>[0]> &
+    Pick<ConstructorParameters<typeof ChunkArtifactAssociation>[0], 'chunkLabel' | 'artifactId'>,
+): ChunkArtifactAssociation {
+  return new ChunkArtifactAssociation({
+    createdByStakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
+    ...overrides,
+  });
+}
+
 describe('BranchRepository.merge (containerized Postgres)', () => {
   let database: TestDatabase;
   let pool: Pool;
   let branchRepository: BranchRepository;
   let chunkRepository: ChunkRepository;
   let edgeRepository: EdgeRepository;
+  let chunkArtifactRepository: ChunkArtifactRepository;
+  let basePath: string;
+  let artifactRepository: ArtifactRepository;
+  let artifactA: Artifact;
 
   beforeAll(async () => {
     database = await setUpTestDatabase();
@@ -54,10 +76,25 @@ describe('BranchRepository.merge (containerized Postgres)', () => {
     branchRepository = new BranchRepository(pool);
     chunkRepository = new ChunkRepository(pool);
     edgeRepository = new EdgeRepository(pool);
+    chunkArtifactRepository = new ChunkArtifactRepository(pool);
   });
 
   afterAll(async () => {
     await database.close();
+  });
+
+  beforeEach(async () => {
+    basePath = await mkdtemp(join(tmpdir(), 'spool-branch-merge-artifacts-test-'));
+    artifactRepository = new ArtifactRepository(pool, new LocalFileBlobStore({ basePath }));
+    artifactA = await artifactRepository.create({
+      content: Buffer.from('artifact A'),
+      mimeType: 'text/plain',
+      createdByStakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
+    });
+  });
+
+  afterEach(async () => {
+    await rm(basePath, { recursive: true, force: true });
   });
 
   async function createDraftBranch(
@@ -216,6 +253,113 @@ describe('BranchRepository.merge (containerized Postgres)', () => {
       [branch.id],
     );
     expect(branchRow.rows[0]?.status).toBe('draft');
+  });
+
+  it('promotes only the authoritative active chunk_artifacts row per pair, leaving older branch history untouched', async () => {
+    const chunkLabel = `chunk-${Math.random().toString(36).slice(2, 10)}`;
+    const draftBranch = await createDraftBranch();
+    const t0 = new Date('2026-02-01T00:00:00Z');
+
+    // Both rows target the same (chunkLabel, artifactId) pair, simulating a detach -> re-attach
+    // history within the branch: only the most-recently-created row is authoritative.
+    const olderAssociation = await chunkArtifactRepository.create(
+      buildAssociation({
+        chunkLabel,
+        artifactId: artifactA.id,
+        status: 'deactivated',
+        branchId: draftBranch.id,
+        originBranchId: draftBranch.id,
+        createdAt: t0,
+      }),
+    );
+    const authoritativeAssociation = await chunkArtifactRepository.create(
+      buildAssociation({
+        chunkLabel,
+        artifactId: artifactA.id,
+        branchId: draftBranch.id,
+        originBranchId: draftBranch.id,
+        createdAt: new Date(t0.getTime() + 1000),
+      }),
+    );
+    const branch = await verifyBranch(draftBranch.id);
+
+    const result = await branchRepository.merge(branch.id, BOOTSTRAP_STAKEHOLDER_ID);
+
+    expect(result?.kind).toBe('merged');
+
+    const olderRow = await pool.query<{ branch_id: string | null }>(
+      'SELECT branch_id FROM chunk_artifacts WHERE id = $1',
+      [olderAssociation.id],
+    );
+    expect(olderRow.rows[0]?.branch_id).toBe(branch.id);
+
+    const authoritativeRow = await pool.query<{ branch_id: string | null; status: string }>(
+      'SELECT branch_id, status FROM chunk_artifacts WHERE id = $1',
+      [authoritativeAssociation.id],
+    );
+    expect(authoritativeRow.rows[0]?.branch_id).toBeNull();
+    expect(authoritativeRow.rows[0]?.status).toBe('active');
+  });
+
+  it('promotes an authoritative deactivated chunk_artifacts row unconditionally, with no collision check', async () => {
+    const chunkLabel = `chunk-${Math.random().toString(36).slice(2, 10)}`;
+    await chunkArtifactRepository.create(buildAssociation({ chunkLabel, artifactId: artifactA.id }));
+
+    const draftBranch = await createDraftBranch();
+    const deactivation = await chunkArtifactRepository.create(
+      buildAssociation({
+        chunkLabel,
+        artifactId: artifactA.id,
+        status: 'deactivated',
+        branchId: draftBranch.id,
+        originBranchId: draftBranch.id,
+      }),
+    );
+    const branch = await verifyBranch(draftBranch.id);
+
+    const result = await branchRepository.merge(branch.id, BOOTSTRAP_STAKEHOLDER_ID);
+
+    expect(result?.kind).toBe('merged');
+
+    const deactivationRow = await pool.query<{ branch_id: string | null; status: string }>(
+      'SELECT branch_id, status FROM chunk_artifacts WHERE id = $1',
+      [deactivation.id],
+    );
+    expect(deactivationRow.rows[0]?.branch_id).toBeNull();
+    expect(deactivationRow.rows[0]?.status).toBe('deactivated');
+  });
+
+  it('rejects a merge in full when a branch active chunk-artifact pair collides with a mainline active pair', async () => {
+    const chunkLabel = `chunk-${Math.random().toString(36).slice(2, 10)}`;
+    await chunkArtifactRepository.create(buildAssociation({ chunkLabel, artifactId: artifactA.id }));
+
+    const draftBranch = await createDraftBranch();
+    const branchAssociation = await chunkArtifactRepository.create(
+      buildAssociation({
+        chunkLabel,
+        artifactId: artifactA.id,
+        branchId: draftBranch.id,
+        originBranchId: draftBranch.id,
+      }),
+    );
+    const branch = await verifyBranch(draftBranch.id);
+
+    const result = await branchRepository.merge(branch.id, BOOTSTRAP_STAKEHOLDER_ID);
+
+    expect(result?.kind).toBe('conflict');
+
+    const branchAssociationRow = await pool.query<{ branch_id: string | null }>(
+      'SELECT branch_id FROM chunk_artifacts WHERE id = $1',
+      [branchAssociation.id],
+    );
+    expect(branchAssociationRow.rows[0]?.branch_id).toBe(branch.id);
+
+    const branchRow = await pool.query<{ status: string; merged_at: Date | null }>(
+      'SELECT status, merged_at FROM branches WHERE id = $1',
+      [branch.id],
+    );
+    expect(branchRow.rows[0]?.status).toBe('verified');
+    expect(branchRow.rows[0]?.merged_at).toBeNull();
   });
 
   it('a simulated mid-transaction failure leaves the database in its pre-merge state', async () => {
