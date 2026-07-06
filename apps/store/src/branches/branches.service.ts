@@ -9,6 +9,7 @@ import {
   BranchLifecycleError,
   assertDraftStatus,
   assertIsHumanActor,
+  assertMergeableStatus,
   assertRejectableStatus,
   assertSubmitDiscipline,
   assertSubmittedStatus,
@@ -163,9 +164,43 @@ export class BranchesService {
   }
 
   /**
-   * Shared verify/reject preamble (Meridian IDEA-81): looks up the branch first (404 before any
-   * actor/status check), then resolves the acting stakeholder. Unlike submit(), a null discipline
-   * is accepted here — verify/reject are discipline-agnostic per this goal's resolved question.
+   * Merges a verified branch into mainline (Meridian IDEA-40's verified -> merged transition,
+   * IDEA-74's merge-lineage/provenance shape, IDEA-46's conflict gate scoped per G06 OQ2). Reuses
+   * the same discipline-agnostic, human-only actor resolution as verify/reject (matches G05's
+   * resolved "merging authority" interpretation of IDEA-11: any human stakeholder may merge,
+   * regardless of discipline).
+   */
+  async merge(branchId: string, claims: SessionTokenClaims): Promise<BranchResponse> {
+    const actor = await this.resolveActorForVerification(branchId, claims);
+
+    try {
+      assertIsHumanActor(actor);
+      assertMergeableStatus(actor.branch);
+    } catch (error) {
+      if (error instanceof BranchLifecycleError) {
+        throw toLifecycleConflict(error);
+      }
+      throw error;
+    }
+
+    const result = await this.branchRepository.merge(branchId, claims.stakeholderId);
+    if (result === undefined) {
+      throw new ConflictException(
+        'Invalid branch lifecycle operation: expected verified branch, received a different status',
+      );
+    }
+    if (result.kind === 'conflict') {
+      throw new ConflictException(result.reason);
+    }
+
+    return toBranchResponse(result.branch);
+  }
+
+  /**
+   * Shared verify/reject/merge preamble (Meridian IDEA-81): looks up the branch first (404 before
+   * any actor/status check), then resolves the acting stakeholder. Unlike submit(), a null
+   * discipline is accepted here — verify/reject/merge are discipline-agnostic per this goal's
+   * resolved question.
    */
   private async resolveActorForVerification(
     branchId: string,
@@ -179,7 +214,7 @@ export class BranchesService {
     const stakeholder = await this.stakeholderRepository.findById(claims.stakeholderId);
     if (stakeholder === undefined) {
       throw new BadRequestException(
-        `Stakeholder ${claims.stakeholderId} must exist to verify or reject a branch`,
+        `Stakeholder ${claims.stakeholderId} must exist to verify, reject, or merge a branch`,
       );
     }
 

@@ -81,6 +81,15 @@ export class BranchesController {
     return this.branches.reject(id, claims);
   }
 
+  @Post(':id/merge')
+  async merge(
+    @Param('id') id: string,
+    @Headers('authorization') authorizationHeader: unknown,
+  ): Promise<BranchResponse> {
+    const claims = verifySessionClaims(authorizationHeader, this.sessionTokenService);
+    return this.branches.merge(id, claims);
+  }
+
   @Get(':id')
   async findOne(@Param('id') id: string): Promise<BranchResponse> {
     return this.branches.findById(id);

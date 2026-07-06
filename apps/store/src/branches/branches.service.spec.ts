@@ -27,7 +27,10 @@ function validClaims(overrides: Partial<SessionTokenClaims> = {}): SessionTokenC
 }
 
 describe('BranchesService', () => {
-  let branchRepository: Pick<BranchRepository, 'create' | 'findById' | 'submit' | 'verify' | 'reject'>;
+  let branchRepository: Pick<
+    BranchRepository,
+    'create' | 'findById' | 'submit' | 'verify' | 'reject' | 'merge'
+  >;
   let stakeholderRepository: Pick<StakeholderRepository, 'findById'>;
   let service: BranchesService;
 
@@ -43,7 +46,11 @@ describe('BranchesService', () => {
             submit: vi.fn(),
             verify: vi.fn(),
             reject: vi.fn(),
-          } satisfies Pick<BranchRepository, 'create' | 'findById' | 'submit' | 'verify' | 'reject'>,
+            merge: vi.fn(),
+          } satisfies Pick<
+            BranchRepository,
+            'create' | 'findById' | 'submit' | 'verify' | 'reject' | 'merge'
+          >,
         },
         {
           provide: StakeholderRepository,
@@ -449,6 +456,164 @@ describe('BranchesService', () => {
     vi.mocked(branchRepository.reject).mockResolvedValue(undefined);
 
     await expect(service.reject(branch.id, validClaims())).rejects.toThrow(ConflictException);
+  });
+
+  it('merges a verified branch, returning mergedAt', async () => {
+    const branch = new Branch({
+      name: 'feature-branch',
+      discipline: 'engineering',
+      status: 'verified',
+      submittedAt: new Date('2026-07-05T12:00:00.000Z'),
+      verifiedAt: new Date('2026-07-05T12:30:00.000Z'),
+      createdByStakeholderId: 'creator-1',
+    });
+    const merged = new Branch({
+      id: branch.id,
+      name: branch.name,
+      discipline: branch.discipline,
+      status: 'merged',
+      divergedAt: branch.divergedAt,
+      submittedAt: branch.submittedAt,
+      verifiedAt: branch.verifiedAt,
+      mergedAt: new Date('2026-07-05T13:00:00.000Z'),
+      mergedByStakeholderId: validClaims().stakeholderId,
+      createdByStakeholderId: branch.createdByStakeholderId,
+      createdAt: branch.createdAt,
+      updatedAt: new Date('2026-07-05T13:00:00.000Z'),
+    });
+    vi.mocked(branchRepository.findById).mockResolvedValue(branch);
+    vi.mocked(stakeholderRepository.findById).mockResolvedValue({
+      id: validClaims().stakeholderId,
+      discipline: 'product',
+    });
+    vi.mocked(branchRepository.merge).mockResolvedValue({ kind: 'merged', branch: merged });
+
+    const result = await service.merge(branch.id, validClaims());
+
+    expect(result.status).toBe('merged');
+    expect(result.mergedAt).toBe('2026-07-05T13:00:00.000Z');
+    expect(branchRepository.merge).toHaveBeenCalledWith(branch.id, validClaims().stakeholderId);
+  });
+
+  it('merges a verified branch for a stakeholder with a null discipline (discipline-agnostic)', async () => {
+    const branch = new Branch({
+      name: 'feature-branch',
+      discipline: 'engineering',
+      status: 'verified',
+      submittedAt: new Date('2026-07-05T12:00:00.000Z'),
+      verifiedAt: new Date('2026-07-05T12:30:00.000Z'),
+      createdByStakeholderId: 'creator-1',
+    });
+    const merged = new Branch({
+      id: branch.id,
+      name: branch.name,
+      discipline: branch.discipline,
+      status: 'merged',
+      divergedAt: branch.divergedAt,
+      submittedAt: branch.submittedAt,
+      verifiedAt: branch.verifiedAt,
+      mergedAt: new Date('2026-07-05T13:00:00.000Z'),
+      mergedByStakeholderId: validClaims().stakeholderId,
+      createdByStakeholderId: branch.createdByStakeholderId,
+      createdAt: branch.createdAt,
+      updatedAt: new Date('2026-07-05T13:00:00.000Z'),
+    });
+    vi.mocked(branchRepository.findById).mockResolvedValue(branch);
+    vi.mocked(stakeholderRepository.findById).mockResolvedValue({
+      id: validClaims().stakeholderId,
+      discipline: null,
+    });
+    vi.mocked(branchRepository.merge).mockResolvedValue({ kind: 'merged', branch: merged });
+
+    const result = await service.merge(branch.id, validClaims());
+
+    expect(result.status).toBe('merged');
+  });
+
+  it('returns 404 when merging an unknown branch, before any stakeholder lookup', async () => {
+    vi.mocked(branchRepository.findById).mockResolvedValue(undefined);
+
+    await expect(service.merge('missing-branch', validClaims())).rejects.toThrow(
+      NotFoundException,
+    );
+    expect(stakeholderRepository.findById).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 when merging with a token stakeholder that does not resolve', async () => {
+    const branch = new Branch({
+      name: 'feature-branch',
+      discipline: 'engineering',
+      status: 'verified',
+      submittedAt: new Date('2026-07-05T12:00:00.000Z'),
+      verifiedAt: new Date('2026-07-05T12:30:00.000Z'),
+      createdByStakeholderId: 'creator-1',
+    });
+    vi.mocked(branchRepository.findById).mockResolvedValue(branch);
+    vi.mocked(stakeholderRepository.findById).mockResolvedValue(undefined);
+
+    await expect(service.merge(branch.id, validClaims())).rejects.toThrow(BadRequestException);
+    expect(branchRepository.merge).not.toHaveBeenCalled();
+  });
+
+  it('returns 409 when merging a branch that is not verified', async () => {
+    const branch = new Branch({
+      name: 'feature-branch',
+      discipline: 'engineering',
+      status: 'submitted',
+      submittedAt: new Date('2026-07-05T12:00:00.000Z'),
+      createdByStakeholderId: 'creator-1',
+    });
+    vi.mocked(branchRepository.findById).mockResolvedValue(branch);
+    vi.mocked(stakeholderRepository.findById).mockResolvedValue({
+      id: validClaims().stakeholderId,
+      discipline: 'product',
+    });
+
+    await expect(service.merge(branch.id, validClaims())).rejects.toThrow(ConflictException);
+    expect(branchRepository.merge).not.toHaveBeenCalled();
+  });
+
+  it('returns 409 when the repository loses the merge race', async () => {
+    const branch = new Branch({
+      name: 'feature-branch',
+      discipline: 'engineering',
+      status: 'verified',
+      submittedAt: new Date('2026-07-05T12:00:00.000Z'),
+      verifiedAt: new Date('2026-07-05T12:30:00.000Z'),
+      createdByStakeholderId: 'creator-1',
+    });
+    vi.mocked(branchRepository.findById).mockResolvedValue(branch);
+    vi.mocked(stakeholderRepository.findById).mockResolvedValue({
+      id: validClaims().stakeholderId,
+      discipline: 'product',
+    });
+    vi.mocked(branchRepository.merge).mockResolvedValue(undefined);
+
+    await expect(service.merge(branch.id, validClaims())).rejects.toThrow(ConflictException);
+  });
+
+  it('returns 409 with a distinguishing message when the merge collides with mainline', async () => {
+    const branch = new Branch({
+      name: 'feature-branch',
+      discipline: 'engineering',
+      status: 'verified',
+      submittedAt: new Date('2026-07-05T12:00:00.000Z'),
+      verifiedAt: new Date('2026-07-05T12:30:00.000Z'),
+      createdByStakeholderId: 'creator-1',
+    });
+    vi.mocked(branchRepository.findById).mockResolvedValue(branch);
+    vi.mocked(stakeholderRepository.findById).mockResolvedValue({
+      id: validClaims().stakeholderId,
+      discipline: 'product',
+    });
+    vi.mocked(branchRepository.merge).mockResolvedValue({
+      kind: 'conflict',
+      reason: 'mainline chunk label collision: some-label',
+    });
+
+    await expect(service.merge(branch.id, validClaims())).rejects.toThrow(
+      'mainline chunk label collision: some-label',
+    );
   });
 
   it('returns the branch from findById', async () => {
