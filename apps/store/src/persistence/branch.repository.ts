@@ -11,6 +11,7 @@ interface BranchRow extends QueryResultRow {
   status: string;
   diverged_at: Date;
   submitted_at: Date | null;
+  verified_at: Date | null;
   created_by_stakeholder_id: string;
   created_at: Date;
   updated_at: Date;
@@ -28,6 +29,7 @@ function toBranch(row: BranchRow): Branch {
     status: row.status as Branch['status'],
     divergedAt: new DivergencePoint(row.diverged_at.toISOString()),
     ...(row.submitted_at === null ? {} : { submittedAt: row.submitted_at }),
+    ...(row.verified_at === null ? {} : { verifiedAt: row.verified_at }),
     createdByStakeholderId: row.created_by_stakeholder_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -132,6 +134,112 @@ export class BranchRepository {
       const row = result.rows[0];
       if (row === undefined) {
         throw new Error('BranchRepository.submit: UPDATE ... RETURNING * produced no row');
+      }
+
+      await client.query('COMMIT');
+      transactionOpen = false;
+      return toBranch(row);
+    } catch (error) {
+      if (transactionOpen) {
+        await client.query('ROLLBACK');
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async verify(branchId: string): Promise<Branch | undefined> {
+    const client = await this.pool.connect();
+    let transactionOpen = false;
+
+    try {
+      await client.query('BEGIN');
+      transactionOpen = true;
+
+      const timestampResult: QueryResult<TimestampRow> =
+        await client.query<TimestampRow>('SELECT clock_timestamp() AS attempted_at');
+      const attemptedAt = timestampResult.rows[0]?.attempted_at;
+      if (attemptedAt === undefined) {
+        throw new Error('BranchRepository.verify: SELECT clock_timestamp() produced no row');
+      }
+
+      const branchResult: QueryResult<BranchRow> = await client.query<BranchRow>(
+        'SELECT * FROM branches WHERE id = $1 FOR UPDATE',
+        [branchId],
+      );
+      const branchRow = branchResult.rows[0];
+      if (
+        branchRow === undefined ||
+        branchRow.status !== 'submitted' ||
+        branchRow.updated_at > attemptedAt
+      ) {
+        await client.query('ROLLBACK');
+        transactionOpen = false;
+        return undefined;
+      }
+
+      const result: QueryResult<BranchRow> = await client.query<BranchRow>(
+        "UPDATE branches SET status='verified', verified_at=now(), updated_at=now() WHERE id=$1 RETURNING *",
+        [branchId],
+      );
+
+      const row = result.rows[0];
+      if (row === undefined) {
+        throw new Error('BranchRepository.verify: UPDATE ... RETURNING * produced no row');
+      }
+
+      await client.query('COMMIT');
+      transactionOpen = false;
+      return toBranch(row);
+    } catch (error) {
+      if (transactionOpen) {
+        await client.query('ROLLBACK');
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async reject(branchId: string): Promise<Branch | undefined> {
+    const client = await this.pool.connect();
+    let transactionOpen = false;
+
+    try {
+      await client.query('BEGIN');
+      transactionOpen = true;
+
+      const timestampResult: QueryResult<TimestampRow> =
+        await client.query<TimestampRow>('SELECT clock_timestamp() AS attempted_at');
+      const attemptedAt = timestampResult.rows[0]?.attempted_at;
+      if (attemptedAt === undefined) {
+        throw new Error('BranchRepository.reject: SELECT clock_timestamp() produced no row');
+      }
+
+      const branchResult: QueryResult<BranchRow> = await client.query<BranchRow>(
+        'SELECT * FROM branches WHERE id = $1 FOR UPDATE',
+        [branchId],
+      );
+      const branchRow = branchResult.rows[0];
+      if (
+        branchRow === undefined ||
+        !['submitted', 'verified'].includes(branchRow.status) ||
+        branchRow.updated_at > attemptedAt
+      ) {
+        await client.query('ROLLBACK');
+        transactionOpen = false;
+        return undefined;
+      }
+
+      const result: QueryResult<BranchRow> = await client.query<BranchRow>(
+        "UPDATE branches SET status='draft', verified_at=NULL, submitted_at=NULL, updated_at=now() WHERE id=$1 RETURNING *",
+        [branchId],
+      );
+
+      const row = result.rows[0];
+      if (row === undefined) {
+        throw new Error('BranchRepository.reject: UPDATE ... RETURNING * produced no row');
       }
 
       await client.query('COMMIT');

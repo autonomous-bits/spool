@@ -4,6 +4,8 @@ import {
   BranchLifecycleError,
   assertDraftStatus,
   assertIsHumanActor,
+  assertRejectableStatus,
+  assertSubmittedStatus,
   assertSubmitDiscipline,
 } from './branch-lifecycle.js';
 import type {
@@ -54,6 +56,12 @@ describe('branch lifecycle assertions', () => {
       expect(() => assertIsHumanActor(actor)).not.toThrow();
     });
 
+    it('accepts a human actor with a null discipline', () => {
+      const actor = createHumanActor({ discipline: null });
+
+      expect(() => assertIsHumanActor(actor)).not.toThrow();
+    });
+
     it('throws when the actor is delegated', () => {
       const actor = createDelegatedActor();
 
@@ -93,6 +101,49 @@ describe('branch lifecycle assertions', () => {
 
         expect(() => assertDraftStatus(branch)).toThrow(BranchLifecycleError);
         expect(() => assertDraftStatus(branch)).toThrow(`expected draft branch, received ${status}`);
+      },
+    );
+  });
+
+  describe('assertSubmittedStatus', () => {
+    it('accepts a submitted branch', () => {
+      const branch = createBranch({ status: 'submitted' });
+
+      expect(() => assertSubmittedStatus(branch)).not.toThrow();
+    });
+
+    it.each(['draft', 'verified', 'merged'] as const)(
+      'throws when the branch status is %s',
+      (status) => {
+        const branch = createBranch({ status });
+
+        expect(() => assertSubmittedStatus(branch)).toThrow(BranchLifecycleError);
+        expect(() => assertSubmittedStatus(branch)).toThrow(
+          `expected submitted branch, received ${status}`,
+        );
+      },
+    );
+  });
+
+  describe('assertRejectableStatus', () => {
+    it.each(['submitted', 'verified'] as const)(
+      'accepts a %s branch',
+      (status) => {
+        const branch = createBranch({ status });
+
+        expect(() => assertRejectableStatus(branch)).not.toThrow();
+      },
+    );
+
+    it.each(['draft', 'merged'] as const)(
+      'throws when the branch status is %s',
+      (status) => {
+        const branch = createBranch({ status });
+
+        expect(() => assertRejectableStatus(branch)).toThrow(BranchLifecycleError);
+        expect(() => assertRejectableStatus(branch)).toThrow(
+          `expected submitted or verified branch, received ${status}`,
+        );
       },
     );
   });

@@ -14,7 +14,7 @@ const claims = {
 
 describe('BranchesController', () => {
   let controller: BranchesController;
-  let service: Pick<BranchesService, 'create' | 'findById' | 'submit'>;
+  let service: Pick<BranchesService, 'create' | 'findById' | 'submit' | 'verify' | 'reject'>;
   let sessionTokenService: Pick<SessionTokenService, 'verify'>;
 
   beforeEach(async () => {
@@ -27,7 +27,9 @@ describe('BranchesController', () => {
             create: vi.fn(),
             findById: vi.fn(),
             submit: vi.fn(),
-          } satisfies Pick<BranchesService, 'create' | 'findById' | 'submit'>,
+            verify: vi.fn(),
+            reject: vi.fn(),
+          } satisfies Pick<BranchesService, 'create' | 'findById' | 'submit' | 'verify' | 'reject'>,
         },
         {
           provide: SessionTokenService,
@@ -51,6 +53,7 @@ describe('BranchesController', () => {
       status: 'draft',
       divergedAt: new Date().toISOString(),
       submittedAt: null,
+      verifiedAt: null,
       createdAt: new Date(),
       updatedAt: new Date(),
       createdByStakeholderId: 'stakeholder-1',
@@ -79,6 +82,7 @@ describe('BranchesController', () => {
       status: 'submitted',
       divergedAt: new Date().toISOString(),
       submittedAt: new Date().toISOString(),
+      verifiedAt: null,
       createdAt: new Date(),
       updatedAt: new Date(),
       createdByStakeholderId: 'stakeholder-1',
@@ -107,6 +111,64 @@ describe('BranchesController', () => {
     expect(service.submit).not.toHaveBeenCalled();
   });
 
+  it('verifies the bearer token and delegates verification to BranchesService', async () => {
+    const expected = {
+      id: 'abc',
+      name: 'feature-branch',
+      discipline: 'product',
+      status: 'verified',
+      divergedAt: new Date().toISOString(),
+      submittedAt: new Date().toISOString(),
+      verifiedAt: new Date().toISOString(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      createdByStakeholderId: 'stakeholder-1',
+    } satisfies BranchResponse;
+    vi.mocked(sessionTokenService.verify).mockReturnValue(claims);
+    vi.mocked(service.verify).mockResolvedValue(expected);
+
+    const result = await controller.verify('abc', 'Bearer signed-token');
+
+    expect(result).toEqual(expected);
+    expect(sessionTokenService.verify).toHaveBeenCalledWith('signed-token');
+    expect(service.verify).toHaveBeenCalledWith('abc', claims);
+  });
+
+  it('rejects verify with a missing Authorization header', async () => {
+    await expect(controller.verify('abc', undefined)).rejects.toThrow(UnauthorizedException);
+    expect(sessionTokenService.verify).not.toHaveBeenCalled();
+    expect(service.verify).not.toHaveBeenCalled();
+  });
+
+  it('verifies the bearer token and delegates rejection to BranchesService', async () => {
+    const expected = {
+      id: 'abc',
+      name: 'feature-branch',
+      discipline: 'product',
+      status: 'draft',
+      divergedAt: new Date().toISOString(),
+      submittedAt: null,
+      verifiedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      createdByStakeholderId: 'stakeholder-1',
+    } satisfies BranchResponse;
+    vi.mocked(sessionTokenService.verify).mockReturnValue(claims);
+    vi.mocked(service.reject).mockResolvedValue(expected);
+
+    const result = await controller.reject('abc', 'Bearer signed-token');
+
+    expect(result).toEqual(expected);
+    expect(sessionTokenService.verify).toHaveBeenCalledWith('signed-token');
+    expect(service.reject).toHaveBeenCalledWith('abc', claims);
+  });
+
+  it('rejects reject with a missing Authorization header', async () => {
+    await expect(controller.reject('abc', undefined)).rejects.toThrow(UnauthorizedException);
+    expect(sessionTokenService.verify).not.toHaveBeenCalled();
+    expect(service.reject).not.toHaveBeenCalled();
+  });
+
   it('delegates retrieval to BranchesService', async () => {
     const expected = {
       id: 'abc',
@@ -115,6 +177,7 @@ describe('BranchesController', () => {
       status: 'draft',
       divergedAt: new Date().toISOString(),
       submittedAt: null,
+      verifiedAt: null,
       createdAt: new Date(),
       updatedAt: new Date(),
       createdByStakeholderId: 'stakeholder-1',

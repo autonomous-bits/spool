@@ -27,7 +27,7 @@ function validClaims(overrides: Partial<SessionTokenClaims> = {}): SessionTokenC
 }
 
 describe('BranchesService', () => {
-  let branchRepository: Pick<BranchRepository, 'create' | 'findById' | 'submit'>;
+  let branchRepository: Pick<BranchRepository, 'create' | 'findById' | 'submit' | 'verify' | 'reject'>;
   let stakeholderRepository: Pick<StakeholderRepository, 'findById'>;
   let service: BranchesService;
 
@@ -41,7 +41,9 @@ describe('BranchesService', () => {
             create: vi.fn(),
             findById: vi.fn(),
             submit: vi.fn(),
-          } satisfies Pick<BranchRepository, 'create' | 'findById' | 'submit'>,
+            verify: vi.fn(),
+            reject: vi.fn(),
+          } satisfies Pick<BranchRepository, 'create' | 'findById' | 'submit' | 'verify' | 'reject'>,
         },
         {
           provide: StakeholderRepository,
@@ -217,6 +219,236 @@ describe('BranchesService', () => {
     vi.mocked(branchRepository.submit).mockResolvedValue(undefined);
 
     await expect(service.submit(branch.id, validClaims())).rejects.toThrow(ConflictException);
+  });
+
+  it('verifies a submitted branch regardless of the acting stakeholder discipline', async () => {
+    const branch = new Branch({
+      name: 'feature-branch',
+      discipline: 'engineering',
+      status: 'submitted',
+      submittedAt: new Date('2026-07-05T12:00:00.000Z'),
+      createdByStakeholderId: 'creator-1',
+    });
+    const verified = new Branch({
+      id: branch.id,
+      name: branch.name,
+      discipline: branch.discipline,
+      status: 'verified',
+      divergedAt: branch.divergedAt,
+      submittedAt: branch.submittedAt,
+      verifiedAt: new Date('2026-07-05T13:00:00.000Z'),
+      createdByStakeholderId: branch.createdByStakeholderId,
+      createdAt: branch.createdAt,
+      updatedAt: new Date('2026-07-05T13:00:00.000Z'),
+    });
+    vi.mocked(branchRepository.findById).mockResolvedValue(branch);
+    vi.mocked(stakeholderRepository.findById).mockResolvedValue({
+      id: validClaims().stakeholderId,
+      discipline: 'product',
+    });
+    vi.mocked(branchRepository.verify).mockResolvedValue(verified);
+
+    const result = await service.verify(branch.id, validClaims());
+
+    expect(result.status).toBe('verified');
+    expect(result.verifiedAt).toBe('2026-07-05T13:00:00.000Z');
+    expect(branchRepository.verify).toHaveBeenCalledWith(branch.id);
+  });
+
+  it('verifies a submitted branch for a stakeholder with a null discipline', async () => {
+    const branch = new Branch({
+      name: 'feature-branch',
+      discipline: 'engineering',
+      status: 'submitted',
+      submittedAt: new Date('2026-07-05T12:00:00.000Z'),
+      createdByStakeholderId: 'creator-1',
+    });
+    const verified = new Branch({
+      id: branch.id,
+      name: branch.name,
+      discipline: branch.discipline,
+      status: 'verified',
+      divergedAt: branch.divergedAt,
+      submittedAt: branch.submittedAt,
+      verifiedAt: new Date('2026-07-05T13:00:00.000Z'),
+      createdByStakeholderId: branch.createdByStakeholderId,
+      createdAt: branch.createdAt,
+      updatedAt: new Date('2026-07-05T13:00:00.000Z'),
+    });
+    vi.mocked(branchRepository.findById).mockResolvedValue(branch);
+    vi.mocked(stakeholderRepository.findById).mockResolvedValue({
+      id: validClaims().stakeholderId,
+      discipline: null,
+    });
+    vi.mocked(branchRepository.verify).mockResolvedValue(verified);
+
+    const result = await service.verify(branch.id, validClaims());
+
+    expect(result.status).toBe('verified');
+  });
+
+  it('returns 404 when verifying an unknown branch, before any stakeholder lookup', async () => {
+    vi.mocked(branchRepository.findById).mockResolvedValue(undefined);
+
+    await expect(service.verify('missing-branch', validClaims())).rejects.toThrow(
+      NotFoundException,
+    );
+    expect(stakeholderRepository.findById).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 when verifying with a token stakeholder that does not resolve', async () => {
+    const branch = new Branch({
+      name: 'feature-branch',
+      discipline: 'engineering',
+      status: 'submitted',
+      submittedAt: new Date('2026-07-05T12:00:00.000Z'),
+      createdByStakeholderId: 'creator-1',
+    });
+    vi.mocked(branchRepository.findById).mockResolvedValue(branch);
+    vi.mocked(stakeholderRepository.findById).mockResolvedValue(undefined);
+
+    await expect(service.verify(branch.id, validClaims())).rejects.toThrow(BadRequestException);
+    expect(branchRepository.verify).not.toHaveBeenCalled();
+  });
+
+  it('returns 409 when verifying a branch that is not submitted', async () => {
+    const branch = new Branch({
+      name: 'feature-branch',
+      discipline: 'engineering',
+      createdByStakeholderId: 'creator-1',
+    });
+    vi.mocked(branchRepository.findById).mockResolvedValue(branch);
+    vi.mocked(stakeholderRepository.findById).mockResolvedValue({
+      id: validClaims().stakeholderId,
+      discipline: 'product',
+    });
+
+    await expect(service.verify(branch.id, validClaims())).rejects.toThrow(ConflictException);
+    expect(branchRepository.verify).not.toHaveBeenCalled();
+  });
+
+  it('returns 409 when the repository loses the verify race', async () => {
+    const branch = new Branch({
+      name: 'feature-branch',
+      discipline: 'engineering',
+      status: 'submitted',
+      submittedAt: new Date('2026-07-05T12:00:00.000Z'),
+      createdByStakeholderId: 'creator-1',
+    });
+    vi.mocked(branchRepository.findById).mockResolvedValue(branch);
+    vi.mocked(stakeholderRepository.findById).mockResolvedValue({
+      id: validClaims().stakeholderId,
+      discipline: 'product',
+    });
+    vi.mocked(branchRepository.verify).mockResolvedValue(undefined);
+
+    await expect(service.verify(branch.id, validClaims())).rejects.toThrow(ConflictException);
+  });
+
+  it('rejects a submitted branch, clearing verifiedAt and submittedAt', async () => {
+    const branch = new Branch({
+      name: 'feature-branch',
+      discipline: 'engineering',
+      status: 'submitted',
+      submittedAt: new Date('2026-07-05T12:00:00.000Z'),
+      createdByStakeholderId: 'creator-1',
+    });
+    const rejected = new Branch({
+      id: branch.id,
+      name: branch.name,
+      discipline: branch.discipline,
+      status: 'draft',
+      divergedAt: branch.divergedAt,
+      createdByStakeholderId: branch.createdByStakeholderId,
+      createdAt: branch.createdAt,
+      updatedAt: new Date('2026-07-05T13:00:00.000Z'),
+    });
+    vi.mocked(branchRepository.findById).mockResolvedValue(branch);
+    vi.mocked(stakeholderRepository.findById).mockResolvedValue({
+      id: validClaims().stakeholderId,
+      discipline: 'product',
+    });
+    vi.mocked(branchRepository.reject).mockResolvedValue(rejected);
+
+    const result = await service.reject(branch.id, validClaims());
+
+    expect(result.status).toBe('draft');
+    expect(result.verifiedAt).toBeNull();
+    expect(result.submittedAt).toBeNull();
+    expect(branchRepository.reject).toHaveBeenCalledWith(branch.id);
+  });
+
+  it('rejects a verified branch', async () => {
+    const branch = new Branch({
+      name: 'feature-branch',
+      discipline: 'engineering',
+      status: 'verified',
+      submittedAt: new Date('2026-07-05T12:00:00.000Z'),
+      verifiedAt: new Date('2026-07-05T12:30:00.000Z'),
+      createdByStakeholderId: 'creator-1',
+    });
+    const rejected = new Branch({
+      id: branch.id,
+      name: branch.name,
+      discipline: branch.discipline,
+      status: 'draft',
+      divergedAt: branch.divergedAt,
+      createdByStakeholderId: branch.createdByStakeholderId,
+      createdAt: branch.createdAt,
+      updatedAt: new Date('2026-07-05T13:00:00.000Z'),
+    });
+    vi.mocked(branchRepository.findById).mockResolvedValue(branch);
+    vi.mocked(stakeholderRepository.findById).mockResolvedValue({
+      id: validClaims().stakeholderId,
+      discipline: 'product',
+    });
+    vi.mocked(branchRepository.reject).mockResolvedValue(rejected);
+
+    const result = await service.reject(branch.id, validClaims());
+
+    expect(result.status).toBe('draft');
+  });
+
+  it('returns 404 when rejecting an unknown branch', async () => {
+    vi.mocked(branchRepository.findById).mockResolvedValue(undefined);
+
+    await expect(service.reject('missing-branch', validClaims())).rejects.toThrow(
+      NotFoundException,
+    );
+  });
+
+  it('returns 409 when rejecting a draft branch', async () => {
+    const branch = new Branch({
+      name: 'feature-branch',
+      discipline: 'engineering',
+      createdByStakeholderId: 'creator-1',
+    });
+    vi.mocked(branchRepository.findById).mockResolvedValue(branch);
+    vi.mocked(stakeholderRepository.findById).mockResolvedValue({
+      id: validClaims().stakeholderId,
+      discipline: 'product',
+    });
+
+    await expect(service.reject(branch.id, validClaims())).rejects.toThrow(ConflictException);
+    expect(branchRepository.reject).not.toHaveBeenCalled();
+  });
+
+  it('returns 409 when the repository loses the reject race', async () => {
+    const branch = new Branch({
+      name: 'feature-branch',
+      discipline: 'engineering',
+      status: 'submitted',
+      submittedAt: new Date('2026-07-05T12:00:00.000Z'),
+      createdByStakeholderId: 'creator-1',
+    });
+    vi.mocked(branchRepository.findById).mockResolvedValue(branch);
+    vi.mocked(stakeholderRepository.findById).mockResolvedValue({
+      id: validClaims().stakeholderId,
+      discipline: 'product',
+    });
+    vi.mocked(branchRepository.reject).mockResolvedValue(undefined);
+
+    await expect(service.reject(branch.id, validClaims())).rejects.toThrow(ConflictException);
   });
 
   it('returns the branch from findById', async () => {

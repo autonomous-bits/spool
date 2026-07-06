@@ -5,7 +5,14 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { SessionTokenClaims } from '../auth/session-token.service.js';
-import { BranchLifecycleError, assertDraftStatus, assertIsHumanActor, assertSubmitDiscipline } from '../domain/branch-lifecycle.js';
+import {
+  BranchLifecycleError,
+  assertDraftStatus,
+  assertIsHumanActor,
+  assertRejectableStatus,
+  assertSubmitDiscipline,
+  assertSubmittedStatus,
+} from '../domain/branch-lifecycle.js';
 import { Branch } from '../domain/branch.js';
 import type { HumanActorContext } from '../domain/types/actor/actor-context.js';
 import { isDiscipline } from '../domain/types/vocabulary/discipline.js';
@@ -107,6 +114,82 @@ export class BranchesService {
     }
 
     return toBranchResponse(submitted);
+  }
+
+  async verify(branchId: string, claims: SessionTokenClaims): Promise<BranchResponse> {
+    const actor = await this.resolveActorForVerification(branchId, claims);
+
+    try {
+      assertIsHumanActor(actor);
+      assertSubmittedStatus(actor.branch);
+    } catch (error) {
+      if (error instanceof BranchLifecycleError) {
+        throw toLifecycleConflict(error);
+      }
+      throw error;
+    }
+
+    const verified = await this.branchRepository.verify(branchId);
+    if (verified === undefined) {
+      throw new ConflictException(
+        'Invalid branch lifecycle operation: expected submitted branch, received a different status',
+      );
+    }
+
+    return toBranchResponse(verified);
+  }
+
+  async reject(branchId: string, claims: SessionTokenClaims): Promise<BranchResponse> {
+    const actor = await this.resolveActorForVerification(branchId, claims);
+
+    try {
+      assertIsHumanActor(actor);
+      assertRejectableStatus(actor.branch);
+    } catch (error) {
+      if (error instanceof BranchLifecycleError) {
+        throw toLifecycleConflict(error);
+      }
+      throw error;
+    }
+
+    const rejected = await this.branchRepository.reject(branchId);
+    if (rejected === undefined) {
+      throw new ConflictException(
+        'Invalid branch lifecycle operation: expected submitted or verified branch, received a different status',
+      );
+    }
+
+    return toBranchResponse(rejected);
+  }
+
+  /**
+   * Shared verify/reject preamble (Meridian IDEA-81): looks up the branch first (404 before any
+   * actor/status check), then resolves the acting stakeholder. Unlike submit(), a null discipline
+   * is accepted here — verify/reject are discipline-agnostic per this goal's resolved question.
+   */
+  private async resolveActorForVerification(
+    branchId: string,
+    claims: SessionTokenClaims,
+  ): Promise<HumanActorContext & { branch: Branch }> {
+    const branch = await this.branchRepository.findById(branchId);
+    if (branch === undefined) {
+      throw new NotFoundException(`Branch ${branchId} not found`);
+    }
+
+    const stakeholder = await this.stakeholderRepository.findById(claims.stakeholderId);
+    if (stakeholder === undefined) {
+      throw new BadRequestException(
+        `Stakeholder ${claims.stakeholderId} must exist to verify or reject a branch`,
+      );
+    }
+
+    const actor = {
+      kind: 'human',
+      stakeholderId: claims.stakeholderId,
+      discipline: isDiscipline(stakeholder.discipline) ? stakeholder.discipline : null,
+    } satisfies HumanActorContext;
+
+    return { ...actor, branch };
   }
 
   async findById(id: string): Promise<BranchResponse> {

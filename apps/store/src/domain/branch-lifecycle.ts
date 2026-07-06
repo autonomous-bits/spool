@@ -30,3 +30,17 @@ export function assertDraftStatus(branch: Pick<Branch, 'status'>): void {
     throw new BranchLifecycleError(`expected draft branch, received ${branch.status}`);
   }
 }
+
+export function assertSubmittedStatus(branch: Pick<Branch, 'status'>): void {
+  if (branch.status !== 'submitted') {
+    throw new BranchLifecycleError(`expected submitted branch, received ${branch.status}`);
+  }
+}
+
+export function assertRejectableStatus(branch: Pick<Branch, 'status'>): void {
+  if (branch.status !== 'submitted' && branch.status !== 'verified') {
+    throw new BranchLifecycleError(
+      `expected submitted or verified branch, received ${branch.status}`,
+    );
+  }
+}

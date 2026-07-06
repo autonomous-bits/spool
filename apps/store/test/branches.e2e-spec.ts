@@ -81,6 +81,21 @@ describe('Branches HTTP API (containerized Postgres)', () => {
     return createResponse.body.id as string;
   }
 
+  async function createSubmittedBranch(
+    discipline: 'engineering' | 'product',
+    stakeholderId: string,
+  ): Promise<string> {
+    const branchId = await createBranch(discipline, stakeholderId);
+    const token = mintSessionToken(stakeholderId, discipline);
+
+    const submitResponse = await request(app.getHttpServer())
+      .post(`/branches/${branchId}/submit`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(submitResponse.status).toBe(201);
+    return branchId;
+  }
+
   it('POST /branches creates a draft branch and GET /branches/:id retrieves it', async () => {
     const createResponse = await request(app.getHttpServer())
       .post('/branches')
@@ -217,6 +232,155 @@ describe('Branches HTTP API (containerized Postgres)', () => {
 
     expect(firstResponse.status).toBe(201);
     expect(repeatedResponse.status).toBe(409);
+  });
+
+  it('POST /branches/:id/verify verifies a submitted branch with a cross-discipline stakeholder token and surfaces verifiedAt', async () => {
+    const branchId = await createSubmittedBranch('engineering', engineeringStakeholderId);
+    const token = mintSessionToken(productStakeholderId, 'product');
+
+    const verifyResponse = await request(app.getHttpServer())
+      .post(`/branches/${branchId}/verify`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(verifyResponse.status).toBe(201);
+    expect(verifyResponse.body.status).toBe('verified');
+    expect(typeof verifyResponse.body.verifiedAt).toBe('string');
+
+    const getResponse = await request(app.getHttpServer()).get(`/branches/${branchId}`);
+    expect(getResponse.body.status).toBe('verified');
+    expect(getResponse.body.verifiedAt).toBe(verifyResponse.body.verifiedAt);
+  });
+
+  it('POST /branches/:id/verify succeeds for a stakeholder with a null discipline', async () => {
+    const branchId = await createSubmittedBranch('engineering', engineeringStakeholderId);
+    const token = mintSessionToken(nullDisciplineStakeholderId, null);
+
+    const verifyResponse = await request(app.getHttpServer())
+      .post(`/branches/${branchId}/verify`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(verifyResponse.status).toBe(201);
+    expect(verifyResponse.body.status).toBe('verified');
+  });
+
+  it('POST /branches/:id/verify returns 401 when Authorization is missing', async () => {
+    const branchId = await createSubmittedBranch('engineering', engineeringStakeholderId);
+
+    const response = await request(app.getHttpServer()).post(`/branches/${branchId}/verify`);
+
+    expect(response.status).toBe(401);
+  });
+
+  it('POST /branches/:id/verify returns 404 for an unknown branch id', async () => {
+    const token = mintSessionToken(engineeringStakeholderId, 'engineering');
+
+    const response = await request(app.getHttpServer())
+      .post('/branches/00000000-0000-0000-0000-00000000dead/verify')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(response.status).toBe(404);
+  });
+
+  it('POST /branches/:id/verify returns 400 when the token stakeholder does not resolve', async () => {
+    const branchId = await createSubmittedBranch('engineering', engineeringStakeholderId);
+    const token = mintSessionToken('00000000-0000-0000-0000-00000000beef', 'engineering');
+
+    const response = await request(app.getHttpServer())
+      .post(`/branches/${branchId}/verify`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(response.status).toBe(400);
+  });
+
+  it('POST /branches/:id/verify returns 409 when the branch is not submitted', async () => {
+    const branchId = await createBranch('engineering', engineeringStakeholderId);
+    const token = mintSessionToken(productStakeholderId, 'product');
+
+    const response = await request(app.getHttpServer())
+      .post(`/branches/${branchId}/verify`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(response.status).toBe(409);
+  });
+
+  it('POST /branches/:id/verify returns 409 when the branch was already verified', async () => {
+    const branchId = await createSubmittedBranch('engineering', engineeringStakeholderId);
+    const token = mintSessionToken(productStakeholderId, 'product');
+
+    const firstResponse = await request(app.getHttpServer())
+      .post(`/branches/${branchId}/verify`)
+      .set('Authorization', `Bearer ${token}`);
+    const repeatedResponse = await request(app.getHttpServer())
+      .post(`/branches/${branchId}/verify`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(firstResponse.status).toBe(201);
+    expect(repeatedResponse.status).toBe(409);
+  });
+
+  it('POST /branches/:id/reject resets a submitted branch to draft, clearing verifiedAt and submittedAt', async () => {
+    const branchId = await createSubmittedBranch('engineering', engineeringStakeholderId);
+    const token = mintSessionToken(productStakeholderId, 'product');
+
+    const rejectResponse = await request(app.getHttpServer())
+      .post(`/branches/${branchId}/reject`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(rejectResponse.status).toBe(201);
+    expect(rejectResponse.body.status).toBe('draft');
+    expect(rejectResponse.body.verifiedAt).toBeNull();
+    expect(rejectResponse.body.submittedAt).toBeNull();
+
+    const getResponse = await request(app.getHttpServer()).get(`/branches/${branchId}`);
+    expect(getResponse.body.status).toBe('draft');
+    expect(getResponse.body.verifiedAt).toBeNull();
+    expect(getResponse.body.submittedAt).toBeNull();
+  });
+
+  it('POST /branches/:id/reject resets a verified branch to draft', async () => {
+    const branchId = await createSubmittedBranch('engineering', engineeringStakeholderId);
+    const verifyToken = mintSessionToken(productStakeholderId, 'product');
+    await request(app.getHttpServer())
+      .post(`/branches/${branchId}/verify`)
+      .set('Authorization', `Bearer ${verifyToken}`);
+
+    const rejectResponse = await request(app.getHttpServer())
+      .post(`/branches/${branchId}/reject`)
+      .set('Authorization', `Bearer ${verifyToken}`);
+
+    expect(rejectResponse.status).toBe(201);
+    expect(rejectResponse.body.status).toBe('draft');
+    expect(rejectResponse.body.verifiedAt).toBeNull();
+    expect(rejectResponse.body.submittedAt).toBeNull();
+  });
+
+  it('POST /branches/:id/reject returns 409 when the branch is a draft', async () => {
+    const branchId = await createBranch('engineering', engineeringStakeholderId);
+    const token = mintSessionToken(productStakeholderId, 'product');
+
+    const response = await request(app.getHttpServer())
+      .post(`/branches/${branchId}/reject`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(response.status).toBe(409);
+  });
+
+  it('POST /branches/:id/reject returns 401 when Authorization is missing', async () => {
+    const branchId = await createSubmittedBranch('engineering', engineeringStakeholderId);
+
+    const response = await request(app.getHttpServer()).post(`/branches/${branchId}/reject`);
+
+    expect(response.status).toBe(401);
+  });
+
+  it('POST /branches/:id/reject returns 404 for an unknown branch id', async () => {
+    const token = mintSessionToken(engineeringStakeholderId, 'engineering');
+
+    const response = await request(app.getHttpServer())
+      .post('/branches/00000000-0000-0000-0000-00000000dead/reject')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(response.status).toBe(404);
   });
 
   it('POST /branches returns 400 for an invalid discipline', async () => {

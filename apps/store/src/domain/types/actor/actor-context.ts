@@ -4,7 +4,7 @@ import type { ActorKind } from './actor-kind.js';
 type BaseActorContext = Readonly<{
   kind: ActorKind;
   stakeholderId: string;
-  discipline: Discipline;
+  discipline: Discipline | null;
 }>;
 
 /**
