@@ -14,7 +14,7 @@ const claims = {
 
 describe('BranchesController', () => {
   let controller: BranchesController;
-  let service: Pick<BranchesService, 'create' | 'findById' | 'submit' | 'verify' | 'reject'>;
+  let service: Pick<BranchesService, 'create' | 'findById' | 'submit' | 'verify' | 'reject' | 'merge'>;
   let sessionTokenService: Pick<SessionTokenService, 'verify'>;
 
   beforeEach(async () => {
@@ -29,7 +29,11 @@ describe('BranchesController', () => {
             submit: vi.fn(),
             verify: vi.fn(),
             reject: vi.fn(),
-          } satisfies Pick<BranchesService, 'create' | 'findById' | 'submit' | 'verify' | 'reject'>,
+            merge: vi.fn(),
+          } satisfies Pick<
+            BranchesService,
+            'create' | 'findById' | 'submit' | 'verify' | 'reject' | 'merge'
+          >,
         },
         {
           provide: SessionTokenService,
@@ -54,6 +58,7 @@ describe('BranchesController', () => {
       divergedAt: new Date().toISOString(),
       submittedAt: null,
       verifiedAt: null,
+      mergedAt: null,
       createdAt: new Date(),
       updatedAt: new Date(),
       createdByStakeholderId: 'stakeholder-1',
@@ -83,6 +88,7 @@ describe('BranchesController', () => {
       divergedAt: new Date().toISOString(),
       submittedAt: new Date().toISOString(),
       verifiedAt: null,
+      mergedAt: null,
       createdAt: new Date(),
       updatedAt: new Date(),
       createdByStakeholderId: 'stakeholder-1',
@@ -120,6 +126,7 @@ describe('BranchesController', () => {
       divergedAt: new Date().toISOString(),
       submittedAt: new Date().toISOString(),
       verifiedAt: new Date().toISOString(),
+      mergedAt: null,
       createdAt: new Date(),
       updatedAt: new Date(),
       createdByStakeholderId: 'stakeholder-1',
@@ -149,6 +156,7 @@ describe('BranchesController', () => {
       divergedAt: new Date().toISOString(),
       submittedAt: null,
       verifiedAt: null,
+      mergedAt: null,
       createdAt: new Date(),
       updatedAt: new Date(),
       createdByStakeholderId: 'stakeholder-1',
@@ -169,6 +177,44 @@ describe('BranchesController', () => {
     expect(service.reject).not.toHaveBeenCalled();
   });
 
+  it('verifies the bearer token and delegates merge to BranchesService', async () => {
+    const expected = {
+      id: 'abc',
+      name: 'feature-branch',
+      discipline: 'product',
+      status: 'merged',
+      divergedAt: new Date().toISOString(),
+      submittedAt: new Date().toISOString(),
+      verifiedAt: new Date().toISOString(),
+      mergedAt: new Date().toISOString(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      createdByStakeholderId: 'stakeholder-1',
+    } satisfies BranchResponse;
+    vi.mocked(sessionTokenService.verify).mockReturnValue(claims);
+    vi.mocked(service.merge).mockResolvedValue(expected);
+
+    const result = await controller.merge('abc', 'Bearer signed-token');
+
+    expect(result).toEqual(expected);
+    expect(sessionTokenService.verify).toHaveBeenCalledWith('signed-token');
+    expect(service.merge).toHaveBeenCalledWith('abc', claims);
+  });
+
+  it('rejects merge with a missing Authorization header', async () => {
+    await expect(controller.merge('abc', undefined)).rejects.toThrow(UnauthorizedException);
+    expect(sessionTokenService.verify).not.toHaveBeenCalled();
+    expect(service.merge).not.toHaveBeenCalled();
+  });
+
+  it('rejects merge with a malformed Authorization header', async () => {
+    await expect(controller.merge('abc', 'Token signed-token')).rejects.toThrow(
+      UnauthorizedException,
+    );
+    expect(sessionTokenService.verify).not.toHaveBeenCalled();
+    expect(service.merge).not.toHaveBeenCalled();
+  });
+
   it('delegates retrieval to BranchesService', async () => {
     const expected = {
       id: 'abc',
@@ -178,6 +224,7 @@ describe('BranchesController', () => {
       divergedAt: new Date().toISOString(),
       submittedAt: null,
       verifiedAt: null,
+      mergedAt: null,
       createdAt: new Date(),
       updatedAt: new Date(),
       createdByStakeholderId: 'stakeholder-1',

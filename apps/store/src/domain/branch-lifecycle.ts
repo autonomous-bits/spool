@@ -44,3 +44,9 @@ export function assertRejectableStatus(branch: Pick<Branch, 'status'>): void {
     );
   }
 }
+
+export function assertMergeableStatus(branch: Pick<Branch, 'status'>): void {
+  if (branch.status !== 'verified') {
+    throw new BranchLifecycleError(`expected verified branch, received ${branch.status}`);
+  }
+}

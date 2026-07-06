@@ -8,7 +8,8 @@ import type { Discipline } from '../domain/types/vocabulary/discipline.js';
  * contract is typed independently of the domain entity's internal shape. `divergedAt`,
  * `submittedAt`, and `verifiedAt` are serialized as ISO-8601 strings (`submittedAt`/`verifiedAt`
  * are nullable until the branch has been submitted/verified, and are cleared back to null on
- * reject per Meridian IDEA-81).
+ * reject per Meridian IDEA-81). `mergedAt` is nullable until the branch has been merged into
+ * mainline (Meridian IDEA-40/IDEA-74, G06).
  */
 export interface BranchResponse {
   id: string;
@@ -18,6 +19,7 @@ export interface BranchResponse {
   divergedAt: string;
   submittedAt: string | null;
   verifiedAt: string | null;
+  mergedAt: string | null;
   createdAt: Date;
   updatedAt: Date;
   createdByStakeholderId: string;
@@ -32,6 +34,7 @@ export function toBranchResponse(branch: Branch): BranchResponse {
     divergedAt: branch.divergedAt.toISOString(),
     submittedAt: branch.submittedAt?.toISOString() ?? null,
     verifiedAt: branch.verifiedAt?.toISOString() ?? null,
+    mergedAt: branch.mergedAt?.toISOString() ?? null,
     createdAt: branch.createdAt,
     updatedAt: branch.updatedAt,
     createdByStakeholderId: branch.createdByStakeholderId,

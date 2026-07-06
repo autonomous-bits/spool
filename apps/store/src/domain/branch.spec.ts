@@ -33,6 +33,28 @@ describe('Branch', () => {
     expect(branch.submittedAt).toEqual(submittedAt);
   });
 
+  it('round-trips mergedAt/mergedByStakeholderId when provided', () => {
+    const mergedAt = new Date('2026-07-06T09:00:00.000Z');
+
+    const branch = new Branch(
+      validProps({
+        status: 'merged',
+        mergedAt,
+        mergedByStakeholderId: '00000000-0000-0000-0000-000000000002',
+      }),
+    );
+
+    expect(branch.mergedAt).toEqual(mergedAt);
+    expect(branch.mergedByStakeholderId).toBe('00000000-0000-0000-0000-000000000002');
+  });
+
+  it('leaves mergedAt/mergedByStakeholderId undefined when omitted', () => {
+    const branch = new Branch(validProps());
+
+    expect(branch.mergedAt).toBeUndefined();
+    expect(branch.mergedByStakeholderId).toBeUndefined();
+  });
+
   it.each(['', '   '])('rejects blank name %j', (name) => {
     expect(() => new Branch(validProps({ name }))).toThrow(TypeError);
   });

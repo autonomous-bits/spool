@@ -4,6 +4,7 @@ import {
   BranchLifecycleError,
   assertDraftStatus,
   assertIsHumanActor,
+  assertMergeableStatus,
   assertRejectableStatus,
   assertSubmittedStatus,
   assertSubmitDiscipline,
@@ -143,6 +144,26 @@ describe('branch lifecycle assertions', () => {
         expect(() => assertRejectableStatus(branch)).toThrow(BranchLifecycleError);
         expect(() => assertRejectableStatus(branch)).toThrow(
           `expected submitted or verified branch, received ${status}`,
+        );
+      },
+    );
+  });
+
+  describe('assertMergeableStatus', () => {
+    it('accepts a verified branch', () => {
+      const branch = createBranch({ status: 'verified' });
+
+      expect(() => assertMergeableStatus(branch)).not.toThrow();
+    });
+
+    it.each(['draft', 'submitted', 'merged'] as const)(
+      'throws when the branch status is %s',
+      (status) => {
+        const branch = createBranch({ status });
+
+        expect(() => assertMergeableStatus(branch)).toThrow(BranchLifecycleError);
+        expect(() => assertMergeableStatus(branch)).toThrow(
+          `expected verified branch, received ${status}`,
         );
       },
     );

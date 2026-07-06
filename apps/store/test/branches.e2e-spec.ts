@@ -96,6 +96,21 @@ describe('Branches HTTP API (containerized Postgres)', () => {
     return branchId;
   }
 
+  async function createVerifiedBranch(
+    discipline: 'engineering' | 'product',
+    stakeholderId: string,
+  ): Promise<string> {
+    const branchId = await createSubmittedBranch(discipline, stakeholderId);
+    const verifyToken = mintSessionToken(productStakeholderId, 'product');
+
+    const verifyResponse = await request(app.getHttpServer())
+      .post(`/branches/${branchId}/verify`)
+      .set('Authorization', `Bearer ${verifyToken}`);
+
+    expect(verifyResponse.status).toBe(201);
+    return branchId;
+  }
+
   it('POST /branches creates a draft branch and GET /branches/:id retrieves it', async () => {
     const createResponse = await request(app.getHttpServer())
       .post('/branches')
@@ -378,6 +393,64 @@ describe('Branches HTTP API (containerized Postgres)', () => {
 
     const response = await request(app.getHttpServer())
       .post('/branches/00000000-0000-0000-0000-00000000dead/reject')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(response.status).toBe(404);
+  });
+
+  it('POST /branches/:id/merge merges a verified branch and returns mergedAt', async () => {
+    const branchId = await createVerifiedBranch('engineering', engineeringStakeholderId);
+    const token = mintSessionToken(productStakeholderId, 'product');
+
+    const mergeResponse = await request(app.getHttpServer())
+      .post(`/branches/${branchId}/merge`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(mergeResponse.status).toBe(201);
+    expect(mergeResponse.body.status).toBe('merged');
+    expect(typeof mergeResponse.body.mergedAt).toBe('string');
+
+    const getResponse = await request(app.getHttpServer()).get(`/branches/${branchId}`);
+    expect(getResponse.body.status).toBe('merged');
+    expect(getResponse.body.mergedAt).toBe(mergeResponse.body.mergedAt);
+  });
+
+  it('POST /branches/:id/merge is discipline-agnostic (any human stakeholder can merge)', async () => {
+    const branchId = await createVerifiedBranch('engineering', engineeringStakeholderId);
+    const token = mintSessionToken(nullDisciplineStakeholderId, null);
+
+    const mergeResponse = await request(app.getHttpServer())
+      .post(`/branches/${branchId}/merge`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(mergeResponse.status).toBe(201);
+    expect(mergeResponse.body.status).toBe('merged');
+  });
+
+  it('POST /branches/:id/merge returns 409 when the branch is not verified', async () => {
+    const branchId = await createSubmittedBranch('engineering', engineeringStakeholderId);
+    const token = mintSessionToken(productStakeholderId, 'product');
+
+    const response = await request(app.getHttpServer())
+      .post(`/branches/${branchId}/merge`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(response.status).toBe(409);
+  });
+
+  it('POST /branches/:id/merge returns 401 when Authorization is missing', async () => {
+    const branchId = await createVerifiedBranch('engineering', engineeringStakeholderId);
+
+    const response = await request(app.getHttpServer()).post(`/branches/${branchId}/merge`);
+
+    expect(response.status).toBe(401);
+  });
+
+  it('POST /branches/:id/merge returns 404 for an unknown branch id', async () => {
+    const token = mintSessionToken(engineeringStakeholderId, 'engineering');
+
+    const response = await request(app.getHttpServer())
+      .post('/branches/00000000-0000-0000-0000-00000000dead/merge')
       .set('Authorization', `Bearer ${token}`);
 
     expect(response.status).toBe(404);

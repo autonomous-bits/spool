@@ -14,6 +14,8 @@ export interface BranchProps {
   divergedAt?: DivergencePoint;
   submittedAt?: Date;
   verifiedAt?: Date;
+  mergedAt?: Date;
+  mergedByStakeholderId?: string;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -41,6 +43,8 @@ export class Branch {
   readonly divergedAt: DivergencePoint;
   readonly submittedAt?: Date;
   readonly verifiedAt?: Date;
+  readonly mergedAt?: Date;
+  readonly mergedByStakeholderId?: string;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 
@@ -61,6 +65,12 @@ export class Branch {
     }
     if (props.verifiedAt !== undefined) {
       this.verifiedAt = props.verifiedAt;
+    }
+    if (props.mergedAt !== undefined) {
+      this.mergedAt = props.mergedAt;
+    }
+    if (props.mergedByStakeholderId !== undefined) {
+      this.mergedByStakeholderId = props.mergedByStakeholderId;
     }
     this.createdAt = props.createdAt ?? new Date();
     this.updatedAt = props.updatedAt ?? this.createdAt;
