@@ -6,11 +6,13 @@ import { BranchRepository } from './branch.repository.js';
 import { ChunkArtifactRepository } from './chunk-artifact.repository.js';
 import { ChunkRepository } from './chunk.repository.js';
 import { EdgeRepository } from './edge.repository.js';
+import { FeedbackNotificationRepository } from './feedback-notification.repository.js';
 import { LocalFileBlobStore } from './local-file-blob-store.js';
 import { loadLocalFileBlobStoreConfig } from './local-file-blob-store-config.js';
 import { LOCAL_FILE_BLOB_STORE_CONFIG } from './local-file-blob-store-config.token.js';
 import { StakeholderRepository } from './stakeholder.repository.js';
 import { SuggestionRepository } from './suggestion.repository.js';
+import { VerificationSignalRepository } from './verification-signal.repository.js';
 import { loadDatabaseConfig } from './database-config.js';
 import { PG_POOL } from './pg-pool.token.js';
 
@@ -51,6 +53,8 @@ class PgPoolProvider implements OnApplicationShutdown {
     SuggestionRepository,
     ArtifactRepository,
     ChunkArtifactRepository,
+    VerificationSignalRepository,
+    FeedbackNotificationRepository,
   ],
   exports: [
     PG_POOL,
@@ -62,6 +66,8 @@ class PgPoolProvider implements OnApplicationShutdown {
     SuggestionRepository,
     ArtifactRepository,
     ChunkArtifactRepository,
+    VerificationSignalRepository,
+    FeedbackNotificationRepository,
   ],
 })
 // eslint-disable-next-line @typescript-eslint/no-extraneous-class -- NestJS module classes are intentionally empty; behavior comes entirely from the @Module decorator.

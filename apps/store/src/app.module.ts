@@ -5,8 +5,10 @@ import { BranchesModule } from './branches/branches.module.js';
 import { ChunksModule } from './chunks/chunks.module.js';
 import { EdgesModule } from './edges/edges.module.js';
 import { HealthController } from './health.controller.js';
+import { NotificationsModule } from './notifications/notifications.module.js';
 import { PersistenceModule } from './persistence/persistence.module.js';
 import { SuggestionsModule } from './suggestions/suggestions.module.js';
+import { VerificationSignalsModule } from './verification-signals/verification-signals.module.js';
 
 @Module({
   imports: [
@@ -17,6 +19,8 @@ import { SuggestionsModule } from './suggestions/suggestions.module.js';
     AuthModule,
     SuggestionsModule,
     ArtifactsModule,
+    VerificationSignalsModule,
+    NotificationsModule,
   ],
   controllers: [HealthController],
 })

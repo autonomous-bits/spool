@@ -6,6 +6,7 @@ import {
   assertIsHumanActor,
   assertMergeableStatus,
   assertRejectableStatus,
+  assertReviewableStatus,
   assertSubmittedStatus,
   assertSubmitDiscipline,
 } from './branch-lifecycle.js';
@@ -164,6 +165,29 @@ describe('branch lifecycle assertions', () => {
         expect(() => { assertMergeableStatus(branch); }).toThrow(BranchLifecycleError);
         expect(() => { assertMergeableStatus(branch); }).toThrow(
           `expected verified branch, received ${status}`,
+        );
+      },
+    );
+  });
+
+  describe('assertReviewableStatus', () => {
+    it.each(['submitted', 'verified'] as const)(
+      'accepts a %s branch',
+      (status) => {
+        const branch = createBranch({ status });
+
+        expect(() => { assertReviewableStatus(branch); }).not.toThrow();
+      },
+    );
+
+    it.each(['draft', 'merged'] as const)(
+      'throws when the branch status is %s',
+      (status) => {
+        const branch = createBranch({ status });
+
+        expect(() => { assertReviewableStatus(branch); }).toThrow(BranchLifecycleError);
+        expect(() => { assertReviewableStatus(branch); }).toThrow(
+          `expected submitted or verified branch, received ${status}`,
         );
       },
     );

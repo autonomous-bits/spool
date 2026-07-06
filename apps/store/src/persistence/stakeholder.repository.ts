@@ -1,4 +1,4 @@
-import type { Pool, QueryResult, QueryResultRow } from 'pg';
+import type { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 import { Inject, Injectable } from '@nestjs/common';
 import { PG_POOL } from './pg-pool.token.js';
 
@@ -30,6 +30,14 @@ function toStakeholderRecord(row: StakeholderRow): StakeholderRecord {
 @Injectable()
 export class StakeholderRepository {
   constructor(@Inject(PG_POOL) private readonly pool: Pool) {}
+
+  async findAll(client?: PoolClient): Promise<StakeholderRecord[]> {
+    const result: QueryResult<StakeholderRow> = await (client ?? this.pool).query<StakeholderRow>(
+      'SELECT id, discipline FROM stakeholders ORDER BY created_at ASC, id ASC',
+    );
+
+    return result.rows.map(toStakeholderRecord);
+  }
 
   async findById(id: string): Promise<StakeholderRecord | undefined> {
     const result: QueryResult<StakeholderRow> = await this.pool.query<StakeholderRow>(

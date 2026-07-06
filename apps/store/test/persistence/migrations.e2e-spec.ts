@@ -98,7 +98,7 @@ describe('store migrations (containerized Postgres)', () => {
     const migrationRows = await pool.query<{ count: string }>(
       'SELECT COUNT(*)::text AS count FROM schema_migrations',
     );
-    expect(migrationRows.rows[0]?.count).toBe('9');
+    expect(migrationRows.rows[0]?.count).toBe('11');
   });
 
   it('creates the suggestions table with the expected columns', async () => {
@@ -291,5 +291,46 @@ describe('store migrations (containerized Postgres)', () => {
     expect(mainlineDef).toContain('UNIQUE INDEX idx_chunk_artifacts_mainline');
     expect(mainlineDef).toContain('branch_id IS NULL');
     expect(mainlineDef).toContain("(status)::text = 'active'::text");
+  });
+
+  it('creates the verification_signals table with the expected columns', async () => {
+    const result = await pool.query<{ column_name: string }>(
+      `SELECT column_name FROM information_schema.columns WHERE table_name = 'verification_signals'`,
+    );
+    const columns = result.rows.map((row) => row.column_name).sort();
+
+    expect(columns).toEqual(
+      ['id', 'branch_id', 'verifier_name', 'status', 'reason', 'created_at'].sort(),
+    );
+  });
+
+  it('enforces the verification_signals status CHECK constraint', async () => {
+    const constraints = await pool.query<{ conname: string }>(
+      `SELECT conname FROM pg_constraint WHERE conrelid = 'verification_signals'::regclass AND contype = 'c'`,
+    );
+    expect(constraints.rows.length).toBeGreaterThan(0);
+  });
+
+  it('creates the feedback_notifications table with the expected columns', async () => {
+    const result = await pool.query<{ column_name: string }>(
+      `SELECT column_name FROM information_schema.columns WHERE table_name = 'feedback_notifications'`,
+    );
+    const columns = result.rows.map((row) => row.column_name).sort();
+
+    expect(columns).toEqual(
+      ['id', 'branch_id', 'stakeholder_id', 'signal_id', 'status', 'created_at', 'updated_at'].sort(),
+    );
+  });
+
+  it('creates idx_feedback_notifications_stakeholder on stakeholder_id and status', async () => {
+    const result = await pool.query<{ indexname: string; indexdef: string }>(
+      `SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'feedback_notifications'`,
+    );
+    const byName = new Map(result.rows.map((row) => [row.indexname, row.indexdef]));
+
+    expect(byName.has('idx_feedback_notifications_stakeholder')).toBe(true);
+    expect(byName.get('idx_feedback_notifications_stakeholder')).toContain(
+      '(stakeholder_id, status)',
+    );
   });
 });

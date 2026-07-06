@@ -5,41 +5,12 @@ import {
   Headers,
   Param,
   Post,
-  UnauthorizedException,
 } from '@nestjs/common';
-import { InvalidSessionTokenError, SessionTokenService, type SessionTokenClaims } from '../auth/session-token.service.js';
+import { SessionTokenService } from '../auth/session-token.service.js';
+import { verifySessionClaims } from '../auth/session-claims.helper.js';
 import type { BranchResponse } from './branch-response.dto.js';
 import { parseCreateBranchRequest } from './create-branch-request.dto.js';
 import { BranchesService } from './branches.service.js';
-
-function extractBearerToken(authorizationHeader: unknown): string {
-  if (typeof authorizationHeader !== 'string') {
-    throw new UnauthorizedException('Missing Authorization header');
-  }
-
-  const [scheme, token, ...rest] = authorizationHeader.split(' ');
-  if (scheme !== 'Bearer' || token === undefined || token.trim().length === 0 || rest.length > 0) {
-    throw new UnauthorizedException('Authorization header must use Bearer token format');
-  }
-
-  return token;
-}
-
-function verifySessionClaims(
-  authorizationHeader: unknown,
-  sessionTokenService: SessionTokenService,
-): SessionTokenClaims {
-  const token = extractBearerToken(authorizationHeader);
-
-  try {
-    return sessionTokenService.verify(token);
-  } catch (error) {
-    if (error instanceof InvalidSessionTokenError) {
-      throw new UnauthorizedException(error.message);
-    }
-    throw error;
-  }
-}
 
 @Controller('branches')
 export class BranchesController {

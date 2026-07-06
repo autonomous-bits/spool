@@ -50,3 +50,17 @@ export function assertMergeableStatus(branch: Pick<Branch, 'status'>): void {
     throw new BranchLifecycleError(`expected verified branch, received ${branch.status}`);
   }
 }
+
+/**
+ * Meridian IDEA-20/IDEA-43: a branch's current state is locked for verification once submitted,
+ * and stays reviewable through the 'verified' state (multiple rounds of feedback are allowed
+ * before a human decides to merge or send it back to draft). Signal submission is rejected for
+ * 'draft' (nothing has been submitted yet) and 'merged' (review is over) branches.
+ */
+export function assertReviewableStatus(branch: Pick<Branch, 'status'>): void {
+  if (branch.status !== 'submitted' && branch.status !== 'verified') {
+    throw new BranchLifecycleError(
+      `expected submitted or verified branch, received ${branch.status}`,
+    );
+  }
+}
