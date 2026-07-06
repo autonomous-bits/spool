@@ -48,16 +48,16 @@ export function parseCreateSuggestionRequest(body: unknown): CreateSuggestionReq
 
   const stakeholderId = requireStringField(record, 'stakeholderId');
 
-  const discipline = record['discipline'];
+  const discipline = record.discipline;
   if (!isDiscipline(discipline)) {
     throw new BadRequestException(`Invalid discipline: ${JSON.stringify(discipline)}`);
   }
 
-  const hasAnyChunkField = isNonEmptyString(record['label']) || isNonEmptyString(record['content']);
+  const hasAnyChunkField = isNonEmptyString(record.label) || isNonEmptyString(record.content);
   const hasAnyEdgeField =
-    isNonEmptyString(record['fromChunkLabel']) ||
-    isNonEmptyString(record['toChunkLabel']) ||
-    record['relationshipType'] !== undefined;
+    isNonEmptyString(record.fromChunkLabel) ||
+    isNonEmptyString(record.toChunkLabel) ||
+    record.relationshipType !== undefined;
 
   if (hasAnyChunkField && hasAnyEdgeField) {
     throw new BadRequestException(
@@ -85,7 +85,7 @@ export function parseCreateSuggestionRequest(body: unknown): CreateSuggestionReq
       );
     }
 
-    const relationshipType = record['relationshipType'];
+    const relationshipType = record.relationshipType;
     if (!isEdgeType(relationshipType)) {
       throw new BadRequestException(`Invalid relationshipType: ${JSON.stringify(relationshipType)}`);
     }

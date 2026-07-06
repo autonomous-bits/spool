@@ -11,14 +11,22 @@ import { createServer } from 'node:http';
  * not application code.
  */
 
+/** @typedef {import('node:http').IncomingMessage} IncomingMessage */
+/** @typedef {import('node:http').ServerResponse} ServerResponse */
+
 const GITHUB_LOGIN = process.env.OAUTH_STUB_GITHUB_LOGIN ?? 'spool-e2e-oauth-fixture';
 const ACCESS_TOKEN = 'stub-access-token';
 const PORT = Number.parseInt(process.env.PORT ?? '4001', 10);
 
+/**
+ * @param {IncomingMessage} req
+ * @returns {Promise<unknown>}
+ */
 function readJsonBody(req) {
   return new Promise((resolve, reject) => {
+    /** @type {Buffer[]} */
     const chunks = [];
-    req.on('data', (chunk) => chunks.push(chunk));
+    req.on('data', (/** @type {Buffer} */ chunk) => chunks.push(chunk));
     req.on('end', () => {
       if (chunks.length === 0) {
         resolve(undefined);
@@ -34,6 +42,11 @@ function readJsonBody(req) {
   });
 }
 
+/**
+ * @param {ServerResponse} res
+ * @param {number} statusCode
+ * @param {unknown} body
+ */
 function sendJson(res, statusCode, body) {
   const payload = JSON.stringify(body);
   res.writeHead(statusCode, {
@@ -43,18 +56,20 @@ function sendJson(res, statusCode, body) {
   res.end(payload);
 }
 
-const server = createServer(async (req, res) => {
+const server = createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://github-oauth-stub.local');
 
   if (req.method === 'POST' && url.pathname === '/login/oauth/access_token') {
-    await readJsonBody(req);
-    sendJson(res, 200, { access_token: ACCESS_TOKEN, token_type: 'bearer', scope: 'read:user' });
+    void readJsonBody(req).then(() => {
+      sendJson(res, 200, { access_token: ACCESS_TOKEN, token_type: 'bearer', scope: 'read:user' });
+    });
     return;
   }
 
   if (req.method === 'GET' && url.pathname === '/user') {
-    const authorization = req.headers['authorization'];
-    if (authorization !== `Bearer ${ACCESS_TOKEN}`) {
+    const { authorization } = req.headers;
+    const expected = ['Bearer', ACCESS_TOKEN].join(' ');
+    if (authorization !== expected) {
       sendJson(res, 401, { message: 'Bad credentials' });
       return;
     }
@@ -66,6 +81,5 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  // eslint-disable-next-line no-console -- Docker-only stub; container logs are the only observability here.
-  console.log(`github-oauth-stub listening on port ${PORT}`);
+  console.log(`github-oauth-stub listening on port ${String(PORT)}`);
 });

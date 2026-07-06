@@ -19,7 +19,7 @@ export function parseAcceptSuggestionRequest(body: unknown): AcceptSuggestionReq
   }
 
   const record = body as Record<string, unknown>;
-  const name = record['name'];
+  const name = record.name;
   if (typeof name !== 'string' || name.trim().length === 0) {
     throw new BadRequestException('name must be a non-empty string');
   }

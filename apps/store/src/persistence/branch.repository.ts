@@ -150,8 +150,7 @@ export class BranchRepository {
       );
       const branchRow = branchResult.rows[0];
       if (
-        branchRow === undefined ||
-        branchRow.status !== 'draft' ||
+        branchRow?.status !== 'draft' ||
         branchRow.updated_at > attemptedAt
       ) {
         await client.query('ROLLBACK');
@@ -203,8 +202,7 @@ export class BranchRepository {
       );
       const branchRow = branchResult.rows[0];
       if (
-        branchRow === undefined ||
-        branchRow.status !== 'submitted' ||
+        branchRow?.status !== 'submitted' ||
         branchRow.updated_at > attemptedAt
       ) {
         await client.query('ROLLBACK');
@@ -314,7 +312,7 @@ export class BranchRepository {
         [branchId],
       );
       const branchRow = branchResult.rows[0];
-      if (branchRow === undefined || branchRow.status !== 'verified') {
+      if (branchRow?.status !== 'verified') {
         await client.query('ROLLBACK');
         transactionOpen = false;
         return undefined;

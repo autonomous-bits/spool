@@ -84,7 +84,7 @@ async function assertDraftBranchLock(client: PoolClient, branchId: string): Prom
   );
 
   const row = result.rows[0];
-  if (row === undefined || row.status !== 'draft') {
+  if (row?.status !== 'draft') {
     throw createNonDraftBranchConflict(branchId);
   }
 }

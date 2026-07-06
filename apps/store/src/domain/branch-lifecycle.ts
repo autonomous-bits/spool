@@ -20,7 +20,7 @@ export function assertSubmitDiscipline(
 ): void {
   if (actor.discipline !== branch.discipline) {
     throw new BranchLifecycleError(
-      `actor discipline ${actor.discipline} does not match branch discipline ${branch.discipline}`,
+      `actor discipline ${String(actor.discipline)} does not match branch discipline ${branch.discipline}`,
     );
   }
 }

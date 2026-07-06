@@ -14,7 +14,7 @@ describe('store migrations (containerized Postgres)', () => {
   });
 
   afterAll(async () => {
-    await database?.close();
+    await database.close();
   });
 
   it('creates the stakeholders table with the expected columns', async () => {
@@ -98,7 +98,7 @@ describe('store migrations (containerized Postgres)', () => {
     const migrationRows = await pool.query<{ count: string }>(
       'SELECT COUNT(*)::text AS count FROM schema_migrations',
     );
-    expect(migrationRows.rows[0]?.count).toBe('8');
+    expect(migrationRows.rows[0]?.count).toBe('9');
   });
 
   it('creates the suggestions table with the expected columns', async () => {
@@ -240,5 +240,56 @@ describe('store migrations (containerized Postgres)', () => {
     const branchActiveDef = byName.get('idx_edges_branch_active') ?? '';
     expect(branchActiveDef).toContain('UNIQUE INDEX idx_edges_branch_active');
     expect(branchActiveDef).toContain("(status)::text = 'active'::text");
+  });
+
+  it('creates the artifacts table with the expected columns', async () => {
+    const result = await pool.query<{ column_name: string }>(
+      `SELECT column_name FROM information_schema.columns WHERE table_name = 'artifacts'`,
+    );
+    const columns = result.rows.map((row) => row.column_name).sort();
+
+    expect(columns).toEqual(
+      ['created_at', 'created_by_stakeholder_id', 'id', 'mime_type', 'uri'].sort(),
+    );
+  });
+
+  it('creates the chunk_artifacts table with the expected columns', async () => {
+    const result = await pool.query<{ column_name: string }>(
+      `SELECT column_name FROM information_schema.columns WHERE table_name = 'chunk_artifacts'`,
+    );
+    const columns = result.rows.map((row) => row.column_name).sort();
+
+    expect(columns).toEqual(
+      [
+        'artifact_id',
+        'branch_id',
+        'chunk_label',
+        'created_at',
+        'created_by_stakeholder_id',
+        'id',
+        'origin_branch_id',
+        'status',
+        'updated_at',
+        'updated_by_stakeholder_id',
+      ].sort(),
+    );
+  });
+
+  it('creates idx_chunk_artifacts_branch_lookup and idx_chunk_artifacts_mainline (IDEA-64)', async () => {
+    const result = await pool.query<{ indexname: string; indexdef: string }>(
+      `SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'chunk_artifacts'`,
+    );
+    const byName = new Map(result.rows.map((row) => [row.indexname, row.indexdef]));
+
+    expect(byName.has('idx_chunk_artifacts_branch_lookup')).toBe(true);
+    expect(byName.get('idx_chunk_artifacts_branch_lookup')).toContain(
+      '(branch_id, chunk_label, artifact_id)',
+    );
+
+    expect(byName.has('idx_chunk_artifacts_mainline')).toBe(true);
+    const mainlineDef = byName.get('idx_chunk_artifacts_mainline') ?? '';
+    expect(mainlineDef).toContain('UNIQUE INDEX idx_chunk_artifacts_mainline');
+    expect(mainlineDef).toContain('branch_id IS NULL');
+    expect(mainlineDef).toContain("(status)::text = 'active'::text");
   });
 });

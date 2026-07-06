@@ -54,20 +54,20 @@ describe('branch lifecycle assertions', () => {
     it('accepts a human actor', () => {
       const actor = createHumanActor();
 
-      expect(() => assertIsHumanActor(actor)).not.toThrow();
+      expect(() => { assertIsHumanActor(actor); }).not.toThrow();
     });
 
     it('accepts a human actor with a null discipline', () => {
       const actor = createHumanActor({ discipline: null });
 
-      expect(() => assertIsHumanActor(actor)).not.toThrow();
+      expect(() => { assertIsHumanActor(actor); }).not.toThrow();
     });
 
     it('throws when the actor is delegated', () => {
       const actor = createDelegatedActor();
 
-      expect(() => assertIsHumanActor(actor)).toThrow(BranchLifecycleError);
-      expect(() => assertIsHumanActor(actor)).toThrow('expected human actor');
+      expect(() => { assertIsHumanActor(actor); }).toThrow(BranchLifecycleError);
+      expect(() => { assertIsHumanActor(actor); }).toThrow('expected human actor');
     });
   });
 
@@ -76,15 +76,15 @@ describe('branch lifecycle assertions', () => {
       const actor = createHumanActor({ discipline: 'product' });
       const branch = createBranch({ discipline: 'product' });
 
-      expect(() => assertSubmitDiscipline(actor, branch)).not.toThrow();
+      expect(() => { assertSubmitDiscipline(actor, branch); }).not.toThrow();
     });
 
     it('throws when the actor discipline does not match the branch', () => {
       const actor = createHumanActor({ discipline: 'engineering' });
       const branch = createBranch({ discipline: 'product' });
 
-      expect(() => assertSubmitDiscipline(actor, branch)).toThrow(BranchLifecycleError);
-      expect(() => assertSubmitDiscipline(actor, branch)).toThrow('does not match branch discipline');
+      expect(() => { assertSubmitDiscipline(actor, branch); }).toThrow(BranchLifecycleError);
+      expect(() => { assertSubmitDiscipline(actor, branch); }).toThrow('does not match branch discipline');
     });
   });
 
@@ -92,7 +92,7 @@ describe('branch lifecycle assertions', () => {
     it('accepts a draft branch', () => {
       const branch = createBranch({ status: 'draft' });
 
-      expect(() => assertDraftStatus(branch)).not.toThrow();
+      expect(() => { assertDraftStatus(branch); }).not.toThrow();
     });
 
     it.each(['submitted', 'verified', 'merged'] as const)(
@@ -100,8 +100,8 @@ describe('branch lifecycle assertions', () => {
       (status) => {
         const branch = createBranch({ status });
 
-        expect(() => assertDraftStatus(branch)).toThrow(BranchLifecycleError);
-        expect(() => assertDraftStatus(branch)).toThrow(`expected draft branch, received ${status}`);
+        expect(() => { assertDraftStatus(branch); }).toThrow(BranchLifecycleError);
+        expect(() => { assertDraftStatus(branch); }).toThrow(`expected draft branch, received ${status}`);
       },
     );
   });
@@ -110,7 +110,7 @@ describe('branch lifecycle assertions', () => {
     it('accepts a submitted branch', () => {
       const branch = createBranch({ status: 'submitted' });
 
-      expect(() => assertSubmittedStatus(branch)).not.toThrow();
+      expect(() => { assertSubmittedStatus(branch); }).not.toThrow();
     });
 
     it.each(['draft', 'verified', 'merged'] as const)(
@@ -118,8 +118,8 @@ describe('branch lifecycle assertions', () => {
       (status) => {
         const branch = createBranch({ status });
 
-        expect(() => assertSubmittedStatus(branch)).toThrow(BranchLifecycleError);
-        expect(() => assertSubmittedStatus(branch)).toThrow(
+        expect(() => { assertSubmittedStatus(branch); }).toThrow(BranchLifecycleError);
+        expect(() => { assertSubmittedStatus(branch); }).toThrow(
           `expected submitted branch, received ${status}`,
         );
       },
@@ -132,7 +132,7 @@ describe('branch lifecycle assertions', () => {
       (status) => {
         const branch = createBranch({ status });
 
-        expect(() => assertRejectableStatus(branch)).not.toThrow();
+        expect(() => { assertRejectableStatus(branch); }).not.toThrow();
       },
     );
 
@@ -141,8 +141,8 @@ describe('branch lifecycle assertions', () => {
       (status) => {
         const branch = createBranch({ status });
 
-        expect(() => assertRejectableStatus(branch)).toThrow(BranchLifecycleError);
-        expect(() => assertRejectableStatus(branch)).toThrow(
+        expect(() => { assertRejectableStatus(branch); }).toThrow(BranchLifecycleError);
+        expect(() => { assertRejectableStatus(branch); }).toThrow(
           `expected submitted or verified branch, received ${status}`,
         );
       },
@@ -153,7 +153,7 @@ describe('branch lifecycle assertions', () => {
     it('accepts a verified branch', () => {
       const branch = createBranch({ status: 'verified' });
 
-      expect(() => assertMergeableStatus(branch)).not.toThrow();
+      expect(() => { assertMergeableStatus(branch); }).not.toThrow();
     });
 
     it.each(['draft', 'submitted', 'merged'] as const)(
@@ -161,8 +161,8 @@ describe('branch lifecycle assertions', () => {
       (status) => {
         const branch = createBranch({ status });
 
-        expect(() => assertMergeableStatus(branch)).toThrow(BranchLifecycleError);
-        expect(() => assertMergeableStatus(branch)).toThrow(
+        expect(() => { assertMergeableStatus(branch); }).toThrow(BranchLifecycleError);
+        expect(() => { assertMergeableStatus(branch); }).toThrow(
           `expected verified branch, received ${status}`,
         );
       },

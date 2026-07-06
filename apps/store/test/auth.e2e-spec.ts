@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { INestApplication } from '@nestjs/common';
+import type { Server } from 'node:http';
 import { Test, type TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -11,6 +12,15 @@ import { setUpTestDatabase, type TestDatabase } from './support/test-database.js
 const KNOWN_GITHUB_LOGIN = `known-octocat-${randomUUID()}`;
 const UNKNOWN_GITHUB_LOGIN = 'unmapped-octocat';
 
+/** Asserts a supertest response's `location` header is present and returns it as a string. */
+function requireLocationHeader(headers: Record<string, unknown>): string {
+  const location = headers.location;
+  if (typeof location !== 'string') {
+    throw new Error('expected a location header');
+  }
+  return location;
+}
+
 /**
  * Deterministic fake standing in for github.com's token-exchange/user endpoints, per SG0's
  * "injectable GithubOAuthClient" requirement. Maps a single fixed authorization code to a fixed
@@ -21,23 +31,23 @@ class FakeGithubOAuthClient implements GithubOAuthClient {
     return `https://github.com/login/oauth/authorize?client_id=fake-client-id&redirect_uri=http%3A%2F%2Flocalhost%3A3000%2Fauth%2Fgithub%2Fcallback&state=${state}`;
   }
 
-  async exchangeCodeForAccessToken(code: string): Promise<string> {
+  exchangeCodeForAccessToken(code: string): Promise<string> {
     if (code !== 'valid-code') {
       throw new Error('unexpected code in FakeGithubOAuthClient');
     }
-    return 'fake-access-token';
+    return Promise.resolve('fake-access-token');
   }
 
-  async fetchGithubUser(accessToken: string): Promise<{ login: string }> {
+  fetchGithubUser(accessToken: string): Promise<{ login: string }> {
     if (accessToken !== 'fake-access-token') {
       throw new Error('unexpected access token in FakeGithubOAuthClient');
     }
-    return { login: KNOWN_GITHUB_LOGIN };
+    return Promise.resolve({ login: KNOWN_GITHUB_LOGIN });
   }
 }
 
 describe('GitHub OAuth login/callback HTTP API (containerized Postgres)', () => {
-  let app: INestApplication;
+  let app: INestApplication<Server>;
   let database: TestDatabase;
   let sessionTokenService: SessionTokenService;
   let stakeholderId: string;
@@ -65,15 +75,15 @@ describe('GitHub OAuth login/callback HTTP API (containerized Postgres)', () => 
   });
 
   afterAll(async () => {
-    await app?.close();
-    await database?.close();
+    await app.close();
+    await database.close();
   });
 
   it('GET /auth/github/login redirects to github.com/login/oauth/authorize with client_id/redirect_uri/state', async () => {
     const response = await request(app.getHttpServer()).get('/auth/github/login');
 
     expect(response.status).toBe(302);
-    const location = response.headers['location'] as string;
+    const location = requireLocationHeader(response.headers);
     expect(location).toContain('github.com/login/oauth/authorize');
     expect(location).toContain('client_id=');
     expect(location).toContain('redirect_uri=');
@@ -82,7 +92,7 @@ describe('GitHub OAuth login/callback HTTP API (containerized Postgres)', () => 
 
   it('GET /auth/github/callback mints a verifiable session token for a known GitHub login', async () => {
     const loginResponse = await request(app.getHttpServer()).get('/auth/github/login');
-    const location = new URL(loginResponse.headers['location'] as string);
+    const location = new URL(requireLocationHeader(loginResponse.headers));
     const state = location.searchParams.get('state');
 
     const callbackResponse = await request(app.getHttpServer())
@@ -99,12 +109,12 @@ describe('GitHub OAuth login/callback HTTP API (containerized Postgres)', () => 
 
   it('GET /auth/github/callback returns 401 for an unknown GitHub login', async () => {
     const loginResponse = await request(app.getHttpServer()).get('/auth/github/login');
-    const location = new URL(loginResponse.headers['location'] as string);
+    const location = new URL(requireLocationHeader(loginResponse.headers));
     const state = location.searchParams.get('state');
 
     class UnknownLoginClient extends FakeGithubOAuthClient {
-      override async fetchGithubUser(): Promise<{ login: string }> {
-        return { login: UNKNOWN_GITHUB_LOGIN };
+      override fetchGithubUser(): Promise<{ login: string }> {
+        return Promise.resolve({ login: UNKNOWN_GITHUB_LOGIN });
       }
     }
 

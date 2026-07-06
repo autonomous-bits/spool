@@ -62,7 +62,7 @@ function setUp() {
 describe('SuggestionsService', () => {
   it('creates and returns the persisted chunk-shaped suggestion, always as delegated', async () => {
     const { suggestionRepository, service } = setUp();
-    vi.mocked(suggestionRepository.create).mockImplementation(async (suggestion) => suggestion);
+    vi.mocked(suggestionRepository.create).mockImplementation((suggestion) => suggestion);
 
     const result = await service.create(chunkRequest());
 
@@ -78,7 +78,7 @@ describe('SuggestionsService', () => {
 
   it('creates and returns the persisted edge-shaped suggestion', async () => {
     const { suggestionRepository, service } = setUp();
-    vi.mocked(suggestionRepository.create).mockImplementation(async (suggestion) => suggestion);
+    vi.mocked(suggestionRepository.create).mockImplementation((suggestion) => suggestion);
 
     const result = await service.create(edgeRequest());
 

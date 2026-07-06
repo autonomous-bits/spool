@@ -1,5 +1,5 @@
 import type { Discipline } from './types/vocabulary/discipline.js';
-import { DivergencePoint } from './divergence-point.js';
+import type { DivergencePoint } from './divergence-point.js';
 
 function requireNonBlank(value: string, typeName: string, fieldName: string): string {
   if (value.trim().length === 0) {

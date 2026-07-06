@@ -22,9 +22,9 @@ export interface SessionTokenClaims {
 }
 
 function isValidClaims(claims: Record<string, unknown>): claims is SessionTokenClaims & Record<string, unknown> {
-  const stakeholderId = claims['stakeholderId'];
-  const discipline = claims['discipline'];
-  const authTime = claims['authTime'];
+  const stakeholderId = claims.stakeholderId;
+  const discipline = claims.discipline;
+  const authTime = claims.authTime;
 
   return (
     typeof stakeholderId === 'string' &&
@@ -70,9 +70,9 @@ export class SessionTokenService {
     }
 
     return {
-      stakeholderId: claims['stakeholderId'],
-      discipline: claims['discipline'],
-      authTime: claims['authTime'],
+      stakeholderId: claims.stakeholderId,
+      discipline: claims.discipline,
+      authTime: claims.authTime,
     };
   }
 }

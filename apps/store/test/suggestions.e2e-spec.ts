@@ -1,4 +1,5 @@
 import type { INestApplication } from '@nestjs/common';
+import type { Server } from 'node:http';
 import { Test, type TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -8,7 +9,7 @@ import { BOOTSTRAP_STAKEHOLDER_ID } from '../src/persistence/bootstrap-stakehold
 import { setUpTestDatabase, type TestDatabase } from './support/test-database.js';
 
 describe('Suggestions HTTP API (containerized Postgres)', () => {
-  let app: INestApplication;
+  let app: INestApplication<Server>;
   let database: TestDatabase;
   let sessionTokenService: SessionTokenService;
 
@@ -25,8 +26,8 @@ describe('Suggestions HTTP API (containerized Postgres)', () => {
   });
 
   afterAll(async () => {
-    await app?.close();
-    await database?.close();
+    await app.close();
+    await database.close();
   });
 
   function mintSessionToken(stakeholderId: string, discipline: string | null): string {

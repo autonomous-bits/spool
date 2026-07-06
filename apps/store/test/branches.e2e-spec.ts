@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { INestApplication } from '@nestjs/common';
+import type { Server } from 'node:http';
 import { Test, type TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -13,7 +14,7 @@ function uniqueName(prefix: string): string {
 }
 
 describe('Branches HTTP API (containerized Postgres)', () => {
-  let app: INestApplication;
+  let app: INestApplication<Server>;
   let database: TestDatabase;
   let sessionTokenService: SessionTokenService;
   let engineeringStakeholderId: string;
@@ -56,8 +57,8 @@ describe('Branches HTTP API (containerized Postgres)', () => {
   });
 
   afterAll(async () => {
-    await app?.close();
-    await database?.close();
+    await app.close();
+    await database.close();
   });
 
   function mintSessionToken(stakeholderId: string, discipline: string | null): string {

@@ -134,7 +134,7 @@ describe('ChunksService', () => {
     });
     const request = validRequest({ branchId: branch.id });
     vi.mocked(branchRepository.findById).mockResolvedValue(branch);
-    vi.mocked(chunkRepository.create).mockImplementation(async (chunk) => chunk);
+    vi.mocked(chunkRepository.create).mockImplementation((chunk) => chunk);
 
     const result = await service.create(request);
 

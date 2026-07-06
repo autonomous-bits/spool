@@ -22,24 +22,24 @@ describe('OAuthStateService', () => {
   it('issues a state that verifies successfully', () => {
     const service = new OAuthStateService(buildConfig());
     const state = service.issue();
-    expect(() => service.verify(state)).not.toThrow();
+    expect(() => { service.verify(state); }).not.toThrow();
   });
 
   it('rejects a missing state', () => {
     const service = new OAuthStateService(buildConfig());
-    expect(() => service.verify(undefined)).toThrow(InvalidOAuthStateError);
+    expect(() => { service.verify(undefined); }).toThrow(InvalidOAuthStateError);
   });
 
   it('rejects a blank state', () => {
     const service = new OAuthStateService(buildConfig());
-    expect(() => service.verify('   ')).toThrow(InvalidOAuthStateError);
+    expect(() => { service.verify('   '); }).toThrow(InvalidOAuthStateError);
   });
 
   it('rejects a tampered/foreign state', () => {
     const service = new OAuthStateService(buildConfig());
     const otherService = new OAuthStateService(buildConfig({ oauthStateSecret: 'other-secret' }));
     const state = otherService.issue();
-    expect(() => service.verify(state)).toThrow(InvalidOAuthStateError);
+    expect(() => { service.verify(state); }).toThrow(InvalidOAuthStateError);
   });
 
   it('rejects an expired state', () => {
@@ -51,7 +51,7 @@ describe('OAuthStateService', () => {
 
       vi.setSystemTime(61_000);
 
-      expect(() => service.verify(state)).toThrow(InvalidOAuthStateError);
+      expect(() => { service.verify(state); }).toThrow(InvalidOAuthStateError);
     } finally {
       vi.useRealTimers();
     }

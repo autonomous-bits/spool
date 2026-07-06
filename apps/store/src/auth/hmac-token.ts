@@ -71,9 +71,9 @@ function parseEnvelope(raw: string): EnvelopedPayload {
   }
 
   const candidate = parsed as Record<string, unknown>;
-  const claims = candidate['claims'];
-  const iat = candidate['iat'];
-  const exp = candidate['exp'];
+  const claims = candidate.claims;
+  const iat = candidate.iat;
+  const exp = candidate.exp;
 
   if (typeof claims !== 'object' || claims === null) {
     throw new InvalidHmacTokenError('payload.claims is missing or not an object');

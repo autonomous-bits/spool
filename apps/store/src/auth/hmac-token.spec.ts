@@ -17,7 +17,7 @@ describe('hmac-token', () => {
     const token = signHmacToken({ hello: 'world' }, 'secret', 60);
     const [, signature] = token.split('.');
     const tamperedPayload = Buffer.from(JSON.stringify({ claims: { hello: 'tampered' }, iat: 0, exp: 9_999_999_999 }), 'utf8').toString('base64url');
-    expect(() => verifyHmacToken(`${tamperedPayload}.${signature}`, 'secret')).toThrow(
+    expect(() => verifyHmacToken(`${tamperedPayload}.${String(signature)}`, 'secret')).toThrow(
       InvalidHmacTokenError,
     );
   });

@@ -14,7 +14,7 @@ function parseAccessTokenResponse(body: unknown): string {
   if (typeof body !== 'object' || body === null) {
     throw new GithubOAuthError('token exchange response was not an object');
   }
-  const accessToken = (body as Record<string, unknown>)['access_token'];
+  const accessToken = (body as Record<string, unknown>).access_token;
   if (typeof accessToken !== 'string' || accessToken.length === 0) {
     throw new GithubOAuthError('token exchange response missing access_token');
   }
@@ -25,7 +25,7 @@ function parseGithubUserResponse(body: unknown): { login: string } {
   if (typeof body !== 'object' || body === null) {
     throw new GithubOAuthError('user response was not an object');
   }
-  const login = (body as Record<string, unknown>)['login'];
+  const login = (body as Record<string, unknown>).login;
   if (typeof login !== 'string' || login.length === 0) {
     throw new GithubOAuthError('user response missing login');
   }
@@ -65,7 +65,7 @@ export class HttpGithubOAuthClient implements GithubOAuthClient {
     });
 
     if (!response.ok) {
-      throw new GithubOAuthError(`token exchange returned HTTP ${response.status}`);
+      throw new GithubOAuthError(`token exchange returned HTTP ${String(response.status)}`);
     }
 
     const body: unknown = await response.json();
@@ -82,7 +82,7 @@ export class HttpGithubOAuthClient implements GithubOAuthClient {
     });
 
     if (!response.ok) {
-      throw new GithubOAuthError(`user lookup returned HTTP ${response.status}`);
+      throw new GithubOAuthError(`user lookup returned HTTP ${String(response.status)}`);
     }
 
     const body: unknown = await response.json();

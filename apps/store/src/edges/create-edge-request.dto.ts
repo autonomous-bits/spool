@@ -48,17 +48,17 @@ export function parseCreateEdgeRequest(body: unknown): CreateEdgeRequest {
     throw new BadRequestException('fromChunkLabel and toChunkLabel must not be the same label');
   }
 
-  const type = record['type'];
+  const type = record.type;
   if (!isEdgeType(type)) {
     throw new BadRequestException(`Invalid type: ${JSON.stringify(type)}`);
   }
 
-  const discipline = record['discipline'];
+  const discipline = record.discipline;
   if (!isDiscipline(discipline)) {
     throw new BadRequestException(`Invalid discipline: ${JSON.stringify(discipline)}`);
   }
 
-  const branchIdValue = record['branchId'];
+  const branchIdValue = record.branchId;
   if (branchIdValue !== undefined) {
     if (typeof branchIdValue !== 'string' || branchIdValue.trim().length === 0) {
       throw new BadRequestException('branchId must be a non-empty string when provided');

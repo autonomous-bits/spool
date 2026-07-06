@@ -59,7 +59,7 @@ describe('EdgeRepository (containerized Postgres)', () => {
   });
 
   afterAll(async () => {
-    await database?.close();
+    await database.close();
   });
 
   it('create persists an edge with status active and supersededByEdgeId NULL', async () => {
@@ -165,7 +165,7 @@ describe('EdgeRepository (containerized Postgres)', () => {
           originBranchId: branch.id,
         }),
       ),
-    ).rejects.toThrowError(new ConflictException(`Branch ${branch.id} is not in draft status`));
+    ).rejects.toThrow(new ConflictException(`Branch ${branch.id} is not in draft status`));
   });
 
   it('serializes a racing submit and branch-scoped create so the create wins and submit loses', async () => {

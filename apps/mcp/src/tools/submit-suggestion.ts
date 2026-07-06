@@ -86,11 +86,11 @@ export function parseSubmitSuggestionInput(body: unknown): SubmitSuggestionInput
   const discipline = requireStringField(record, 'discipline');
   const stakeholderId = requireStringField(record, 'stakeholderId');
 
-  const hasAnyChunkField = isNonEmptyString(record['label']) || isNonEmptyString(record['content']);
+  const hasAnyChunkField = isNonEmptyString(record.label) || isNonEmptyString(record.content);
   const hasAnyEdgeField =
-    isNonEmptyString(record['fromChunkLabel']) ||
-    isNonEmptyString(record['toChunkLabel']) ||
-    record['relationshipType'] !== undefined;
+    isNonEmptyString(record.fromChunkLabel) ||
+    isNonEmptyString(record.toChunkLabel) ||
+    record.relationshipType !== undefined;
 
   if (hasAnyChunkField && hasAnyEdgeField) {
     throw new SubmitSuggestionValidationError(
@@ -131,7 +131,7 @@ function extractErrorMessage(body: unknown, fallback: string): string {
     typeof body === 'object' &&
     body !== null &&
     'message' in body &&
-    typeof (body as { message: unknown }).message === 'string'
+    typeof (body).message === 'string'
   ) {
     return (body as { message: string }).message;
   }
