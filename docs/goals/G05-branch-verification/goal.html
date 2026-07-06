@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>G05 — Branch Verification (submitted → verified | draft)</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  body { font-family: -apple-system, Segoe UI, sans-serif; max-width: 960px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
+  h1 { font-size: 1.4rem; }
+  h2 { font-size: 1.1rem; margin-top: 2rem; border-bottom: 1px solid #ddd; padding-bottom: 0.25rem; }
+  table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; font-size: 0.9rem; }
+  th, td { border: 1px solid #ccc; padding: 4px 8px; text-align: left; vertical-align: top; }
+  th { background: #f0f0f0; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 0.75rem; font-weight: 600; color: #fff; }
+  .badge-open { background: #6c757d; }
+  .badge-in-progress { background: #f0ad4e; }
+  .badge-done { background: #28a745; }
+  .badge-blocked { background: #d9534f; }
+  details { border: 1px solid #ddd; border-radius: 6px; padding: 0.5rem 0.75rem; margin: 0.5rem 0; }
+  summary { cursor: pointer; font-weight: 600; }
+  code { background: #f5f5f5; padding: 1px 4px; border-radius: 3px; }
+  .mermaid { background: #fafafa; padding: 0.5rem; border-radius: 6px; }
+  .warn { background: #fff3cd; border: 1px solid #ffe08a; padding: 0.5rem 0.75rem; border-radius: 6px; }
+</style>
+</head>
+<body>
+
+<h1>G05 — Branch Verification (submitted → verified | draft)</h1>
+<p>
+  Status: <span id="goal-status-badge" class="badge badge-open">open</span> &middot;
+  Size: <strong>4/5</strong> — touches domain, persistence, and API layers; widens the existing
+  <code>ActorContext</code> type (nullable discipline) to correctly model verification as a
+  cross-discipline "merging authority" action distinct from discipline-scoped submission; adds a
+  schema column and reject-path reset semantics; extends the read model. Reuses G04's GitHub OAuth
+  session-token auth as-is (no new auth code), which keeps this below G04's 5/5.
+</p>
+
+<h2>Meridian Source</h2>
+<table>
+<thead><tr><th>Chunk</th><th>Status</th><th>Layer</th><th>Note</th></tr></thead>
+<tbody>
+<tr><td>IDEA-18</td><td>promoted</td><td>functional</td><td>Merge Pipeline: Submission → Human Verification → Merge. This goal implements Human Verification (the second phase); Merge is out of scope and structurally depends on this goal.</td></tr>
+<tr><td>IDEA-25</td><td>promoted</td><td>functional</td><td>Human stakeholders manually transition a branch to 'verified' after reviewing feedback/evaluations; if unsatisfactory, manually transition back to 'draft' for revision.</td></tr>
+<tr><td>IDEA-43</td><td>promoted (ADR)</td><td>domain</td><td>Verification signals are recorded as feedback but never auto-transition state; a human always decides both the verify and the reject-to-draft transition.</td></tr>
+<tr><td>IDEA-35</td><td>promoted (ADR amendment)</td><td>domain</td><td>Domain invariants (incl. write-lock enforcement for submitted/verified/merged branches) are enforced in apps/store domain/persistence layers. Its discipline-scoping language attaches only to the submission gate, not verify/merge.</td></tr>
+<tr><td>IDEA-53</td><td>promoted</td><td>domain</td><td>Domain Invariant Protection Service: branch write-locks, "submission gates within the authoring discipline", single-discipline bounds, merge restrictions — discipline-scoping again attaches only to submission.</td></tr>
+<tr><td>IDEA-11</td><td>promoted (persona)</td><td>domain</td><td>Stakeholders "author... within their discipline" (discipline-scoped) but separately "act as merging authorities to decide on verifying and merging branches" (no discipline qualifier) — basis for this goal's discipline-agnostic verify/reject design, confirmed by the user (see Open Questions: resolved).</td></tr>
+<tr><td>IDEA-42</td><td>promoted</td><td>domain (context)</td><td>Merge restricted to human stakeholders, never AI-triggered. Verification carries the same human-only requirement per IDEA-25/IDEA-43.</td></tr>
+<tr><td>IDEA-9</td><td>promoted</td><td>domain (scope)</td><td>Delegated agents act strictly as tools under human supervision — part of why this goal adds no MCP verify/reject tool.</td></tr>
+<tr><td>IDEA-57</td><td>promoted</td><td>domain (scope)</td><td>Autonomous AI agents forbidden from executing/approving mainline merges/submissions — same scope reasoning as IDEA-9.</td></tr>
+<tr><td>IDEA-81</td><td>promoted (ADR)</td><td>domain + API</td><td>GitHub OAuth authorization-code flow is the ratified human-authentication mechanism for branch submit/verify/merge. Already implemented in G04; reused unchanged here.</td></tr>
+<tr><td>IDEA-52</td><td>promoted</td><td>API</td><td>All external traffic goes through the NestJS gateway; exact REST shape is repo-derived, as for G01–G04.</td></tr>
+<tr><td>IDEA-34</td><td>promoted</td><td>API</td><td>Companion API-surface chunk to IDEA-52, as cited in G01–G04.</td></tr>
+<tr><td>IDEA-31</td><td>promoted (ADR)</td><td>persistence</td><td>Authoritative schema reference (external file not accessible from this repo/session). This goal follows the repo's own established precedent (G02's <code>submitted_at</code> column, sans a "submitted-by" column) for the new <code>verified_at</code> column, per G01/G02's documented "scope deviation" convention for schema details not resolvable from this repo alone.</td></tr>
+</tbody>
+</table>
+
+<p class="warn">
+  <strong>Scope note (not exposed via MCP):</strong> verify/reject are human-only per IDEA-9/IDEA-25/IDEA-43/IDEA-57,
+  gated by the same GitHub-OAuth-derived session token as G04's submit. An MCP tool cannot itself complete a
+  human's interactive GitHub login, so MCP exposure remains deferred to a future goal, identical reasoning to G04.
+</p>
+
+<h2>Vertical slice diagram</h2>
+<p>A human's existing session token (from G04) authorizes <code>POST /branches/:id/verify</code> and
+<code>POST /branches/:id/reject</code>; unlike submit, neither requires the actor's discipline to match the
+branch's discipline (verification is a cross-discipline "merging authority" action per IDEA-11).</p>
+<div class="mermaid">
+flowchart LR
+  subgraph AUTH["GitHub OAuth (G04, reused)"]
+    G3["SessionTokenService.verify\n(existing)"]
+  end
+  subgraph API["API surface"]
+    C0["Authorization: ******"]
+    C1["POST /branches/:id/verify"]
+    C2["POST /branches/:id/reject"]
+  end
+  subgraph DOMAIN["Domain"]
+    D1["ActorContext\n(discipline: Discipline | null)"]
+    D2["assertIsHumanActor\n(reused, no discipline check)"]
+    D3["assertSubmittedStatus\n(verify guard)"]
+    D4["assertRejectableStatus\n(reject guard: submitted|verified)"]
+  end
+  subgraph PERSIST["Persistence"]
+    P1["StakeholderRepository.findById\n(existing; discipline may be null)"]
+    P2[("branches table\n+ verified_at column")]
+    P3["BranchRepository.verify\n(atomic UPDATE...WHERE status='submitted')"]
+    P4["BranchRepository.reject\n(atomic UPDATE...WHERE status IN ('submitted','verified'),\nclears verified_at + submitted_at)"]
+  end
+  G3 --> C0
+  C0 --> C1 --> D1 --> D2 --> D3 --> P3 --> P2
+  C0 --> C2 --> D1
+  D2 --> D4 --> P4 --> P2
+  D1 --> P1
+</div>
+
+<h2>Dependency diagram</h2>
+<div class="mermaid">
+flowchart TD
+  SG0["SG0: Domain — nullable ActorContext.discipline + verify/reject lifecycle assertions"] --> SG2["SG2: API — POST /branches/:id/verify + /reject"]
+  SG1["SG1: Persistence — verified_at column + BranchRepository.verify/reject"] --> SG2
+  SG2 --> SG3["SG3: Docker end-to-end"]
+</div>
+
+<h2>Sub-goal detail</h2>
+
+<details id="d-SG0">
+<summary>SG0 — domain: nullable ActorContext.discipline + verify/reject lifecycle assertions <span class="badge badge-open">open</span></summary>
+<p><strong>Depends on:</strong> none</p>
+<p><strong>Objective:</strong> Model verification/rejection as human-only, discipline-agnostic transitions, per IDEA-11/IDEA-25/IDEA-43, without weakening submit's existing discipline check.</p>
+<ul>
+<li>Widen <code>BaseActorContext.discipline</code> in <code>domain/types/actor/actor-context.ts</code> from <code>Discipline</code> to <code>Discipline | null</code>. <code>assertSubmitDiscipline</code>'s existing comparison (<code>actor.discipline !== branch.discipline</code>) is unaffected: <code>BranchesService.submit</code> already pre-guards on <code>isDiscipline(stakeholder.discipline)</code> before constructing the actor, so submit's behavior is unchanged.</li>
+<li>Add <code>assertSubmittedStatus(branch: Pick&lt;Branch, 'status'&gt;): void</code> — throws a <code>BranchLifecycleError</code> unless <code>branch.status === 'submitted'</code> (verify's guard).</li>
+<li>Add <code>assertRejectableStatus(branch: Pick&lt;Branch, 'status'&gt;): void</code> — throws a <code>BranchLifecycleError</code> unless <code>branch.status === 'submitted' || branch.status === 'verified'</code> (reject's guard).</li>
+<li>Reuse <code>assertIsHumanActor</code> unchanged for both verify and reject. Do <strong>not</strong> add any discipline-match assertion for verify/reject — this discipline-agnostic design was confirmed by the user (see Open Questions: resolved).</li>
+<li>Unit tests: each new assertion's pass/throw cases; a null-discipline actor passes <code>assertIsHumanActor</code> and is accepted by verify/reject call sites (no discipline check invoked at all for these two operations).</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:store</code> (domain unit tests).</p>
+</details>
+
+<details id="d-SG1">
+<summary>SG1 — persistence: verified_at column + BranchRepository.verify/reject <span class="badge badge-open">open</span></summary>
+<p><strong>Depends on:</strong> none</p>
+<p><strong>Objective:</strong> Persist the verify/reject transitions atomically, mirroring the existing <code>submit()</code> compare-and-set pattern, with reject fully resetting review state.</p>
+<ul>
+<li>New migration: <code>ALTER TABLE branches ADD COLUMN verified_at TIMESTAMP WITH TIME ZONE;</code> (nullable, mirrors <code>submitted_at</code>'s existing shape; no "verified-by" column, matching the repo's existing <code>submitted_at</code>-without-"submitted-by" precedent).</li>
+<li>Extend <code>Branch</code> domain entity + <code>BranchProps</code> + <code>BranchRepository</code>'s <code>BranchRow</code>/<code>toBranch</code> mapping with an optional <code>verifiedAt: Date</code>.</li>
+<li><code>BranchRepository.verify(branchId): Promise&lt;Branch | undefined&gt;</code> — transactional: <code>BEGIN</code>; <code>SELECT ... FOR UPDATE</code> the branch row plus a <code>clock_timestamp()</code> guard (identical structure to <code>submit()</code>); if the row is missing or <code>status !== 'submitted'</code>, <code>ROLLBACK</code> and return <code>undefined</code>; otherwise <code>UPDATE branches SET status='verified', verified_at=now(), updated_at=now() WHERE id=$1 RETURNING *</code>, then <code>COMMIT</code>.</li>
+<li><code>BranchRepository.reject(branchId): Promise&lt;Branch | undefined&gt;</code> — same transactional shape: <code>SELECT ... FOR UPDATE</code> the branch row; if missing or <code>status</code> is not <code>'submitted'</code>/<code>'verified'</code>, <code>ROLLBACK</code> and return <code>undefined</code>; otherwise <code>UPDATE branches SET status='draft', verified_at=NULL, submitted_at=NULL, updated_at=now() WHERE id=$1 RETURNING *</code>, then <code>COMMIT</code>.</li>
+<li>Both methods return <code>undefined</code> for "branch missing" and "branch has wrong status" alike (matching <code>submit()</code>'s existing shape) — SG2's service layer is responsible for telling these apart via its own prior <code>findById</code> lookup (404) before calling <code>verify</code>/<code>reject</code> (409 on an <code>undefined</code> result, since <code>findById</code> already proved the branch exists).</li>
+<li>Integration tests: <code>verify</code> succeeds once from <code>submitted</code> and returns <code>undefined</code> on repeat; <code>reject</code> succeeds from both <code>submitted</code> and <code>verified</code>, clearing both <code>verified_at</code> and <code>submitted_at</code>; <code>reject</code> returns <code>undefined</code> from <code>draft</code> or <code>merged</code>.</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:store</code> (persistence integration tests).</p>
+</details>
+
+<details id="d-SG2">
+<summary>SG2 — API: POST /branches/:id/verify + POST /branches/:id/reject <span class="badge badge-open">open</span></summary>
+<p><strong>Depends on:</strong> SG0, SG1</p>
+<p><strong>Objective:</strong> Expose both transitions over HTTP, gated by the existing session-token bearer auth, with no discipline requirement, and surface <code>verifiedAt</code> on the read model.</p>
+<ul>
+<li><code>BranchResponse</code> gains a nullable <code>verifiedAt</code>, populated on successful verify and on <code>GET /branches/:id</code>; cleared (absent/<code>null</code>) after a reject.</li>
+<li><code>BranchesService.verify(branchId, claims)</code>: <code>findById(branchId)</code> first — 404 (<code>NotFoundException</code>) if absent. Then resolves the stakeholder by <code>claims.stakeholderId</code> (400 if not found — no discipline-null rejection, unlike submit); constructs a <code>HumanActorContext</code> with whatever discipline the stakeholder has (including <code>null</code>); asserts human actor + <code>assertSubmittedStatus</code> (409/<code>ConflictException</code> on the found-but-wrong-status in-memory check, as a fast path). Calls <code>BranchRepository.verify</code>; 409 (<code>ConflictException</code>) if it returns <code>undefined</code> (covers the race where status changed between the read and the write).</li>
+<li><code>BranchesService.reject(branchId, claims)</code>: identical control flow — <code>findById</code> first (404 if absent), same actor resolution, <code>assertRejectableStatus</code> fast-path 409, then <code>BranchRepository.reject</code> with a 409 on <code>undefined</code>.</li>
+<li><code>BranchesController</code>: <code>POST :id/verify</code> and <code>POST :id/reject</code>, both requiring <code>Authorization: ******</code> via the existing <code>verifySessionClaims</code> helper (401 on missing/invalid/expired token, identical to <code>submit</code>).</li>
+<li>e2e tests cover: verify success path (any discipline, including a stakeholder whose discipline differs from the branch's, and a null-discipline stakeholder); verify 409 from non-submitted status; reject success from both submitted and verified; reject 409 from draft/merged; 401 with no/invalid token on both endpoints; <code>GET /branches/:id</code> reflects <code>verifiedAt</code> correctly after each transition.</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:store</code> (e2e HTTP tests).</p>
+</details>
+
+<details id="d-SG3">
+<summary>SG3 — Docker end-to-end <span class="badge badge-open">open</span></summary>
+<p><strong>Depends on:</strong> SG2</p>
+<p><strong>Objective:</strong> Exercise verify and reject against the real containerized store over HTTP, confirming behavior matches the Meridian acceptance criteria.</p>
+<ul>
+<li><code>docker compose up --build spoolstore</code> against real Postgres, obtaining a real session token by running <code>pnpm dev:session-token</code> (<code>tools/dev-session-token/get-dev-session-token.mjs</code>) against the running container — this drives the real <code>GET /auth/github/login</code> → <code>GET /auth/github/callback</code> flow through the <code>github-oauth-stub</code> service already wired into <code>compose.yaml</code>. Do not fabricate, hand-sign, or otherwise bypass the token.</li>
+<li>Real HTTP flow: create branch → submit → <code>POST /branches/:id/verify</code> with a token whose stakeholder discipline differs from the branch's discipline succeeds (proves discipline-agnosticism); <code>GET /branches/:id</code> shows <code>status: 'verified'</code> and a non-null <code>verifiedAt</code>.</li>
+<li>Separate run: create branch → submit → <code>POST /branches/:id/reject</code> succeeds; <code>GET /branches/:id</code> shows <code>status: 'draft'</code>, <code>verifiedAt</code> and <code>submittedAt</code> both null/absent.</li>
+<li>Repeat verify on an already-verified branch returns 409; verify with no Authorization header returns 401.</li>
+</ul>
+<p><strong>Verification:</strong> manual/scripted HTTP exercise against spoolstore covering the success paths (verify, reject) and the 409/401 negative cases.</p>
+</details>
+
+<h2>Open Questions</h2>
+<p><strong>None.</strong> The prior open question — whether verify/reject should be discipline-agnostic (no actor/branch discipline match, unlike submit) — is <strong>resolved</strong>: confirmed by the user (repo maintainer) on 2026-07-06 that any human stakeholder, regardless of discipline, may verify/reject a branch. This matches the reading already inferred from IDEA-11's "merging authorities" language vs. IDEA-35/IDEA-53's submission-only discipline-scoping wording. SG0/SG2 are unchanged by this confirmation (they already implement it this way); no ratified Meridian chunk contradicts it, so no Meridian escalation is needed.</p>
+
+<h2>Definition of Done</h2>
+<ul>
+<li>SG0, SG1, SG2 all complete with passing <code>pnpm test:store</code>.</li>
+<li>SG3's Docker end-to-end exercise passes against the real containerized store (not satisfied by unit/integration tests alone).</li>
+<li><code>docs/goals/README.md</code> updated with G05's row and status.</li>
+</ul>
+
+<script type="application/json" id="goal-data">
+{
+  "goalId": "G05",
+  "slug": "branch-verification",
+  "title": "Branch Verification (submitted \u2192 verified | draft)",
+  "status": "open",
+  "size": 4,
+  "sizeJustification": "Touches domain, persistence, and API layers; widens ActorContext (nullable discipline) as a new domain concept; adds a schema column plus reject-path reset semantics; extends the read model. Reuses G04's auth as-is, so below G04's 5/5.",
+  "meridianChunks": [
+    {"label": "IDEA-18", "status": "promoted", "layer": "functional"},
+    {"label": "IDEA-25", "status": "promoted", "layer": "functional"},
+    {"label": "IDEA-43", "status": "promoted", "statusDetail": "promoted (ADR)", "layer": "domain"},
+    {"label": "IDEA-35", "status": "promoted", "statusDetail": "promoted (ADR amendment)", "layer": "domain"},
+    {"label": "IDEA-53", "status": "promoted", "layer": "domain"},
+    {"label": "IDEA-11", "status": "promoted", "statusDetail": "promoted (persona)", "layer": "domain"},
+    {"label": "IDEA-42", "status": "promoted", "layer": "domain (context)"},
+    {"label": "IDEA-9", "status": "promoted", "layer": "domain (scope)"},
+    {"label": "IDEA-57", "status": "promoted", "layer": "domain (scope)"},
+    {"label": "IDEA-81", "status": "promoted", "statusDetail": "promoted (ADR)", "layer": "domain + API"},
+    {"label": "IDEA-52", "status": "promoted", "layer": "API"},
+    {"label": "IDEA-34", "status": "promoted", "layer": "API"},
+    {"label": "IDEA-31", "status": "promoted", "statusDetail": "promoted (ADR, external schema file not accessible)", "layer": "persistence"}
+  ],
+  "openQuestions": [],
+  "resolvedQuestions": [
+    "Discipline-agnostic verify/reject: confirmed by the user (repo maintainer) on 2026-07-06 that any human stakeholder, regardless of discipline, may verify/reject a branch. Matches the inference from IDEA-11's 'merging authorities' language vs. IDEA-35/IDEA-53's submission-only discipline-scoping wording. No SG0/SG2 changes required; they already implement it this way."
+  ],
+  "definitionOfDone": [
+    "SG0, SG1, SG2 all complete with passing pnpm test:store.",
+    "SG3's Docker end-to-end exercise passes against the real containerized store (not satisfied by unit/integration tests alone).",
+    "docs/goals/README.md updated with G05's row and status."
+  ],
+  "subGoals": [
+    {
+      "id": "SG0",
+      "layer": "domain",
+      "dependsOn": [],
+      "objective": "Widen ActorContext.discipline to Discipline | null; add assertSubmittedStatus and assertRejectableStatus lifecycle guards.",
+      "acceptanceCriteria": [
+        "BaseActorContext.discipline is typed Discipline | null; assertSubmitDiscipline's comparison and submit()'s existing pre-guard keep submit's behavior unchanged.",
+        "assertSubmittedStatus throws a BranchLifecycleError unless branch.status === 'submitted'.",
+        "assertRejectableStatus throws a BranchLifecycleError unless branch.status is 'submitted' or 'verified'.",
+        "assertIsHumanActor is reused unchanged for verify/reject; no discipline-match assertion is added for either.",
+        "A null-discipline actor passes assertIsHumanActor and is accepted at the verify/reject call sites with no discipline check invoked at all (unlike submit's assertSubmitDiscipline).",
+        "Unit tests cover each new assertion's pass/throw cases and a null-discipline actor passing assertIsHumanActor."
+      ],
+      "verification": "pnpm test:store",
+      "status": "open"
+    },
+    {
+      "id": "SG1",
+      "layer": "persistence/infra",
+      "dependsOn": [],
+      "objective": "Add verified_at column and atomic BranchRepository.verify/reject compare-and-set transitions, with reject clearing verified_at and submitted_at.",
+      "acceptanceCriteria": [
+        "Migration adds branches.verified_at TIMESTAMP WITH TIME ZONE, nullable, no verified-by column (mirrors existing submitted_at precedent).",
+        "Branch entity and BranchRepository's row mapping expose an optional verifiedAt: Date.",
+        "BranchRepository.verify(branchId) is transactional: SELECT ... FOR UPDATE the branch row with a clock_timestamp() guard (mirrors submit()); if missing or status !== 'submitted', ROLLBACK and return undefined; otherwise UPDATE branches SET status='verified', verified_at=now(), updated_at=now() WHERE id=$1 RETURNING *, then COMMIT.",
+        "BranchRepository.reject(branchId) uses the same transactional shape; if missing or status is not 'submitted'/'verified', ROLLBACK and return undefined; otherwise UPDATE branches SET status='draft', verified_at=NULL, submitted_at=NULL, updated_at=now() WHERE id=$1 RETURNING *, then COMMIT.",
+        "Both methods return undefined for 'branch missing' and 'branch wrong status' alike (matching submit()'s existing shape); the service layer (SG2) distinguishes these via its own prior findById lookup.",
+        "Integration tests cover: verify succeeds once from submitted and returns undefined on repeat; reject succeeds from both submitted and verified, clearing verified_at and submitted_at; reject returns undefined from draft or merged."
+      ],
+      "verification": "pnpm test:store",
+      "status": "open"
+    },
+    {
+      "id": "SG2",
+      "layer": "API",
+      "dependsOn": ["SG0", "SG1"],
+      "objective": "Expose POST /branches/:id/verify and POST /branches/:id/reject, gated by the existing session-token bearer auth, with no discipline requirement, and surface verifiedAt on BranchResponse.",
+      "acceptanceCriteria": [
+        "Both endpoints require Authorization: ******; 401 if missing/invalid/expired (identical to existing submit behavior).",
+        "Both endpoints call findById(branchId) first and return 404 (NotFoundException) if absent, before any actor/status check.",
+        "400 if the token's stakeholderId does not resolve to a stakeholder (discipline may be null; this is NOT rejected, unlike submit).",
+        "verify: 409 unless branch.status === 'submitted' (fast-path in-memory check via assertSubmittedStatus, plus a 409 if BranchRepository.verify returns undefined on a race); success returns 200 with status 'verified' and non-null verifiedAt.",
+        "reject: 409 unless branch.status is 'submitted' or 'verified' (fast-path via assertRejectableStatus, plus a 409 on a BranchRepository.reject race); success returns 200 with status 'draft' and verifiedAt/submittedAt both null.",
+        "BranchResponse includes nullable verifiedAt, populated on verify and on GET /branches/:id, cleared after reject.",
+        "e2e tests cover all success and error paths above, including a verifying stakeholder whose discipline differs from the branch's discipline, and a verifying stakeholder with a null discipline."
+      ],
+      "verification": "pnpm test:store",
+      "status": "open"
+    },
+    {
+      "id": "SG3",
+      "layer": "docker-e2e",
+      "dependsOn": ["SG2"],
+      "objective": "Exercise verify and reject against the real containerized store over HTTP, obtaining the session token via the dev-session-token tool against the G04 GitHub OAuth stub.",
+      "acceptanceCriteria": [
+        "docker compose up --build spoolstore runs against real Postgres with the existing GitHub OAuth stub.",
+        "A real session token is obtained by running pnpm dev:session-token (tools/dev-session-token/get-dev-session-token.mjs) against the running container, never fabricated or hand-signed.",
+        "Branch create -> submit -> verify (cross-discipline token) succeeds; GET /branches/:id shows status 'verified' and non-null verifiedAt.",
+        "Separate run: branch create -> submit -> reject succeeds; GET /branches/:id shows status 'draft' with verifiedAt and submittedAt both null.",
+        "Repeat verify on an already-verified branch returns 409; verify with no Authorization header returns 401."
+      ],
+      "verification": "manual/scripted HTTP exercise against spoolstore covering verify success, reject success, and the 409/401 negative cases",
+      "status": "open"
+    }
+  ]
+}
+</script>
+
+<script>
+  const data = JSON.parse(document.getElementById('goal-data').textContent);
+  const badgeClass = (s) => ({ open: 'badge-open', 'in-progress': 'badge-in-progress', done: 'badge-done', blocked: 'badge-blocked' }[s] || 'badge-open');
+  data.subGoals.forEach((sg) => {
+    const el = document.getElementById('d-' + sg.id);
+    if (!el) return;
+    const badge = el.querySelector('.badge');
+    if (badge) {
+      badge.className = 'badge ' + badgeClass(sg.status);
+      badge.textContent = sg.status;
+    }
+  });
+  const goalBadge = document.getElementById('goal-status-badge');
+  if (goalBadge) {
+    goalBadge.className = 'badge ' + badgeClass(data.status);
+    goalBadge.textContent = data.status;
+  }
+  if (window.mermaid) mermaid.initialize({ startOnLoad: true });
+</script>
+
+</body>
+</html>

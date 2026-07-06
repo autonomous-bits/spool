@@ -144,9 +144,10 @@ Implement it directly:
 This only happens once every other sub-goal is already done, and it is always a single-item increment:
 
 1. Bring the system up with `docker compose up --build spoolstore` (or the debug compose file only when debugging, per `apps/store/AGENTS.md`).
-2. Exercise the capability over its real interface — an HTTP request to the store, or an MCP tool call — exactly as specified in the sub-goal's acceptance criteria.
-3. Confirm the observed response matches the Meridian acceptance criteria driving the goal. Do not accept unit or in-process integration test output as a substitute — it must be the actual running containerized system.
-4. If it fails, treat it as a defect in an earlier sub-goal's work (or its integration with another), not a new isolated bug — identify which sub-goal is actually wrong, fix it there, and re-run affected verification before re-attempting this step.
+2. **If the capability is gated behind a human-authenticated session token** (per Meridian IDEA-81/G04, or any acceptance criterion mentioning a session token/`Authorization` header), obtain that token by running `pnpm dev:session-token` (`tools/dev-session-token/get-dev-session-token.mjs`) against the running containerized store — never fabricate, hand-sign, or bypass the token by any other means. This is the only way to exercise every auth-gated scenario (the success path and each negative case) faithfully against the real system.
+3. Exercise the capability over its real interface — an HTTP request to the store, or an MCP tool call — exactly as specified in the sub-goal's acceptance criteria.
+4. Confirm the observed response matches the Meridian acceptance criteria driving the goal. Do not accept unit or in-process integration test output as a substitute — it must be the actual running containerized system.
+5. If it fails, treat it as a defect in an earlier sub-goal's work (or its integration with another), not a new isolated bug — identify which sub-goal is actually wrong, fix it there, and re-run affected verification before re-attempting this step.
 
 ---
 

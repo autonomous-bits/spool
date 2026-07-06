@@ -49,10 +49,18 @@ export class BranchRepository {
    */
   async create(branch: Branch): Promise<Branch> {
     const result: QueryResult<BranchRow> = await this.pool.query<BranchRow>(
-      `INSERT INTO branches (
+      `WITH persisted_timestamps AS (
+         SELECT clock_timestamp() AS persisted_at
+       )
+       INSERT INTO branches (
          id, name, discipline, status, diverged_at,
          created_by_stakeholder_id, created_at, updated_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       )
+       SELECT
+         $1, $2, $3, $4, $5, $6,
+         persisted_timestamps.persisted_at,
+         persisted_timestamps.persisted_at
+       FROM persisted_timestamps
        RETURNING *`,
       [
         branch.id,
@@ -61,8 +69,6 @@ export class BranchRepository {
         branch.status,
         branch.divergedAt.toISOString(),
         branch.createdByStakeholderId,
-        branch.createdAt,
-        branch.updatedAt,
       ],
     );
 
