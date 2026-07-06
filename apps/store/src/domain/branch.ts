@@ -16,6 +16,7 @@ export interface BranchProps {
   verifiedAt?: Date;
   mergedAt?: Date;
   mergedByStakeholderId?: string;
+  originSuggestionId?: string;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -45,6 +46,7 @@ export class Branch {
   readonly verifiedAt?: Date;
   readonly mergedAt?: Date;
   readonly mergedByStakeholderId?: string;
+  readonly originSuggestionId?: string;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 
@@ -71,6 +73,9 @@ export class Branch {
     }
     if (props.mergedByStakeholderId !== undefined) {
       this.mergedByStakeholderId = props.mergedByStakeholderId;
+    }
+    if (props.originSuggestionId !== undefined) {
+      this.originSuggestionId = props.originSuggestionId;
     }
     this.createdAt = props.createdAt ?? new Date();
     this.updatedAt = props.updatedAt ?? this.createdAt;

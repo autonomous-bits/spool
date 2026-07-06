@@ -98,7 +98,75 @@ describe('store migrations (containerized Postgres)', () => {
     const migrationRows = await pool.query<{ count: string }>(
       'SELECT COUNT(*)::text AS count FROM schema_migrations',
     );
-    expect(migrationRows.rows[0]?.count).toBe('7');
+    expect(migrationRows.rows[0]?.count).toBe('8');
+  });
+
+  it('creates the suggestions table with the expected columns', async () => {
+    const result = await pool.query<{ column_name: string }>(
+      `SELECT column_name FROM information_schema.columns WHERE table_name = 'suggestions'`,
+    );
+    const columns = result.rows.map((row) => row.column_name).sort();
+
+    expect(columns).toEqual(
+      [
+        'content',
+        'created_at',
+        'decided_at',
+        'decided_by_stakeholder_id',
+        'discipline',
+        'from_chunk_label',
+        'id',
+        'label',
+        'relationship_type',
+        'status',
+        'submitted_by_actor_kind',
+        'submitted_by_stakeholder_id',
+        'to_chunk_label',
+        'updated_at',
+      ].sort(),
+    );
+  });
+
+  it('creates the suggestion_state_logs table with the expected columns', async () => {
+    const result = await pool.query<{ column_name: string }>(
+      `SELECT column_name FROM information_schema.columns WHERE table_name = 'suggestion_state_logs'`,
+    );
+    const columns = result.rows.map((row) => row.column_name).sort();
+
+    expect(columns).toEqual(
+      [
+        'created_at',
+        'id',
+        'new_status',
+        'old_status',
+        'suggestion_id',
+        'updated_by_stakeholder_id',
+      ].sort(),
+    );
+  });
+
+  it('enforces the check_suggestion_type CHECK constraint and idx_suggestions_unique index', async () => {
+    const constraints = await pool.query<{ conname: string }>(
+      `SELECT conname FROM pg_constraint WHERE conrelid = 'suggestions'::regclass AND contype = 'c'`,
+    );
+    const names = constraints.rows.map((row) => row.conname);
+    expect(names).toContain('check_suggestion_type');
+
+    const indexes = await pool.query<{ indexname: string }>(
+      `SELECT indexname FROM pg_indexes WHERE tablename = 'suggestions'`,
+    );
+    expect(indexes.rows.map((row) => row.indexname)).toContain('idx_suggestions_unique');
+  });
+
+  it('adds the branches_origin_suggestion_id_fkey FK constraint targeting suggestions(id)', async () => {
+    const result = await pool.query<{ confrelid: string }>(
+      `SELECT confrelid::regclass::text AS confrelid
+         FROM pg_constraint
+        WHERE conname = 'branches_origin_suggestion_id_fkey'`,
+    );
+
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0]?.confrelid).toBe('suggestions');
   });
 
   it('creates the branches table with the expected columns', async () => {
