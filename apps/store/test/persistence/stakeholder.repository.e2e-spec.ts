@@ -87,4 +87,19 @@ describe('StakeholderRepository (containerized Postgres)', () => {
 
     expect(found).toBeUndefined();
   });
+
+  it('findAll returns every stakeholder deterministically oldest-first', async () => {
+    const first = await seedStakeholder(pool);
+    const second = await seedStakeholder(pool, { discipline: null });
+
+    const found = await repository.findAll();
+
+    const firstIndex = found.findIndex((stakeholder) => stakeholder.id === first.id);
+    const secondIndex = found.findIndex((stakeholder) => stakeholder.id === second.id);
+
+    expect(firstIndex).toBeGreaterThanOrEqual(0);
+    expect(secondIndex).toBeGreaterThan(firstIndex);
+    expect(found[firstIndex]).toEqual({ id: first.id, discipline: 'engineering' });
+    expect(found[secondIndex]).toEqual({ id: second.id, discipline: null });
+  });
 });

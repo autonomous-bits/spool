@@ -12,6 +12,11 @@ import {
   SubmitSuggestionValidationError,
   parseSubmitSuggestionInput,
 } from './tools/submit-suggestion.js';
+import {
+  submitVerificationSignal,
+  SubmitVerificationSignalValidationError,
+  parseSubmitVerificationSignalInput,
+} from './tools/submit-verification-signal.js';
 import { uploadArtifact, UploadArtifactValidationError, parseUploadArtifactInput } from './tools/upload-artifact.js';
 
 interface McpHealthResponse {
@@ -34,6 +39,7 @@ const CAPTURE_CHUNK_ROUTE = '/tools/capture-chunk';
 const CREATE_BRANCH_ROUTE = '/tools/create-branch';
 const CREATE_EDGE_ROUTE = '/tools/create-edge';
 const SUBMIT_SUGGESTION_ROUTE = '/tools/submit-suggestion';
+const SUBMIT_VERIFICATION_SIGNAL_ROUTE = '/tools/submit-verification-signal';
 const UPLOAD_ARTIFACT_ROUTE = '/tools/upload-artifact';
 const ATTACH_ARTIFACT_TO_CHUNK_ROUTE = '/tools/attach-artifact-to-chunk';
 // Bounds the in-memory body buffer for a single tool call (node-memory-management: avoid
@@ -192,6 +198,35 @@ async function handleSubmitSuggestion(
   }
 }
 
+async function handleSubmitVerificationSignal(
+  request: IncomingMessage,
+  response: ServerResponse,
+  harnessUrl: string,
+): Promise<void> {
+  try {
+    const raw = await readRequestBody(request);
+    let parsedBody: unknown;
+    try {
+      parsedBody = raw.length === 0 ? undefined : JSON.parse(raw);
+    } catch {
+      throw new SubmitVerificationSignalValidationError('Request body must be valid JSON', 400);
+    }
+
+    const input = parseSubmitVerificationSignalInput(parsedBody);
+    const signal = await submitVerificationSignal(input, harnessUrl);
+    sendJson(response, 201, signal);
+  } catch (error) {
+    if (error instanceof RequestBodyError || error instanceof SubmitVerificationSignalValidationError) {
+      sendJson(response, error.statusCode, { message: error.message });
+      return;
+    }
+
+    const reason = error instanceof Error ? error.message : 'Unknown error';
+    logDiagnostic('error', 'submit-verification-signal tool call failed', { reason });
+    sendJson(response, 502, { message: 'Failed to reach the store' });
+  }
+}
+
 async function handleUploadArtifact(
   request: IncomingMessage,
   response: ServerResponse,
@@ -271,6 +306,11 @@ export function createMcpHttpServer(
 
     if (request.method === 'POST' && request.url === SUBMIT_SUGGESTION_ROUTE) {
       void handleSubmitSuggestion(request, response, harnessUrl);
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === SUBMIT_VERIFICATION_SIGNAL_ROUTE) {
+      void handleSubmitVerificationSignal(request, response, harnessUrl);
       return;
     }
 
