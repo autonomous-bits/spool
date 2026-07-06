@@ -1,0 +1,181 @@
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import type { SessionTokenClaims } from '../auth/session-token.service.js';
+import { assertIsHumanActor } from '../domain/branch-lifecycle.js';
+import { Suggestion } from '../domain/suggestion.js';
+import type { HumanActorContext } from '../domain/types/actor/actor-context.js';
+import { isDiscipline } from '../domain/types/vocabulary/discipline.js';
+import { isSuggestionStatus } from '../domain/types/vocabulary/suggestion-status.js';
+import type { BranchResponse } from '../branches/branch-response.dto.js';
+import { toBranchResponse } from '../branches/branch-response.dto.js';
+import { StakeholderRepository } from '../persistence/stakeholder.repository.js';
+import { SuggestionRepository } from '../persistence/suggestion.repository.js';
+import { toSuggestionResponse, type SuggestionResponse } from './suggestion-response.dto.js';
+import type { AcceptSuggestionRequest } from './accept-suggestion-request.dto.js';
+import type { CreateSuggestionRequest } from './create-suggestion-request.dto.js';
+
+const FOREIGN_KEY_VIOLATION = '23503';
+const UNIQUE_VIOLATION = '23505';
+
+function isPgErrorWithCode(error: unknown, code: string): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code: unknown }).code === code
+  );
+}
+
+/**
+ * Application service for suggestion submission and acceptance (Meridian IDEA-27/IDEA-28/
+ * IDEA-49), sitting between the HTTP controller and the `SuggestionRepository`/
+ * `StakeholderRepository` persistence layers. Submission is a delegated-actor operation
+ * (Meridian IDEA-9/IDEA-75): the server always assigns `submittedByActorKind: 'delegated'`,
+ * never trusting a client-supplied value. Acceptance is human-only (Meridian IDEA-75): the
+ * server always assigns `kind: 'human'` from verified session-token claims.
+ */
+@Injectable()
+export class SuggestionsService {
+  constructor(
+    private readonly suggestionRepository: SuggestionRepository,
+    private readonly stakeholderRepository: StakeholderRepository,
+  ) {}
+
+  async create(request: CreateSuggestionRequest): Promise<SuggestionResponse> {
+    let suggestion: Suggestion;
+    try {
+      suggestion = new Suggestion({
+        variant: request.variant,
+        discipline: request.discipline,
+        submittedByStakeholderId: request.stakeholderId,
+        submittedByActorKind: 'delegated',
+      });
+    } catch (error) {
+      // Domain invariants (blank label/content/from/to labels, same from/to, invalid vocab)
+      // surfaced as 400s, not 500s.
+      const message = error instanceof Error ? error.message : 'Invalid suggestion';
+      throw new BadRequestException(message);
+    }
+
+    try {
+      const created = await this.suggestionRepository.create(suggestion);
+      return toSuggestionResponse(created);
+    } catch (error) {
+      if (isPgErrorWithCode(error, FOREIGN_KEY_VIOLATION)) {
+        throw new BadRequestException(`Unknown stakeholderId: ${request.stakeholderId}`);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Accepts a pending suggestion, creating a linked draft branch (Meridian IDEA-27/IDEA-49).
+   * `claims` must come from a verified session token (Meridian IDEA-75: human-only); the
+   * resulting branch's discipline is taken from the suggestion, never the request body.
+   */
+  async accept(
+    suggestionId: string,
+    request: AcceptSuggestionRequest,
+    claims: SessionTokenClaims,
+  ): Promise<BranchResponse> {
+    const stakeholder = await this.stakeholderRepository.findById(claims.stakeholderId);
+    if (stakeholder === undefined) {
+      throw new BadRequestException(
+        `Stakeholder ${claims.stakeholderId} must exist to accept a suggestion`,
+      );
+    }
+
+    const actor = {
+      kind: 'human',
+      stakeholderId: claims.stakeholderId,
+      discipline: isDiscipline(stakeholder.discipline) ? stakeholder.discipline : null,
+    } satisfies HumanActorContext;
+    assertIsHumanActor(actor);
+
+    let result;
+    try {
+      result = await this.suggestionRepository.accept(suggestionId, request.name, claims.stakeholderId);
+    } catch (error) {
+      if (isPgErrorWithCode(error, UNIQUE_VIOLATION)) {
+        throw new BadRequestException(`Branch name already active: ${request.name}`);
+      }
+      throw error;
+    }
+
+    switch (result.kind) {
+      case 'not_found':
+        throw new NotFoundException(`Suggestion ${suggestionId} not found`);
+      case 'not_pending':
+        throw new ConflictException(
+          `Invalid suggestion lifecycle operation: expected pending suggestion, received a different status`,
+        );
+      case 'accepted':
+        return toBranchResponse(result.branch);
+    }
+  }
+
+  /**
+   * Rejects a pending suggestion (Meridian IDEA-27, G07 SG3). `claims` must come from a verified
+   * session token (Meridian IDEA-75: human-only), matching `accept`'s auth requirements. Never
+   * creates a branch.
+   */
+  async reject(suggestionId: string, claims: SessionTokenClaims): Promise<SuggestionResponse> {
+    const stakeholder = await this.stakeholderRepository.findById(claims.stakeholderId);
+    if (stakeholder === undefined) {
+      throw new BadRequestException(
+        `Stakeholder ${claims.stakeholderId} must exist to reject a suggestion`,
+      );
+    }
+
+    const actor = {
+      kind: 'human',
+      stakeholderId: claims.stakeholderId,
+      discipline: isDiscipline(stakeholder.discipline) ? stakeholder.discipline : null,
+    } satisfies HumanActorContext;
+    assertIsHumanActor(actor);
+
+    const result = await this.suggestionRepository.reject(suggestionId, claims.stakeholderId);
+
+    switch (result.kind) {
+      case 'not_found':
+        throw new NotFoundException(`Suggestion ${suggestionId} not found`);
+      case 'not_pending':
+        throw new ConflictException(
+          `Invalid suggestion lifecycle operation: expected pending suggestion, received a different status`,
+        );
+      case 'rejected': {
+        const rejected = await this.suggestionRepository.findById(suggestionId);
+        if (rejected === undefined) {
+          throw new Error(
+            `SuggestionsService.reject: suggestion ${suggestionId} vanished after rejection`,
+          );
+        }
+        return toSuggestionResponse(rejected);
+      }
+    }
+  }
+
+  /**
+   * Reads a single suggestion by id (G07 SG3). Deliberately unauthenticated, matching this
+   * codebase's existing GET /branches/:id, GET /chunks/:id, GET /edges/:id precedent.
+   */
+  async findById(suggestionId: string): Promise<SuggestionResponse> {
+    const suggestion = await this.suggestionRepository.findById(suggestionId);
+    if (suggestion === undefined) {
+      throw new NotFoundException(`Suggestion ${suggestionId} not found`);
+    }
+    return toSuggestionResponse(suggestion);
+  }
+
+  /**
+   * Lists suggestions, optionally filtered to a single status, ordered oldest-first (G07 SG3).
+   * Deliberately unauthenticated, matching this codebase's existing GET /branches, GET /chunks,
+   * GET /edges precedent.
+   */
+  async findAll(status?: string): Promise<SuggestionResponse[]> {
+    if (status !== undefined && !isSuggestionStatus(status)) {
+      throw new BadRequestException(`Invalid status filter: ${status}`);
+    }
+    const suggestions = await this.suggestionRepository.findAll(status);
+    return suggestions.map(toSuggestionResponse);
+  }
+}

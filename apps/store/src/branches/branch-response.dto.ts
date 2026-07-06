@@ -9,7 +9,8 @@ import type { Discipline } from '../domain/types/vocabulary/discipline.js';
  * `submittedAt`, and `verifiedAt` are serialized as ISO-8601 strings (`submittedAt`/`verifiedAt`
  * are nullable until the branch has been submitted/verified, and are cleared back to null on
  * reject per Meridian IDEA-81). `mergedAt` is nullable until the branch has been merged into
- * mainline (Meridian IDEA-40/IDEA-74, G06).
+ * mainline (Meridian IDEA-40/IDEA-74, G06). `originSuggestionId` is nullable and set only for
+ * branches created via `POST /suggestions/:id/accept` (Meridian IDEA-49, G07).
  */
 export interface BranchResponse {
   id: string;
@@ -20,6 +21,7 @@ export interface BranchResponse {
   submittedAt: string | null;
   verifiedAt: string | null;
   mergedAt: string | null;
+  originSuggestionId: string | null;
   createdAt: Date;
   updatedAt: Date;
   createdByStakeholderId: string;
@@ -35,6 +37,7 @@ export function toBranchResponse(branch: Branch): BranchResponse {
     submittedAt: branch.submittedAt?.toISOString() ?? null,
     verifiedAt: branch.verifiedAt?.toISOString() ?? null,
     mergedAt: branch.mergedAt?.toISOString() ?? null,
+    originSuggestionId: branch.originSuggestionId ?? null,
     createdAt: branch.createdAt,
     updatedAt: branch.updatedAt,
     createdByStakeholderId: branch.createdByStakeholderId,

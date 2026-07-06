@@ -4,7 +4,7 @@ import { Branch } from '../domain/branch.js';
 import { DivergencePoint } from '../domain/divergence-point.js';
 import { PG_POOL } from './pg-pool.token.js';
 
-interface BranchRow extends QueryResultRow {
+export interface BranchRow extends QueryResultRow {
   id: string;
   name: string;
   discipline: string;
@@ -14,6 +14,7 @@ interface BranchRow extends QueryResultRow {
   verified_at: Date | null;
   merged_at: Date | null;
   merged_by_stakeholder_id: string | null;
+  origin_suggestion_id: string | null;
   created_by_stakeholder_id: string;
   created_at: Date;
   updated_at: Date;
@@ -46,7 +47,7 @@ function edgeIdentityKey(row: Pick<EdgeIdentityRow, 'from_chunk_label' | 'to_chu
   return `${row.from_chunk_label}\u0000${row.to_chunk_label}\u0000${row.type}`;
 }
 
-function toBranch(row: BranchRow): Branch {
+export function toBranch(row: BranchRow): Branch {
   return new Branch({
     id: row.id,
     name: row.name,
@@ -59,6 +60,9 @@ function toBranch(row: BranchRow): Branch {
     ...(row.merged_by_stakeholder_id === null
       ? {}
       : { mergedByStakeholderId: row.merged_by_stakeholder_id }),
+    ...(row.origin_suggestion_id === null
+      ? {}
+      : { originSuggestionId: row.origin_suggestion_id }),
     createdByStakeholderId: row.created_by_stakeholder_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

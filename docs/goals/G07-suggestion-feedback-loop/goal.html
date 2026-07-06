@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>G07 — Suggestion Feedback Loop</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  body { font-family: -apple-system, Segoe UI, sans-serif; max-width: 960px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
+  h1 { font-size: 1.4rem; }
+  h2 { font-size: 1.1rem; margin-top: 2rem; border-bottom: 1px solid #ddd; padding-bottom: .25rem; }
+  table { border-collapse: collapse; width: 100%; margin: .5rem 0; }
+  th, td { border: 1px solid #ccc; padding: .4rem .6rem; text-align: left; font-size: .9rem; }
+  th { background: #f2f2f2; }
+  .badge { display: inline-block; padding: .1rem .5rem; border-radius: .75rem; font-size: .75rem; font-weight: 600; color: #fff; }
+  .badge.open { background: #6c757d; }
+  .badge.in-progress { background: #d9822b; }
+  .badge.done { background: #2e7d32; }
+  .badge.blocked { background: #c62828; }
+  details { border: 1px solid #ddd; border-radius: .4rem; margin: .5rem 0; padding: .4rem .8rem; }
+  summary { cursor: pointer; font-weight: 600; }
+  code { background: #f5f5f5; padding: 0 .3rem; border-radius: .2rem; }
+  .mermaid { background: #fafafa; padding: .5rem; }
+</style>
+</head>
+<body>
+
+<h1>G07 — Suggestion Feedback Loop <span id="goal-status-badge" class="badge done">done</span></h1>
+<p><strong>Size:</strong> 4/5 — touches every layer (domain, persistence, API, MCP), introduces a new domain concept (<code>Suggestion</code> + lifecycle + transition log), but reuses existing session-token auth (G04/G05) and the existing branch-creation path, so no brand-new infra is required.</p>
+
+<h2>Meridian Source</h2>
+<table>
+<tr><th>Chunk</th><th>Status</th><th>Layer</th><th>Note</th></tr>
+<tr><td>IDEA-28</td><td>promoted</td><td>API / domain</td><td>Harness API for external feedback → suggestions queue (chunk/edge mods) → human accepts → feedback branch scoped to discipline, linked to source suggestion, routed through merge pipeline.</td></tr>
+<tr><td>IDEA-27</td><td>promoted</td><td>domain</td><td>Suggestion lifecycle states: pending → accepted/rejected. All state changes logged.</td></tr>
+<tr><td>IDEA-49</td><td>promoted (ADR)</td><td>persistence / API</td><td>Suggestions table; NestJS route to insert with status <code>pending</code>; branches track origin via <code>origin_suggestion_id</code> FK.</td></tr>
+<tr><td>IDEA-75</td><td>promoted (ADR)</td><td>domain / MCP</td><td>ActorKind human/delegated; "chunk approval/suggestion decisions" are human-only (<code>assertIsHumanActor</code>). Matches existing precedent: human-only ops get no MCP tool.</td></tr>
+<tr><td>IDEA-9</td><td>promoted</td><td>MCP</td><td>Ideation assistants act as delegated tools on behalf of humans — basis for the <code>submit-suggestion</code> MCP tool (submission only).</td></tr>
+<tr><td>IDEA-34</td><td>promoted (ADR)</td><td>API</td><td>NestJS API gateway is the sole application boundary.</td></tr>
+<tr><td>IDEA-31</td><td>promoted (ADR)</td><td>persistence</td><td>Postgres stores the versioned graph (chunks/edges/branches/suggestions).</td></tr>
+<tr><td>IDEA-82</td><td>promoted (ADR)</td><td>persistence</td><td>Amends IDEA-31: confirms <code>branches.origin_suggestion_id</code> is currently a plain nullable UUID with no FK; the FK to <code>suggestions(id)</code> is expected once this goal (G07) implements the <code>suggestions</code> table.</td></tr>
+<tr><td>IDEA-83</td><td>promoted (feedback)</td><td>persistence</td><td>Feedback proposing schema.sql's <code>suggestions</code> table add <code>submitted_by_stakeholder_id</code>/<code>submitted_by_actor_kind</code> columns; SG1 implements this as an additive scope deviation regardless.</td></tr>
+</table>
+
+<h2>Vertical Slice Diagram</h2>
+<p>Each sub-goal below is a full vertical slice (domain → persistence → API → MCP where applicable), not a horizontal layer pass.</p>
+<div class="mermaid">
+flowchart TB
+  subgraph SG1["SG1: submit-suggestion"]
+    A1[MCP submit-suggestion tool] --> A2[POST /suggestions]
+    A2 --> A3[SuggestionsService.submit]
+    A3 --> A4[(suggestions table, status=pending)]
+    A3 --> A5[(suggestion_state_logs: null→pending)]
+  end
+  subgraph SG2["SG2: accept-suggestion"]
+    B1[POST /suggestions/:id/accept + session token] --> B2[SuggestionsService.accept]
+    B2 --> B3["1 DB transaction:\nlock suggestion FOR UPDATE,\ncreate branch,\nset origin_suggestion_id,\nstatus=accepted"]
+    B3 --> B4[(branches table)]
+    B3 --> B5[(suggestions table)]
+    B3 --> B6[(suggestion_state_logs: pending→accepted)]
+  end
+  subgraph SG3["SG3: reject + list/read"]
+    C1[POST /suggestions/:id/reject + session token] --> C2[SuggestionsService.reject]
+    C2 --> C3[(suggestions table, status=rejected)]
+    C2 --> C4[(suggestion_state_logs: pending→rejected)]
+    C5[GET /suggestions?status=] --> C6[SuggestionsService.list]
+    C7[GET /suggestions/:id] --> C8[SuggestionsService.findById]
+  end
+  SG1 --> SG2 --> SG3
+</div>
+
+<h2>Dependency Diagram</h2>
+<div class="mermaid">
+graph LR
+  SG1[sg1-submit-suggestion] --> SG2[sg2-accept-suggestion]
+  SG2 --> SG3[sg3-reject-list-suggestions]
+  SG3 --> SG4[sg4-docker-e2e]
+</div>
+
+<h2>Sub-goal Detail</h2>
+
+<details open>
+<summary>SG1 — submit-suggestion <span class="sg-badge badge done" data-sg="sg1-submit-suggestion">done</span></summary>
+<p><strong>Layer:</strong> domain + persistence + API + MCP (full vertical slice) &nbsp; <strong>Depends on:</strong> none</p>
+<p><strong>Objective:</strong> External/delegated actors can submit a chunk- or edge-modification suggestion that lands as a <code>pending</code> row, over both HTTP and the MCP tool.</p>
+<p><strong>Design decisions (field-level shape is ratified by IDEA-31 → <code>schema.sql</code>'s <code>suggestions</code>/<code>suggestion_state_logs</code> tables, ADR promoted — not free-form; only the additive submitter-attribution columns below are a documented scope deviation, mirroring the IDEA-82 precedent):</strong></p>
+<ul>
+  <li><code>SuggestionStatus</code> vocabulary: <code>'pending' | 'accepted' | 'rejected'</code> (IDEA-27, matches schema.sql's <code>status</code> CHECK).</li>
+  <li>Suggestion row exactly matches schema.sql's <code>suggestions</code> table: <code>id</code>, <code>label</code> VARCHAR(50) (chunk-suggestion only), <code>content</code> TEXT (chunk-suggestion only), <code>from_chunk_label</code>/<code>to_chunk_label</code> VARCHAR(50) (edge-suggestion only), <code>relationship_type</code> (edge-suggestion only, same closed vocab as <code>edges.type</code>), <code>discipline</code> (closed Discipline vocab, NOT NULL — the discipline the resulting feedback branch will be scoped to, per IDEA-28), <code>status</code>, <code>created_at</code>, <code>updated_at</code>. <strong>No <code>kind</code>/<code>summary</code>/<code>payload</code> columns</strong> — the discriminated-union CHECK constraint <code>check_suggestion_type</code> (either label+content set with from/to/relationship_type NULL, or the reverse) is the sole discriminator; enforce it both at the DB (migration) and API validation layers. Unique index <code>idx_suggestions_unique (label, content)</code> per schema.sql.</li>
+  <li><strong>Documented scope deviation (mirrors IDEA-82's precedent of extending schema.sql for real implementation needs; escalated upstream as promoted Meridian feedback <code>IDEA-83</code>, <code>feedback-on</code> IDEA-31/IDEA-49/IDEA-75/IDEA-82 — schema.sql itself not yet physically edited, this deviation proceeds regardless):</strong> add <code>submitted_by_stakeholder_id</code> (NOT NULL, FK stakeholders) and <code>submitted_by_actor_kind</code> (server-assigned, never client-supplied — IDEA-75) columns, since schema.sql's <code>suggestions</code> table has no submitter-attribution column (unlike <code>branches.created_by_stakeholder_id</code> NOT NULL) and IDEA-75 requires distinguishing delegated vs. human actors. <code>decided_by_stakeholder_id</code>/<code>decided_at</code> are also additive (nullable) for the same reason SG2/SG3 need to know who accepted/rejected — schema.sql tracks this only via <code>suggestion_state_logs.updated_by_stakeholder_id</code>, which this goal also uses, so these two columns are optional convenience denormalization; keep them nullable and non-blocking if dropped in review.</li>
+  <li>Table <code>suggestion_state_logs</code> matches schema.sql exactly: <code>id</code>, <code>suggestion_id</code> FK, <code>old_status</code> (nullable for the initial insert), <code>new_status</code>, <code>updated_by_stakeholder_id</code> FK stakeholders, <code>created_at</code> — satisfies IDEA-27's "all suggestion state changes are logged". No <code>actor_kind</code> column (not in schema.sql); actor-kind enforcement (IDEA-75) happens at the API layer via <code>assertIsHumanActor</code>, not persisted per-event. Every status change (submit/accept/reject) inserts exactly one row here in the same transaction as the status update.</li>
+  <li>Migration <code>0008_add_suggestions_table.sql</code>: creates <code>suggestions</code> and <code>suggestion_state_logs</code> per schema.sql plus the two additive submitter columns above; does <strong>not</strong> re-add <code>branches.origin_suggestion_id</code> (it already exists as a plain nullable UUID per migration <code>0003</code>'s documented scope deviation) — instead adds the FK constraint <code>branches_origin_suggestion_id_fkey</code> referencing <code>suggestions(id)</code>.</li>
+  <li><code>POST /suggestions</code>: delegated-actor style (mirrors <code>capture-chunk</code>/<code>create-branch</code>/<code>create-edge</code>) — body carries <code>stakeholderId</code> plus exactly one variant's fields (chunk: <code>label</code>+<code>content</code>; edge: <code>fromChunkLabel</code>+<code>toChunkLabel</code>+<code>relationshipType</code>) and <code>discipline</code>; no session token required; server sets <code>submitted_by_actor_kind = 'delegated'</code> unconditionally (never trusts a client-supplied actor kind, per IDEA-75).</li>
+  <li>MCP tool <code>submit-suggestion</code> (new file <code>apps/mcp/src/tools/submit-suggestion.ts</code>): validates input, proxies to <code>POST /suggestions</code>, structured exactly like <code>capture-chunk.ts</code> (own <code>parse*Input</code>, <code>*ValidationError</code>, result type, spec file).</li>
+</ul>
+<p><strong>Acceptance criteria:</strong></p>
+<ul>
+  <li><code>POST /suggestions</code> with a valid chunk-shaped body (<code>label</code>, <code>content</code>, <code>discipline</code>, <code>stakeholderId</code>) OR a valid edge-shaped body (<code>fromChunkLabel</code>, <code>toChunkLabel</code>, <code>relationshipType</code>, <code>discipline</code>, <code>stakeholderId</code>) persists a suggestion with <code>status='pending'</code> and inserts one <code>suggestion_state_logs</code> row (<code>old_status=NULL</code>, <code>new_status='pending'</code>).</li>
+  <li>A body mixing both variants' fields, or missing all of both variants' fields, → 400 (mirrors <code>check_suggestion_type</code>); unknown <code>stakeholderId</code> → 400 (mirrors existing chunk/branch/edge creation error handling).</li>
+  <li>SG1 does <strong>not</strong> require a read endpoint; assert the persisted row directly via the repository/DB in tests. <code>GET /suggestions/:id</code> is introduced in SG3, not SG1.</li>
+  <li>MCP <code>submit-suggestion</code> tool: unit tests cover valid chunk-shaped input, valid edge-shaped input, validation failures (mixed/missing variant fields), and store-error propagation (mirrors <code>capture-chunk.spec.ts</code> structure).</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:store</code>, <code>pnpm test:mcp</code></p>
+</details>
+
+<details>
+<summary>SG2 — accept-suggestion <span class="sg-badge badge done" data-sg="sg2-accept-suggestion">done</span></summary>
+<p><strong>Layer:</strong> domain + persistence + API (no MCP tool — human-only per IDEA-75 and existing branch-lifecycle precedent) &nbsp; <strong>Depends on:</strong> sg1-submit-suggestion</p>
+<p><strong>Objective:</strong> A human stakeholder (session token, per G04/G05's <code>SessionTokenService</code>) accepts a pending suggestion, atomically creating a linked draft branch.</p>
+<ul>
+  <li><code>POST /suggestions/:id/accept</code> body: <code>{ name: string }</code> (branch name — reuses the same non-empty-string validation as <code>CreateBranchRequest</code>; branch <code>discipline</code> comes from the suggestion row, not the request body).</li>
+  <li>Auth: <code>Authorization: Bearer &lt;session token&gt;</code>, verified via existing <code>SessionTokenService</code>; resolves a <code>HumanActorContext</code> exactly like <code>BranchesService.resolveActorForVerification</code>.</li>
+  <li><strong>Must be one atomic DB transaction</strong>: lock the suggestion row (<code>SELECT ... FOR UPDATE</code>), assert <code>status='pending'</code> (else 409, mirrors <code>BranchLifecycleError</code>/<code>ConflictException</code> pattern), insert the new branch row (status=<code>draft</code>, discipline=suggestion.discipline, <code>origin_suggestion_id</code>=suggestion.id, <code>created_by_stakeholder_id</code>=acting human), update the suggestion (<code>status='accepted'</code>, <code>decided_by_stakeholder_id</code>, <code>decided_at</code>), and insert one <code>suggestion_state_logs</code> row (<code>pending→accepted</code>) — all-or-nothing.</li>
+  <li>Add <code>originSuggestionId: string | null</code> to <code>BranchResponse</code>/<code>toBranchResponse</code> so the linkage is publicly visible (currently missing from the DTO).</li>
+  <li>Response: the created <code>BranchResponse</code> (with <code>originSuggestionId</code> set) — not the suggestion.</li>
+</ul>
+<p><strong>Acceptance criteria:</strong></p>
+<ul>
+  <li>Accepting a pending suggestion creates exactly one new branch with <code>status='draft'</code>, correct <code>discipline</code>, and <code>originSuggestionId</code> equal to the suggestion's id.</li>
+  <li>Accepting a non-pending suggestion (already accepted/rejected) → 409, no branch created, no transition row inserted.</li>
+  <li>Accepting with a non-human/invalid/missing session token → 401 (mirrors existing branch-lifecycle auth tests).</li>
+  <li>A failure injected mid-transaction (e.g. duplicate branch name) rolls back both the suggestion status and any partial branch row — no orphaned state.</li>
+  <li>Exactly one <code>suggestion_state_logs</code> row is inserted per successful accept.</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:store</code></p>
+</details>
+
+<details>
+<summary>SG3 — reject + list/read suggestions <span class="sg-badge badge done" data-sg="sg3-reject-list-suggestions">done</span></summary>
+<p><strong>Layer:</strong> domain + persistence + API (no MCP tool) &nbsp; <strong>Depends on:</strong> sg2-accept-suggestion</p>
+<p><strong>Objective:</strong> Human stakeholders can reject a pending suggestion, and any caller can list/read suggestions for review (closing the "queue" aspect of IDEA-28/IDEA-49).</p>
+<ul>
+  <li><code>POST /suggestions/:id/reject</code>: same auth/actor pattern as accept; asserts <code>status='pending'</code> (409 otherwise); sets <code>status='rejected'</code>, <code>decided_by_stakeholder_id</code>, <code>decided_at</code>; inserts one <code>suggestion_state_logs</code> row (<code>pending→rejected</code>); no branch created.</li>
+  <li><code>GET /suggestions/:id</code>: returns the suggestion (404 if missing).</li>
+  <li><code>GET /suggestions?status=pending</code> (optional query param, defaults to no filter): returns the list, ordered by <code>created_at</code> ascending — this is the human-review "queue" view.</li>
+  <li><strong>Explicit decision:</strong> <code>GET /suggestions</code> and <code>GET /suggestions/:id</code> require no auth (unauthenticated read), matching the existing precedent of <code>GET /branches/:id</code>/<code>GET /chunks/:id</code>/<code>GET /edges/:id</code>, which are also unauthenticated in this codebase. This is a deliberate consistency choice, not an oversight.</li>
+</ul>
+<p><strong>Acceptance criteria:</strong></p>
+<ul>
+  <li>Rejecting a pending suggestion sets <code>status='rejected'</code> and logs one transition row; rejecting a non-pending suggestion → 409.</li>
+  <li><code>GET /suggestions?status=pending</code> returns only pending suggestions, oldest first.</li>
+  <li><code>GET /suggestions/:id</code> returns 404 for an unknown id.</li>
+  <li><code>GET /suggestions</code> and <code>GET /suggestions/:id</code> succeed with <strong>no</strong> <code>Authorization</code> header (test explicitly omits it) — confirming the deliberate unauthenticated-read decision above is actually implemented, not just documented.</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:store</code></p>
+</details>
+
+<details>
+<summary>SG4 — Docker end-to-end verification <span class="sg-badge badge done" data-sg="sg4-docker-e2e">done</span></summary>
+<p><strong>Layer:</strong> full stack, containerized &nbsp; <strong>Depends on:</strong> sg3-reject-list-suggestions</p>
+<p><strong>Objective:</strong> Prove the full submit → accept/reject → linked-branch loop against the real running system, not in-process tests.</p>
+<ul>
+  <li>Bring the system up with <code>docker compose up --build spoolstore</code> (per <code>apps/store/AGENTS.md</code>).</li>
+  <li>Obtain a real human session token via <code>pnpm dev:session-token</code> (drives the actual <code>GET /auth/github/login</code> → <code>GET /auth/github/callback</code> flow against the running container, using the <code>github-oauth-stub</code> service in <code>compose.yaml</code>). <strong>Do not</strong> substitute a hand-crafted token, a client-supplied actor field, or any auth bypass — accept/reject are human-only and must be exercised with this real token for both the success path and negative cases (wrong/missing token, already-decided suggestion).</li>
+  <li>Submit the <strong>first</strong> suggestion via the <code>submit-suggestion</code> MCP tool specifically (not a bare HTTP call) against the running store — this is required to prove the MCP integration path, not optional.</li>
+  <li>Accept it using the human session token; confirm via <code>GET /branches/:id</code> that a new branch exists with the correct <code>discipline</code> and <code>originSuggestionId</code>.</li>
+  <li>Submit a second suggestion (either via the MCP tool or a direct <code>POST /suggestions</code> call) and exercise the reject path with the human token; confirm its status is <code>rejected</code> via <code>GET /suggestions/:id</code>.</li>
+  <li>Confirm accept/reject without a valid human session token is rejected with 401 against the running container.</li>
+</ul>
+<p><strong>Acceptance criteria:</strong> all six bullets above observed against the containerized system (not unit/integration tests alone).</p>
+<p><strong>Verification:</strong> manual/scripted HTTP + MCP calls against the Dockerized <code>spoolstore</code>, using a token minted by <code>pnpm dev:session-token</code>.</p>
+</details>
+
+<h2>Open Questions</h2>
+<p>None. (The one prior ambiguity — the missing submitter-attribution column in schema.sql's <code>suggestions</code> table — is resolved: SG1 adds it as a documented additive deviation, tracked upstream via promoted Meridian feedback <code>IDEA-83</code>; see SG1's design decisions.)</p>
+
+<h2>Definition of Done</h2>
+<ul>
+  <li>SG1, SG2, SG3 all pass their store/MCP verification commands.</li>
+  <li>SG4's Docker end-to-end exercise passes against the containerized <code>spoolstore</code>, using a session token obtained via <code>pnpm dev:session-token</code>.</li>
+  <li><code>docs/goals/README.md</code> updated with G07's row.</li>
+</ul>
+
+<script type="application/json" id="goal-data">
+{
+  "goalId": "G07",
+  "slug": "suggestion-feedback-loop",
+  "status": "done",
+  "size": 4,
+  "sizeJustification": "Touches every layer (domain, persistence, API, MCP) and introduces a new domain concept (Suggestion + lifecycle + transition log), but reuses existing session-token auth and branch-creation path.",
+  "meridianChunks": [
+    { "id": "IDEA-28", "status": "promoted", "layer": "API/domain", "note": "Feedback API -> suggestions queue (chunk/edge mods) -> human accept -> discipline-scoped feedback branch, linked to source suggestion, routed through merge pipeline." },
+    { "id": "IDEA-27", "status": "promoted", "layer": "domain", "note": "Suggestion lifecycle: pending -> accepted/rejected; all state changes logged." },
+    { "id": "IDEA-49", "status": "promoted", "layer": "persistence/API", "note": "ADR: suggestions table; POST route inserts pending; branches.origin_suggestion_id FK." },
+    { "id": "IDEA-75", "status": "promoted", "layer": "domain/MCP", "note": "ADR: ActorKind human/delegated; suggestion decisions are human-only (assertIsHumanActor); matches no-MCP-tool precedent for human-only ops." },
+    { "id": "IDEA-9", "status": "promoted", "layer": "MCP", "note": "Ideation assistants act as delegated tools on behalf of humans; basis for submit-suggestion MCP tool (submission only)." },
+    { "id": "IDEA-34", "status": "promoted", "layer": "API", "note": "NestJS API gateway is the sole application boundary." },
+    { "id": "IDEA-31", "status": "promoted", "layer": "persistence", "note": "Postgres stores the versioned graph (chunks/edges/branches/suggestions)." },
+    { "id": "IDEA-82", "status": "promoted", "layer": "persistence", "note": "Amends IDEA-31: branches.origin_suggestion_id is a plain nullable UUID with no FK today; FK to suggestions(id) expected once G07 implements the suggestions table." },
+    { "id": "IDEA-83", "status": "promoted", "layer": "persistence", "note": "Feedback (type: feedback) proposing schema.sql's suggestions table add submitted_by_stakeholder_id/submitted_by_actor_kind; SG1 implements this as an additive scope deviation regardless of schema.sql's own update timeline." }
+  ],
+  "verifiedRepoFacts": [
+    "branches.origin_suggestion_id already exists as a plain nullable UUID with no FK (migration 0003, documented scope deviation) -- do not re-add the column, only add the FK constraint",
+    "BranchResponse/toBranchResponse (apps/store/src/branches/branch-response.dto.ts) does not currently expose originSuggestionId -- must be added in SG2",
+    "CreateBranchRequest (apps/store/src/branches/create-branch-request.dto.ts) requires a non-empty name string -- accept's request body reuses this validation",
+    "Next available migration number is 0008",
+    "GET /branches/:id, GET /chunks/:id, GET /edges/:id are unauthenticated in this codebase today -- precedent for SG3's unauthenticated suggestion reads"
+  ],
+  "subGoals": [
+    {
+      "id": "sg1-submit-suggestion",
+      "layer": "domain+persistence+API+MCP",
+      "dependsOn": [],
+      "objective": "Delegated actors submit a chunk/edge suggestion; persists as pending with a logged transition; MCP tool exposes submission only.",
+      "designDecisions": [
+        "suggestions field-level shape is ratified by IDEA-31 -> schema.sql (promoted ADR), not free-form; only submitter-attribution columns below are an additive documented deviation, mirroring IDEA-82's precedent",
+        "SuggestionStatus vocabulary: 'pending' | 'accepted' | 'rejected' (matches schema.sql status CHECK)",
+        "suggestions columns exactly match schema.sql: id, label VARCHAR(50) (chunk-suggestion only), content TEXT (chunk-suggestion only), from_chunk_label/to_chunk_label VARCHAR(50) (edge-suggestion only), relationship_type (edge-suggestion only, same closed vocab as edges.type), discipline (closed Discipline vocab, NOT NULL), status, created_at, updated_at -- no kind/summary/payload columns; check_suggestion_type CHECK constraint is the sole discriminator (label+content XOR from/to/relationship_type); unique index idx_suggestions_unique(label, content) per schema.sql",
+        "documented scope deviation (mirrors IDEA-82 precedent; escalated upstream as promoted Meridian feedback IDEA-83, feedback-on IDEA-31/IDEA-49/IDEA-75/IDEA-82 -- schema.sql not yet physically edited, deviation proceeds regardless): add submitted_by_stakeholder_id (NOT NULL, FK stakeholders) and submitted_by_actor_kind (server-assigned, never client-supplied -- IDEA-75), since schema.sql's suggestions table has no submitter-attribution column; decided_by_stakeholder_id/decided_at are additive nullable convenience columns for the same reason",
+        "suggestion_state_logs table matches schema.sql exactly: id, suggestion_id FK, old_status (nullable), new_status, updated_by_stakeholder_id FK stakeholders, created_at -- no actor_kind column (not in schema.sql); actor-kind enforcement (IDEA-75) happens at the API layer via assertIsHumanActor, not persisted per-event",
+        "migration 0008_add_suggestions_table.sql creates suggestions + suggestion_state_logs per schema.sql plus the additive submitter columns, and adds FK branches_origin_suggestion_id_fkey on the EXISTING branches.origin_suggestion_id column (does not recreate that column)",
+        "POST /suggestions is delegated-actor style (mirrors capture-chunk/create-branch/create-edge): body carries stakeholderId plus exactly one variant's fields (chunk: label+content; edge: fromChunkLabel+toChunkLabel+relationshipType) and discipline, no session token; server always sets submitted_by_actor_kind='delegated'",
+        "SG1 does not require a read endpoint -- GET /suggestions/:id ships in SG3; SG1 tests assert directly against the repository/DB row"
+      ],
+      "acceptanceCriteria": [
+        "POST /suggestions with a valid chunk-shaped body (label, content, discipline, stakeholderId) OR a valid edge-shaped body (fromChunkLabel, toChunkLabel, relationshipType, discipline, stakeholderId) persists status=pending and one suggestion_state_logs row (old_status=NULL, new_status=pending)",
+        "A body mixing both variants' fields, or missing all of both variants' fields, returns 400 (mirrors check_suggestion_type); unknown stakeholderId returns 400",
+        "SG1 does not require a read endpoint; tests assert directly against the repository/DB row (GET /suggestions/:id ships in SG3)",
+        "submit-suggestion MCP tool (new apps/mcp/src/tools/submit-suggestion.ts, structured like capture-chunk.ts) has unit tests for valid chunk-shaped input, valid edge-shaped input, validation failures (mixed/missing variant fields), and store-error propagation"
+      ],
+      "verification": "pnpm test:store && pnpm test:mcp",
+      "status": "done"
+    },
+    {
+      "id": "sg2-accept-suggestion",
+      "layer": "domain+persistence+API",
+      "dependsOn": ["sg1-submit-suggestion"],
+      "objective": "Human session-token holder accepts a pending suggestion, atomically creating a linked draft branch.",
+      "designDecisions": [
+        "POST /suggestions/:id/accept body: { name: string } only -- discipline comes from the suggestion row, not the request body",
+        "Auth: Authorization header 'Bearer ' + token, verified via existing SessionTokenService, resolving a HumanActorContext exactly like BranchesService.resolveActorForVerification",
+        "Accept is one atomic DB transaction: SELECT suggestion FOR UPDATE, assert status=pending (else 409), insert branch (status=draft, discipline=suggestion.discipline, origin_suggestion_id=suggestion.id, created_by_stakeholder_id=acting human), update suggestion (status=accepted, decided_by_stakeholder_id, decided_at), insert one suggestion_state_logs row (pending->accepted) -- all-or-nothing",
+        "BranchResponse/toBranchResponse gains originSuggestionId: string | null",
+        "Response is the created BranchResponse (with originSuggestionId set), not the suggestion"
+      ],
+      "acceptanceCriteria": [
+        "Accepting a pending suggestion creates one new branch with discipline from the suggestion and originSuggestionId set to the suggestion id",
+        "Accepting a non-pending suggestion returns 409 and creates no branch",
+        "Accepting with missing/invalid/non-human session token returns 401",
+        "A mid-transaction failure (e.g. duplicate branch name) rolls back both suggestion and branch state -- no orphaned rows",
+        "Exactly one suggestion_state_logs row (pending->accepted) is inserted per successful accept"
+      ],
+      "verification": "pnpm test:store",
+      "status": "done"
+    },
+    {
+      "id": "sg3-reject-list-suggestions",
+      "layer": "domain+persistence+API",
+      "dependsOn": ["sg2-accept-suggestion"],
+      "objective": "Human session-token holder rejects a pending suggestion; any caller can list/read suggestions (unauthenticated, matching existing GET /branches|chunks|edges precedent).",
+      "designDecisions": [
+        "POST /suggestions/:id/reject uses the same auth/actor pattern as accept; asserts status=pending (409 otherwise); sets status=rejected, decided_by_stakeholder_id, decided_at; inserts one suggestion_state_logs row (pending->rejected); creates no branch",
+        "GET /suggestions/:id returns the suggestion or 404",
+        "GET /suggestions?status=pending (optional filter, default unfiltered) returns the list ordered by created_at ascending",
+        "GET /suggestions and GET /suggestions/:id are deliberately unauthenticated, matching this codebase's existing GET /branches/:id, GET /chunks/:id, GET /edges/:id precedent -- not an oversight"
+      ],
+      "acceptanceCriteria": [
+        "Rejecting a pending suggestion sets status=rejected and logs one transition row",
+        "Rejecting a non-pending suggestion returns 409",
+        "GET /suggestions?status=pending returns only pending suggestions ordered oldest first",
+        "GET /suggestions/:id returns 404 for unknown id",
+        "GET /suggestions and GET /suggestions/:id succeed with no Authorization header, confirming the unauthenticated-read decision is implemented"
+      ],
+      "verification": "pnpm test:store",
+      "status": "done"
+    },
+    {
+      "id": "sg4-docker-e2e",
+      "layer": "full-stack-docker",
+      "dependsOn": ["sg3-reject-list-suggestions"],
+      "objective": "Exercise submit -> accept/reject -> linked-branch loop against the running containerized store using a real human session token from pnpm dev:session-token, including the MCP submission path.",
+      "acceptanceCriteria": [
+        "docker compose up --build spoolstore succeeds",
+        "pnpm dev:session-token produces a valid human session token via the real OAuth login/callback flow against github-oauth-stub",
+        "The first suggestion is submitted via the submit-suggestion MCP tool specifically (not a bare HTTP call) against the running store",
+        "That suggestion can be accepted with the human token, producing a branch with correct discipline and originSuggestionId, verified via GET /branches/:id",
+        "A second suggestion (MCP tool or direct POST /suggestions) can be rejected with the human token, verified via GET /suggestions/:id showing status=rejected",
+        "Accept/reject without a valid human session token returns 401 against the running container"
+      ],
+      "verification": "manual/scripted HTTP+MCP calls against dockerized spoolstore using pnpm dev:session-token",
+      "status": "done"
+    }
+  ],
+  "openQuestions": []
+}
+</script>
+
+<script>
+  mermaid.initialize({ startOnLoad: true, theme: 'neutral' });
+  const data = JSON.parse(document.getElementById('goal-data').textContent);
+  const statusColor = { open: 'open', 'in-progress': 'in-progress', done: 'done', blocked: 'blocked' };
+  document.querySelectorAll('.sg-badge').forEach((el) => {
+    const sg = data.subGoals.find((s) => s.id === el.dataset.sg);
+    if (sg) {
+      el.textContent = sg.status;
+      el.className = 'sg-badge badge ' + (statusColor[sg.status] || 'open');
+    }
+  });
+  const goalBadge = document.getElementById('goal-status-badge');
+  goalBadge.textContent = data.status;
+  goalBadge.className = 'badge ' + (statusColor[data.status] || 'open');
+</script>
+
+</body>
+</html>
