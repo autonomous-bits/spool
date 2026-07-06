@@ -98,7 +98,32 @@ describe('store migrations (containerized Postgres)', () => {
     const migrationRows = await pool.query<{ count: string }>(
       'SELECT COUNT(*)::text AS count FROM schema_migrations',
     );
-    expect(migrationRows.rows[0]?.count).toBe('6');
+    expect(migrationRows.rows[0]?.count).toBe('7');
+  });
+
+  it('creates the branches table with the expected columns', async () => {
+    const result = await pool.query<{ column_name: string }>(
+      `SELECT column_name FROM information_schema.columns WHERE table_name = 'branches'`,
+    );
+    const columns = result.rows.map((row) => row.column_name).sort();
+
+    expect(columns).toEqual(
+      [
+        'created_at',
+        'created_by_stakeholder_id',
+        'discipline',
+        'diverged_at',
+        'id',
+        'merged_at',
+        'merged_by_stakeholder_id',
+        'name',
+        'origin_suggestion_id',
+        'status',
+        'submitted_at',
+        'updated_at',
+        'verified_at',
+      ].sort(),
+    );
   });
 
   it('creates the edges table with the expected columns', async () => {

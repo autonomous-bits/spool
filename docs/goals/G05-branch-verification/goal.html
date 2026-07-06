@@ -27,7 +27,7 @@
 
 <h1>G05 — Branch Verification (submitted → verified | draft)</h1>
 <p>
-  Status: <span id="goal-status-badge" class="badge badge-open">open</span> &middot;
+  Status: <span id="goal-status-badge" class="badge badge-done">done</span> &middot;
   Size: <strong>4/5</strong> — touches domain, persistence, and API layers; widens the existing
   <code>ActorContext</code> type (nullable discipline) to correctly model verification as a
   cross-discipline "merging authority" action distinct from discipline-scoped submission; adds a
@@ -105,7 +105,7 @@ flowchart TD
 <h2>Sub-goal detail</h2>
 
 <details id="d-SG0">
-<summary>SG0 — domain: nullable ActorContext.discipline + verify/reject lifecycle assertions <span class="badge badge-open">open</span></summary>
+<summary>SG0 — domain: nullable ActorContext.discipline + verify/reject lifecycle assertions <span class="badge badge-done">done</span></summary>
 <p><strong>Depends on:</strong> none</p>
 <p><strong>Objective:</strong> Model verification/rejection as human-only, discipline-agnostic transitions, per IDEA-11/IDEA-25/IDEA-43, without weakening submit's existing discipline check.</p>
 <ul>
@@ -119,7 +119,7 @@ flowchart TD
 </details>
 
 <details id="d-SG1">
-<summary>SG1 — persistence: verified_at column + BranchRepository.verify/reject <span class="badge badge-open">open</span></summary>
+<summary>SG1 — persistence: verified_at column + BranchRepository.verify/reject <span class="badge badge-done">done</span></summary>
 <p><strong>Depends on:</strong> none</p>
 <p><strong>Objective:</strong> Persist the verify/reject transitions atomically, mirroring the existing <code>submit()</code> compare-and-set pattern, with reject fully resetting review state.</p>
 <ul>
@@ -134,7 +134,7 @@ flowchart TD
 </details>
 
 <details id="d-SG2">
-<summary>SG2 — API: POST /branches/:id/verify + POST /branches/:id/reject <span class="badge badge-open">open</span></summary>
+<summary>SG2 — API: POST /branches/:id/verify + POST /branches/:id/reject <span class="badge badge-done">done</span></summary>
 <p><strong>Depends on:</strong> SG0, SG1</p>
 <p><strong>Objective:</strong> Expose both transitions over HTTP, gated by the existing session-token bearer auth, with no discipline requirement, and surface <code>verifiedAt</code> on the read model.</p>
 <ul>
@@ -148,7 +148,7 @@ flowchart TD
 </details>
 
 <details id="d-SG3">
-<summary>SG3 — Docker end-to-end <span class="badge badge-open">open</span></summary>
+<summary>SG3 — Docker end-to-end <span class="badge badge-done">done</span></summary>
 <p><strong>Depends on:</strong> SG2</p>
 <p><strong>Objective:</strong> Exercise verify and reject against the real containerized store over HTTP, confirming behavior matches the Meridian acceptance criteria.</p>
 <ul>
@@ -175,7 +175,7 @@ flowchart TD
   "goalId": "G05",
   "slug": "branch-verification",
   "title": "Branch Verification (submitted \u2192 verified | draft)",
-  "status": "open",
+  "status": "done",
   "size": 4,
   "sizeJustification": "Touches domain, persistence, and API layers; widens ActorContext (nullable discipline) as a new domain concept; adds a schema column plus reject-path reset semantics; extends the read model. Reuses G04's auth as-is, so below G04's 5/5.",
   "meridianChunks": [
@@ -217,7 +217,7 @@ flowchart TD
         "Unit tests cover each new assertion's pass/throw cases and a null-discipline actor passing assertIsHumanActor."
       ],
       "verification": "pnpm test:store",
-      "status": "open"
+      "status": "done"
     },
     {
       "id": "SG1",
@@ -233,7 +233,7 @@ flowchart TD
         "Integration tests cover: verify succeeds once from submitted and returns undefined on repeat; reject succeeds from both submitted and verified, clearing verified_at and submitted_at; reject returns undefined from draft or merged."
       ],
       "verification": "pnpm test:store",
-      "status": "open"
+      "status": "done"
     },
     {
       "id": "SG2",
@@ -250,7 +250,7 @@ flowchart TD
         "e2e tests cover all success and error paths above, including a verifying stakeholder whose discipline differs from the branch's discipline, and a verifying stakeholder with a null discipline."
       ],
       "verification": "pnpm test:store",
-      "status": "open"
+      "status": "done"
     },
     {
       "id": "SG3",
@@ -265,7 +265,7 @@ flowchart TD
         "Repeat verify on an already-verified branch returns 409; verify with no Authorization header returns 401."
       ],
       "verification": "manual/scripted HTTP exercise against spoolstore covering verify success, reject success, and the 409/401 negative cases",
-      "status": "open"
+      "status": "done"
     }
   ]
 }

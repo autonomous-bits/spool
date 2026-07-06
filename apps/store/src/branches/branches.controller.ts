@@ -63,6 +63,24 @@ export class BranchesController {
     return this.branches.submit(id, claims);
   }
 
+  @Post(':id/verify')
+  async verify(
+    @Param('id') id: string,
+    @Headers('authorization') authorizationHeader: unknown,
+  ): Promise<BranchResponse> {
+    const claims = verifySessionClaims(authorizationHeader, this.sessionTokenService);
+    return this.branches.verify(id, claims);
+  }
+
+  @Post(':id/reject')
+  async reject(
+    @Param('id') id: string,
+    @Headers('authorization') authorizationHeader: unknown,
+  ): Promise<BranchResponse> {
+    const claims = verifySessionClaims(authorizationHeader, this.sessionTokenService);
+    return this.branches.reject(id, claims);
+  }
+
   @Get(':id')
   async findOne(@Param('id') id: string): Promise<BranchResponse> {
     return this.branches.findById(id);

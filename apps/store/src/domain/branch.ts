@@ -13,6 +13,7 @@ export interface BranchProps {
   createdByStakeholderId: string;
   divergedAt?: DivergencePoint;
   submittedAt?: Date;
+  verifiedAt?: Date;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -39,6 +40,7 @@ export class Branch {
   readonly createdByStakeholderId: string;
   readonly divergedAt: DivergencePoint;
   readonly submittedAt?: Date;
+  readonly verifiedAt?: Date;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 
@@ -56,6 +58,9 @@ export class Branch {
     this.divergedAt = props.divergedAt ?? new DivergencePoint();
     if (props.submittedAt !== undefined) {
       this.submittedAt = props.submittedAt;
+    }
+    if (props.verifiedAt !== undefined) {
+      this.verifiedAt = props.verifiedAt;
     }
     this.createdAt = props.createdAt ?? new Date();
     this.updatedAt = props.updatedAt ?? this.createdAt;
