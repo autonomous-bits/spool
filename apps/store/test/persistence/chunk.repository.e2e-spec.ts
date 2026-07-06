@@ -44,7 +44,7 @@ describe('ChunkRepository (containerized Postgres)', () => {
   });
 
   afterAll(async () => {
-    await database?.close();
+    await database.close();
   });
 
   it('create persists a chunk with status draft, branch_id NULL, and chunk_type/context_kind populated', async () => {
@@ -101,7 +101,7 @@ describe('ChunkRepository (containerized Postgres)', () => {
 
     await expect(
       repository.create(buildChunk({ branchId: branch.id, originBranchId: branch.id })),
-    ).rejects.toThrowError(new ConflictException(`Branch ${branch.id} is not in draft status`));
+    ).rejects.toThrow(new ConflictException(`Branch ${branch.id} is not in draft status`));
   });
 
   it('serializes a racing submit and branch-scoped create so the create wins and submit loses', async () => {

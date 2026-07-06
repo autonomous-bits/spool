@@ -1,4 +1,4 @@
-import type { Pool, PoolClient } from 'pg';
+import type { Pool, PoolClient, QueryResult } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Branch } from '../../src/domain/branch.js';
 import { Chunk } from '../../src/domain/chunk.js';
@@ -57,7 +57,7 @@ describe('BranchRepository.merge (containerized Postgres)', () => {
   });
 
   afterAll(async () => {
-    await database?.close();
+    await database.close();
   });
 
   async function createDraftBranch(
@@ -239,10 +239,16 @@ describe('BranchRepository.merge (containerized Postgres)', () => {
     const poisonedPool: Pick<Pool, 'connect'> = {
       connect: async (): Promise<PoolClient> => {
         const client = await pool.connect();
-        const originalQuery = client.query.bind(client);
+        const originalQuery = client.query.bind(client) as (
+          ...args: Parameters<PoolClient['query']>
+        ) => Promise<QueryResult>;
+        // Give the poisoned wrapper an explicit, non-overloaded signature (matching how
+        // `BranchRepository` actually calls `query`: text + params, returning a promise); `pg`'s
+        // real overload set also includes callback-style signatures returning `void`, which would
+        // otherwise make forwarding `originalQuery`'s result look like a possible void return.
         const poisonedQuery = (
           ...args: Parameters<PoolClient['query']>
-        ): ReturnType<PoolClient['query']> => {
+        ): Promise<QueryResult> => {
           const sql = typeof args[0] === 'string' ? args[0] : undefined;
           if (sql?.includes("SET status = 'merged'")) {
             return Promise.reject(new Error('Simulated mid-transaction failure'));
@@ -257,7 +263,7 @@ describe('BranchRepository.merge (containerized Postgres)', () => {
 
     await expect(
       poisonedBranchRepository.merge(branch.id, BOOTSTRAP_STAKEHOLDER_ID),
-    ).rejects.toThrowError('Simulated mid-transaction failure');
+    ).rejects.toThrow('Simulated mid-transaction failure');
 
     const branchRow = await pool.query<{ status: string; merged_at: Date | null }>(
       'SELECT status, merged_at FROM branches WHERE id = $1',

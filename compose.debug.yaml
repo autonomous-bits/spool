@@ -11,12 +11,15 @@ services:
       STORE_DB_USER: spool
       STORE_DB_PASSWORD: spool_dev
       STORE_DB_NAME: spool
+      ARTIFACT_BLOB_STORE_PATH: /usr/src/app/artifact-data
       GITHUB_OAUTH_TOKEN_URL: http://github-oauth-stub:4001/login/oauth/access_token
       GITHUB_USER_API_URL: http://github-oauth-stub:4001/user
     ports:
       - 3000:3000
       - 9229:9229
     command: ["node", "--inspect=0.0.0.0:9229", "./dist/main.js"]
+    volumes:
+      - spoolstore-artifact-data:/usr/src/app/artifact-data
     depends_on:
       postgres:
         condition: service_healthy
@@ -51,3 +54,4 @@ services:
 
 volumes:
   spoolstore-postgres-data:
+  spoolstore-artifact-data:

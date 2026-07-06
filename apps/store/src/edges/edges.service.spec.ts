@@ -54,10 +54,10 @@ describe('EdgesService', () => {
   it('creates and returns the persisted edge (branchless)', async () => {
     const { edgeRepository, chunkRepository, service } = setUp();
     const request = validRequest();
-    vi.mocked(chunkRepository.findByLabel).mockImplementation(async (label) =>
+    vi.mocked(chunkRepository.findByLabel).mockImplementation((label) =>
       chunkWithLabel(label),
     );
-    vi.mocked(edgeRepository.create).mockImplementation(async (edge) => edge);
+    vi.mocked(edgeRepository.create).mockImplementation((edge) => edge);
 
     const result = await service.create(request);
 
@@ -80,7 +80,7 @@ describe('EdgesService', () => {
 
   it('throws NotFoundException when toChunkLabel does not resolve', async () => {
     const { chunkRepository, edgeRepository, service } = setUp();
-    vi.mocked(chunkRepository.findByLabel).mockImplementation(async (label) =>
+    vi.mocked(chunkRepository.findByLabel).mockImplementation((label) =>
       label === 'ATOMIC-1' ? chunkWithLabel(label) : undefined,
     );
 
@@ -138,10 +138,10 @@ describe('EdgesService', () => {
       createdByStakeholderId: '00000000-0000-0000-0000-000000000001',
     });
     vi.mocked(branchRepository.findById).mockResolvedValue(branch);
-    vi.mocked(chunkRepository.findByLabel).mockImplementation(async (label) =>
+    vi.mocked(chunkRepository.findByLabel).mockImplementation((label) =>
       chunkWithLabel(label),
     );
-    vi.mocked(edgeRepository.create).mockImplementation(async (edge) => edge);
+    vi.mocked(edgeRepository.create).mockImplementation((edge) => edge);
 
     const result = await service.create(validRequest({ branchId: branch.id }));
 
@@ -153,7 +153,7 @@ describe('EdgesService', () => {
 
   it('translates a foreign key violation on an unknown stakeholderId into a BadRequestException', async () => {
     const { chunkRepository, edgeRepository, service } = setUp();
-    vi.mocked(chunkRepository.findByLabel).mockImplementation(async (label) =>
+    vi.mocked(chunkRepository.findByLabel).mockImplementation((label) =>
       chunkWithLabel(label),
     );
     vi.mocked(edgeRepository.create).mockRejectedValue(
@@ -165,7 +165,7 @@ describe('EdgesService', () => {
 
   it('translates a unique violation on a duplicate active edge into a ConflictException', async () => {
     const { chunkRepository, edgeRepository, service } = setUp();
-    vi.mocked(chunkRepository.findByLabel).mockImplementation(async (label) =>
+    vi.mocked(chunkRepository.findByLabel).mockImplementation((label) =>
       chunkWithLabel(label),
     );
     vi.mocked(edgeRepository.create).mockRejectedValue(
@@ -179,7 +179,7 @@ describe('EdgesService', () => {
 
   it('rethrows unrelated repository errors', async () => {
     const { chunkRepository, edgeRepository, service } = setUp();
-    vi.mocked(chunkRepository.findByLabel).mockImplementation(async (label) =>
+    vi.mocked(chunkRepository.findByLabel).mockImplementation((label) =>
       chunkWithLabel(label),
     );
     vi.mocked(edgeRepository.create).mockRejectedValue(new Error('connection lost'));

@@ -37,7 +37,7 @@ export function parseCreateBranchRequest(body: unknown): CreateBranchRequest {
   const name = requireStringField(record, 'name');
   const stakeholderId = requireStringField(record, 'stakeholderId');
 
-  const discipline = record['discipline'];
+  const discipline = record.discipline;
   if (!isDiscipline(discipline)) {
     throw new BadRequestException(`Invalid discipline: ${JSON.stringify(discipline)}`);
   }

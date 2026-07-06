@@ -47,22 +47,22 @@ export function parseCreateChunkRequest(body: unknown): CreateChunkRequest {
   const content = requireStringField(record, 'content');
   const stakeholderId = requireStringField(record, 'stakeholderId');
 
-  const discipline = record['discipline'];
+  const discipline = record.discipline;
   if (!isDiscipline(discipline)) {
     throw new BadRequestException(`Invalid discipline: ${JSON.stringify(discipline)}`);
   }
 
-  const chunkType = record['chunkType'];
+  const chunkType = record.chunkType;
   if (!isChunkType(chunkType)) {
     throw new BadRequestException(`Invalid chunkType: ${JSON.stringify(chunkType)}`);
   }
 
-  const contextKind = record['contextKind'];
+  const contextKind = record.contextKind;
   if (!isContextKind(contextKind)) {
     throw new BadRequestException(`Invalid contextKind: ${JSON.stringify(contextKind)}`);
   }
 
-  const branchIdValue = record['branchId'];
+  const branchIdValue = record.branchId;
   if (branchIdValue !== undefined) {
     if (typeof branchIdValue !== 'string' || branchIdValue.trim().length === 0) {
       throw new BadRequestException('branchId must be a non-empty string when provided');

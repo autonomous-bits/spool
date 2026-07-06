@@ -97,7 +97,7 @@ function extractErrorMessage(body: unknown, fallback: string): string {
     typeof body === 'object' &&
     body !== null &&
     'message' in body &&
-    typeof (body as { message: unknown }).message === 'string'
+    typeof (body).message === 'string'
   ) {
     return (body as { message: string }).message;
   }

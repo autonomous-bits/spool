@@ -12,7 +12,7 @@ function isForeignKeyViolation(error: unknown): boolean {
     typeof error === 'object' &&
     error !== null &&
     'code' in error &&
-    (error as { code: unknown }).code === FOREIGN_KEY_VIOLATION
+    (error).code === FOREIGN_KEY_VIOLATION
   );
 }
 

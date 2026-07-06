@@ -50,7 +50,7 @@ describe('SuggestionRepository (containerized Postgres)', () => {
   });
 
   afterAll(async () => {
-    await database?.close();
+    await database.close();
   });
 
   it('create persists a chunk-shaped suggestion with status pending and one state-log row', async () => {

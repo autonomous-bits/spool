@@ -73,7 +73,7 @@ export function parseCreateEdgeInput(body: unknown): CreateEdgeInput {
   const discipline = requireStringField(record, 'discipline');
   const stakeholderId = requireStringField(record, 'stakeholderId');
 
-  const branchIdValue = record['branchId'];
+  const branchIdValue = record.branchId;
   if (branchIdValue !== undefined) {
     if (typeof branchIdValue !== 'string' || branchIdValue.trim().length === 0) {
       throw new CreateEdgeValidationError('branchId must be a non-empty string when provided', 400);
@@ -102,7 +102,7 @@ function extractErrorMessage(body: unknown, fallback: string): string {
     typeof body === 'object' &&
     body !== null &&
     'message' in body &&
-    typeof (body as { message: unknown }).message === 'string'
+    typeof (body).message === 'string'
   ) {
     return (body as { message: string }).message;
   }

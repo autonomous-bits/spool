@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ArtifactsModule } from './artifacts/artifacts.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { BranchesModule } from './branches/branches.module.js';
 import { ChunksModule } from './chunks/chunks.module.js';
@@ -15,6 +16,7 @@ import { SuggestionsModule } from './suggestions/suggestions.module.js';
     EdgesModule,
     AuthModule,
     SuggestionsModule,
+    ArtifactsModule,
   ],
   controllers: [HealthController],
 })

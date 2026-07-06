@@ -75,10 +75,12 @@ async function ensureContainerizedPostgres(): Promise<void> {
     }
 
     if (composeStartupError !== undefined) {
-      throw composeStartupError;
+      throw composeStartupError instanceof Error
+        ? composeStartupError
+        : new Error(JSON.stringify(composeStartupError));
     }
 
-    throw lastError;
+    throw lastError instanceof Error ? lastError : new Error(String(lastError));
   })();
 
   try {

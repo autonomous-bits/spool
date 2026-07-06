@@ -40,7 +40,7 @@ describe('StakeholderRepository (containerized Postgres)', () => {
   });
 
   afterAll(async () => {
-    await database?.close();
+    await database.close();
   });
 
   it('findByGithubLogin round-trips id and discipline for a seeded stakeholder', async () => {

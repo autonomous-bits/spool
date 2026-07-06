@@ -34,7 +34,7 @@ describe('parseCreateEdgeInput', () => {
     'rejects a missing %s, never inventing one',
     (field) => {
       const body: Record<string, unknown> = { ...validBody };
-      delete body[field];
+      Reflect.deleteProperty(body, field);
       expect(() => parseCreateEdgeInput(body)).toThrow(new RegExp(field));
     },
   );

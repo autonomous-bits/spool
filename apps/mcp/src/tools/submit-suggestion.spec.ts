@@ -40,7 +40,7 @@ describe('parseSubmitSuggestionInput', () => {
 
   it.each(['discipline', 'stakeholderId'])('rejects a missing %s, never inventing one', (field) => {
     const body: Record<string, unknown> = { ...chunkBody };
-    delete body[field];
+    Reflect.deleteProperty(body, field);
     expect(() => parseSubmitSuggestionInput(body)).toThrow(new RegExp(field));
   });
 
@@ -56,7 +56,7 @@ describe('parseSubmitSuggestionInput', () => {
 
   it('rejects a partial chunk shape (label only)', () => {
     const body: Record<string, unknown> = { ...chunkBody };
-    delete body['content'];
+    delete body.content;
     expect(() => parseSubmitSuggestionInput(body)).toThrow(SubmitSuggestionValidationError);
   });
 

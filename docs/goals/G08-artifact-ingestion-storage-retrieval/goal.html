@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>G08 — Artifact Ingestion, Storage &amp; Retrieval</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  body { font-family: -apple-system, Segoe UI, sans-serif; max-width: 980px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
+  h1 { font-size: 1.4rem; }
+  table { border-collapse: collapse; width: 100%; margin: 0.75rem 0; }
+  th, td { border: 1px solid #ccc; padding: 0.4rem 0.6rem; text-align: left; font-size: 0.9rem; vertical-align: top; }
+  th { background: #f2f2f2; }
+  .badge { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 0.75rem; font-size: 0.75rem; font-weight: 600; color: #fff; }
+  .badge-open { background: #6b7280; }
+  .badge-in-progress { background: #d97706; }
+  .badge-done { background: #16a34a; }
+  .badge-blocked { background: #dc2626; }
+  details { border: 1px solid #ddd; border-radius: 6px; padding: 0.5rem 0.8rem; margin: 0.5rem 0; background: #fafafa; }
+  summary { cursor: pointer; font-weight: 600; }
+  .unratified { color: #b45309; font-weight: 600; }
+  code { background: #eee; padding: 0.05rem 0.3rem; border-radius: 3px; }
+  .mermaid { background: #fff; }
+</style>
+</head>
+<body>
+
+<h1>G08 — Artifact Ingestion, Storage &amp; Retrieval</h1>
+<p>
+  <span class="badge badge-open" id="goal-status-badge">open</span>
+  Size: <strong>5</strong> — new domain concepts (immutable artifact blobs, branch-scoped junction-table associations distinct
+  from the existing chunk/edge delta-row pattern), a new swappable storage abstraction, two new tables + a partial unique index,
+  merge-transaction extension, plus API and MCP layers.
+</p>
+
+<h2>Meridian Source</h2>
+<table>
+<thead><tr><th>Chunk</th><th>Status</th><th>Layer</th><th>Note</th></tr></thead>
+<tbody>
+<tr><td>IDEA-58</td><td>promoted</td><td>Product/functional</td><td>Ingestion/storage/retrieval of standalone artifacts as chunk-referenceable context.</td></tr>
+<tr><td>IDEA-59</td><td>promoted</td><td>Domain</td><td>Artifacts strictly immutable; update = new blob, new id.</td></tr>
+<tr><td>IDEA-60</td><td>promoted</td><td>Domain</td><td>Chunks associate with multiple artifacts; associations versioned per-branch.</td></tr>
+<tr><td>IDEA-61</td><td>promoted</td><td>Persistence/infra</td><td>Blob storage (S3-compatible OR Docker volume) + signed-URL retrieval — backend/signed-URL mechanism left as an OR, not resolved for this repo.</td></tr>
+<tr><td>IDEA-62</td><td>promoted</td><td>Persistence</td><td><code>chunk_artifacts</code> junction table shape: branch_id, origin_branch_id, status, audit columns.</td></tr>
+<tr><td>IDEA-64</td><td>promoted</td><td>Persistence</td><td>Partial unique index preventing duplicate active mainline chunk-artifact associations.</td></tr>
+<tr><td>IDEA-46</td><td>promoted</td><td>Domain (merge)</td><td>Merge conflict detection explicitly scoped to include chunk-artifact-association modifications.</td></tr>
+<tr><td>IDEA-51/52/34</td><td>promoted</td><td>API surface</td><td>General NestJS API Gateway / controller pattern — same basis every prior goal (G01-G07) used to derive concrete routes.</td></tr>
+<tr><td>IDEA-9</td><td>promoted</td><td>MCP exposure</td><td>Delegated-actor (ideation assistant) pattern — same basis every prior goal's MCP sub-goal used.</td></tr>
+<tr><td>IDEA-32</td><td>promoted</td><td>Domain (precedent)</td><td>Existing branch-delta-row pattern for chunks/edges; <code>chunk_artifacts</code> is similar in intent but a distinct junction+status shape, not the same operational mechanism.</td></tr>
+<tr><td>IDEA-84</td><td>promoted</td><td>Persistence/infra</td><td>Gap report: IDEA-61's storage-backend OR and "signed URL" semantics were unresolved for this repo (filed via meridian-capture-draft-chunk fallback; meridian-submit-feedback 500'd). Now approved/promoted.</td></tr>
+<tr><td>IDEA-85</td><td>promoted</td><td>Persistence/infra</td><td>Resolution (per explicit user direction, ratified by promotion): local file storage on a Docker volume behind a swappable <code>ArtifactBlobStore</code> interface; HMAC-signed download tokens instead of S3 presigned URLs. Edge to IDEA-61 inserted directly via psql in the Meridian Postgres container after <code>meridian-create-edge</code> 404'd for that pair (also per explicit user direction).</td></tr>
+</tbody>
+</table>
+
+<h2>Vertical Slice Diagram</h2>
+<p>Every layer this goal touches, for this capability specifically.</p>
+<div class="mermaid">
+flowchart TB
+  subgraph MCP["MCP exposure (apps/mcp)"]
+    T1[upload-artifact tool]
+    T2[attach-artifact-to-chunk tool]
+  end
+  subgraph API["API surface (apps/store)"]
+    C1["POST /artifacts"]
+    C2["POST /chunks/:label/artifacts"]
+    C3["DELETE /chunks/:label/artifacts/:artifactId?branchId=&stakeholderId="]
+    C4["GET /chunks/:label/artifacts?branchId="]
+    C5["GET /artifacts/:id/download-token"]
+    C6["GET /artifacts/content/:token"]
+  end
+  subgraph DOMAIN["Domain"]
+    D1["Artifact (immutable)"]
+    D2["ChunkArtifactAssociation (active/superseded/deactivated)"]
+  end
+  subgraph PERSIST["Persistence/infra"]
+    R1["ArtifactRepository"]
+    R2["ChunkArtifactRepository.findEffectiveForChunk"]
+    B1["ArtifactBlobStore interface"]
+    B2["LocalFileBlobStore (Docker volume)"]
+    M1["BranchRepository.merge (extended)"]
+    PG[("Postgres: artifacts, chunk_artifacts")]
+  end
+  T1 --> C1
+  T2 --> C2
+  C1 --> D1 --> R1 --> B1 --> B2
+  R1 --> PG
+  C2 --> D2
+  C3 --> D2
+  C4 --> D2
+  D2 --> R2 --> PG
+  C5 --> B1
+  C6 --> B1
+  D2 -. promoted on verified-branch merge .-> M1
+  M1 --> PG
+</div>
+
+<h2>Dependency Diagram</h2>
+<div class="mermaid">
+flowchart LR
+  SG1["SG1: Domain model"] --> SG2["SG2: Persistence"]
+  SG2 --> SG3["SG3: Branch-scoped writes (API)"]
+  SG3 --> SG4["SG4: Effective reads + retrieval (API)"]
+  SG4 --> SG5["SG5: Merge integration"]
+  SG5 --> SG6["SG6: MCP exposure"]
+  SG6 --> SG7["SG7: Docker E2E (mandatory)"]
+</div>
+
+<h2>Sub-goal Detail</h2>
+
+<details>
+<summary>SG1 — Domain: Artifact + ChunkArtifactAssociation types <span class="badge badge-done sg-badge" data-sg="SG1">done</span></summary>
+<p><strong>Depends on:</strong> none</p>
+<p><strong>Objective:</strong> Define <code>Artifact</code> and <code>ChunkArtifactAssociation</code> domain types + invariants in <code>apps/store/src/domain/</code> and <code>domain/types/</code>, mirroring <code>chunk.ts</code>/<code>edge.ts</code>.</p>
+<ul>
+<li><code>Artifact</code> carries id, uri, mimeType, createdAt, createdByStakeholderId; no domain operation mutates an existing artifact's uri/mimeType (IDEA-59) — only creation of a new Artifact is exposed.</li>
+<li><code>ChunkArtifactAssociation</code> carries chunkLabel, artifactId, branchId (nullable = mainline), originBranchId, status (<code>active</code>|<code>superseded</code>|<code>deactivated</code>), audit columns (IDEA-62). <code>superseded</code> is defined at the type level for IDEA-62 schema parity but this goal produces only <code>active</code>/<code>deactivated</code> rows — no write path in G08 ever sets <code>superseded</code>; a future goal introducing artifact-reference replacement (swap which artifact a chunk points to without a plain detach+attach) would own that behavior.</li>
+<li>Unit test asserts no code path allows mutating an existing artifact's blob reference in place.</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:store</code></p>
+</details>
+
+<details>
+<summary>SG2 — Persistence: tables, repositories, blob store <span class="badge badge-done sg-badge" data-sg="SG2">done</span></summary>
+<p><strong>Depends on:</strong> SG1</p>
+<p><strong>Objective:</strong> Migration <code>0009</code> creates <code>artifacts</code> (id, uri, mime_type, created_at, created_by_stakeholder_id) and <code>chunk_artifacts</code> (id, chunk_label, artifact_id, branch_id nullable, origin_branch_id, status, created_at, created_by_stakeholder_id, updated_at, updated_by_stakeholder_id) plus IDEA-64's partial unique index. Add <code>ArtifactRepository</code> (create/findById) and <code>ChunkArtifactRepository</code> with <code>findEffectiveForChunk(chunkLabel, branchId)</code> — a <strong>set-based</strong> overlay read (a chunk can hold multiple artifacts per IDEA-60) returning <code>{ artifactId, branchId, status }</code> per pair: within each scope (mainline rows where <code>branch_id IS NULL</code>; this branch's rows where <code>branch_id = branchId</code>), the <strong>most-recently-created row</strong> (by <code>created_at</code>, tie-broken by <code>id</code>) for a given <code>artifact_id</code> is authoritative — older rows for that same pair in that same scope are historical and ignored (every write inserts a new row rather than updating one, per IDEA-59/IDEA-62's append-only shape). The branch-scope's authoritative row for a pair wins over the mainline-scope's authoritative row for that same pair; the method returns one <code>{artifactId, branchId, status}</code> tuple per <code>artifact_id</code> whose winning row has <code>status='active'</code>, with <code>branchId</code> reflecting which scope won (<code>null</code> = mainline). This is scoped only to <code>chunk_artifacts</code> — it does not attempt the generic chunks/edges overlay read still out of scope per <code>chunk.repository.ts:154-159</code>. Add <code>ArtifactBlobStore</code> interface + <code>LocalFileBlobStore</code> implementation backed by a new Docker named volume, per explicit user direction (local storage, swappable interface).</p>
+<ul>
+<li>Migration creates both tables + partial unique index <code>(chunk_label, artifact_id) WHERE branch_id IS NULL AND status='active'</code>.</li>
+<li><code>ArtifactRepository.create</code> writes the blob via <code>ArtifactBlobStore.put</code> then inserts one metadata row; no update path exists.</li>
+<li><code>ChunkArtifactRepository.findEffectiveForChunk(label, branchId)</code> returns the correct set of <code>{artifactId, branchId, status}</code> tuples for three cases, each integration-tested against containerized Postgres: (a) mainline has A+B, branch has no rows for the chunk → returns {A:null,B:null}; (b) mainline has A+B, branch deactivates A → returns {B:null} (A's branch-scoped deactivated row wins and masks it); (c) mainline has A, branch adds C as active → returns {A:null, C:branchId}.</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:store</code></p>
+</details>
+
+<details>
+<summary>SG3 — API: branch-scoped artifact writes <span class="badge badge-done sg-badge" data-sg="SG3">done</span></summary>
+<p><strong>Depends on:</strong> SG2</p>
+<p><strong>Objective:</strong> <code>ArtifactsController</code> exposes <code>POST /artifacts</code> (upload: body carries base64 content + mimeType; creates one immutable Artifact) and <code>POST /chunks/:label/artifacts</code> (attach: body <code>{ artifactId, branchId?, stakeholderId }</code>). <code>DELETE /chunks/:label/artifacts/:artifactId?branchId=&stakeholderId=</code> (detach) inserts a branch-scoped <code>deactivated</code> row rather than removing anything, mirroring IDEA-32's chunk-deactivation-row pattern. <code>branchId</code> is carried as a required query parameter (not a request body) since <code>DELETE</code> bodies are non-standard in this codebase's existing controllers.</p>
+<ul>
+<li><code>POST /artifacts</code> returns <code>201</code> with the created artifact's id + uri metadata (never raw bytes in the response).</li>
+<li><code>POST /chunks/:label/artifacts</code> returns <code>201</code> with the created association; <code>404</code> if the chunk label or artifact id does not exist.</li>
+<li><code>DELETE .../artifacts/:artifactId?branchId=&stakeholderId=</code> inserts a deactivated row; <code>400</code> if <code>branchId</code> query parameter is omitted (mainline cannot be detached from directly).</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:store</code></p>
+</details>
+
+<details>
+<summary>SG4 — API: effective reads + signed retrieval <span class="badge badge-done sg-badge" data-sg="SG4">done</span></summary>
+<p><strong>Depends on:</strong> SG3</p>
+<p><strong>Objective:</strong> <code>GET /chunks/:label/artifacts?branchId=</code> returns the effective (branch-overlaid, set-based per SG2) list of <code>{artifactId, branchId, status}</code> tuples for currently-active associations of a chunk via <code>findEffectiveForChunk</code> — <code>branchId</code> in each returned tuple reflects which scope's row won (<code>null</code> = mainline), so callers (including SG7's Docker verification) can directly observe whether an association is mainline-effective without inspecting the database. <code>GET /artifacts/:id/download-token</code> issues a time-limited HMAC-signed download token (reusing <code>signHmacToken</code>/<code>verifyHmacToken</code> from <code>apps/store/src/auth/hmac-token.ts</code>) instead of an S3 presigned URL. <code>GET /artifacts/content/:token</code> validates that token and streams the blob back from <code>LocalFileBlobStore</code>.</p>
+<ul>
+<li><code>GET /chunks/:label/artifacts?branchId=</code> returns the full set of currently-active <code>{artifactId, branchId, status}</code> tuples for the chunk, correctly overlaying branch-scoped rows over mainline per SG2's three test cases.</li>
+<li><code>GET /artifacts/:id/download-token</code> issues a token that expires (e.g. 5 minutes).</li>
+<li><code>GET /artifacts/content/:token</code> rejects an expired or tampered token (<code>InvalidHmacTokenError</code>) and, given a valid token, returns the exact bytes originally uploaded.</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:store</code></p>
+</details>
+
+<details>
+<summary>SG5 — Merge integration: chunk_artifacts in atomic merge <span class="badge badge-open sg-badge" data-sg="SG5">open</span></summary>
+<p><strong>Depends on:</strong> SG4</p>
+<p><strong>Objective:</strong> Extend <code>BranchRepository.merge</code>'s atomic transaction (<code>apps/store/src/persistence/branch.repository.ts:304-392</code>) to also promote branch-scoped <code>chunk_artifacts</code> rows to mainline (<code>branch_id -&gt; NULL</code>). Per SG2's authoritative-row rule, a branch can accumulate multiple historical rows for the same <code>(chunk_label, artifact_id)</code> pair (e.g. attach → detach → attach); promoting <strong>every</strong> such row would create duplicate mainline rows and violate IDEA-64's partial unique index. Merge therefore promotes <strong>only the authoritative (most-recently-created) branch-scoped row per <code>(chunk_label, artifact_id)</code> pair</strong> — all older same-pair branch rows are left as-is (branch-scoped, non-authoritative history; they do not migrate to mainline). The merge rejects (<code>kind:'conflict'</code>) when an authoritative branch row is <code>active</code> and that exact <code>(chunk_label, artifact_id)</code> pair is already <code>active</code> on mainline, using the same identity-collision scope (not a full three-way divergence diff) as the existing chunk-label/edge-identity checks at lines 323-363. An authoritative branch row that is <code>deactivated</code> never conflicts (that is the mechanism by which a detach reaches mainline) and is promoted unconditionally. This closes the gap flagged in review: without promoting deactivated rows too, a branch-scoped detach would never take effect on mainline after merge. IDEA-46 names chunk-artifact-association modifications as in-scope for merge conflict detection; the specific identity-collision mechanics (vs. a full three-way divergence diff) are a repo-local scoping carried forward from G06's OQ2 resolution for chunks/edges, applied here by extension — not a verbatim restatement of IDEA-46's text.</p>
+<ul>
+<li>Merging a verified branch with an authoritative added active <code>chunk_artifacts</code> row promotes only that row to <code>branch_id=NULL</code> on mainline.</li>
+<li>Merging a branch with an authoritative <code>deactivated</code> <code>chunk_artifacts</code> row (a detach) promotes only that row to <code>branch_id=NULL</code> on mainline unconditionally, so the chunk's mainline effective-artifact set (SG4) no longer includes it afterward.</li>
+<li>Merging a branch with older, non-authoritative same-pair rows (e.g. an earlier attach superseded by a later detach in the same branch) does not promote those older rows — only the authoritative one migrates, so no duplicate mainline row is ever created.</li>
+<li>Merging a branch whose authoritative new <code>active</code> association would collide with an existing active mainline <code>(chunk_label, artifact_id)</code> pair returns <code>kind:'conflict'</code> and rolls back the entire transaction (zero rows mutated).</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:store</code></p>
+</details>
+
+<details>
+<summary>SG6 — MCP: upload-artifact, attach-artifact-to-chunk <span class="badge badge-open sg-badge" data-sg="SG6">open</span></summary>
+<p><strong>Depends on:</strong> SG5</p>
+<p><strong>Objective:</strong> Add <code>upload-artifact</code> and <code>attach-artifact-to-chunk</code> MCP tools in <code>apps/mcp/src/tools</code>, calling the store's <code>POST /artifacts</code> / <code>POST /chunks/:label/artifacts</code> as a delegated actor (IDEA-9), consistent with the <code>capture-chunk</code>/<code>create-edge</code> precedent. Given the MCP server's existing ~1MB in-memory request-body cap and JSON-only transport, <code>upload-artifact</code> accepts inline base64 content up to that cap only; larger binary artifacts are explicitly out of scope for this goal.</p>
+<ul>
+<li><code>upload-artifact</code> forwards base64 content + mimeType to <code>POST /artifacts</code> and returns the created artifact id.</li>
+<li><code>upload-artifact</code> surfaces a clear client-facing error (not a crash) when decoded content exceeds the store's configured max artifact size.</li>
+<li><code>attach-artifact-to-chunk</code> forwards <code>{ chunkLabel, artifactId, branchId, stakeholderId }</code> to <code>POST /chunks/:label/artifacts</code> and returns the created association.</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:mcp</code></p>
+</details>
+
+<details>
+<summary>SG7 — Docker end-to-end verification (mandatory) <span class="badge badge-open sg-badge" data-sg="SG7">open</span></summary>
+<p><strong>Depends on:</strong> SG6</p>
+<p><strong>Objective:</strong> <code>docker compose up --build spoolstore</code>; obtain a session token via <code>pnpm dev:session-token</code> (real GitHub OAuth login/callback flow against <code>github-oauth-stub</code>, per G04-G06 precedent) since branch submit/verify/merge are human-gated (per G04-G06, unchanged by this goal); attach/detach are <code>stakeholderId</code>-carrying delegated writes, consistent with existing chunk/edge writes, and do not require a session token. Exercise the full loop over real HTTP against the running container.</p>
+<ul>
+<li>Create a branch; upload an artifact; attach it to a chunk in the branch; <code>GET /chunks/:label/artifacts?branchId=</code> and confirm the returned tuple shows <code>branchId</code> equal to the branch id (the branch-scoped row overlays mainline).</li>
+<li><code>GET</code> a signed download token and successfully download the exact original bytes.</li>
+<li>Submit, verify, and merge the branch (reusing G04-G06 endpoints) using the <code>pnpm dev:session-token</code>-obtained token — not a hand-crafted or client-supplied actor field.</li>
+<li><code>GET /chunks/:label/artifacts</code> (no <code>branchId</code>) afterward and confirm the same artifact's tuple now has <code>branchId: null</code>, proving it reached mainline.</li>
+<li>Every step's observed HTTP status/payload is checked against the running containerized system — no in-process/unit test substitutes satisfy this step.</li>
+</ul>
+<p><strong>Verification:</strong> manual HTTP exercise against the running <code>spoolstore</code> container.</p>
+</details>
+
+<h2>Open Questions</h2>
+<p><strong>None.</strong> Large (over the MCP server's body-size cap) binary artifact ingestion is out of scope for this goal by design, not unresolved ambiguity: only inline/base64 content up to that existing cap is supported via MCP; direct HTTP upload (SG3) has no such cap beyond NestJS's body parser limits.</p>
+<p>IDEA-61's storage-backend/signed-URL ambiguity (originally flagged as a gap) is resolved: IDEA-84 (gap report) and IDEA-85 (resolution — local file storage on a Docker volume behind a swappable <code>ArtifactBlobStore</code> interface, HMAC-signed download tokens) are both now <code>promoted</code> in Meridian. The IDEA-85 → IDEA-61 edge was inserted directly via psql into the Meridian Postgres container per explicit user direction, after <code>meridian-create-edge</code> repeatedly 404'd for that specific pair.</p>
+
+<h2>Definition of Done</h2>
+<ul>
+<li>SG1–SG6 all pass their named verification command.</li>
+<li>SG7's Docker end-to-end exercise passes against the real running <code>spoolstore</code> container, using a <code>pnpm dev:session-token</code>-obtained session token for the submit/verify/merge steps (attach/detach use <code>stakeholderId</code>, consistent with existing chunk/edge writes).</li>
+<li>No open questions remain: IDEA-84/85 (storage mechanism) are resolved/promoted, and the MCP body-size scope limit is a documented design choice, not unresolved ambiguity.</li>
+</ul>
+
+<script type="application/json" id="goal-data">
+{
+  "goalId": "G08",
+  "slug": "artifact-ingestion-storage-retrieval",
+  "title": "Artifact Ingestion, Storage & Retrieval",
+  "status": "open",
+  "size": 5,
+  "sizeJustification": "New domain concepts (immutable blobs, junction-table branch-scoped associations), new swappable storage abstraction, two new tables + partial unique index, merge-transaction extension, plus API and MCP layers.",
+  "meridianChunks": [
+    { "id": "IDEA-58", "status": "promoted", "layer": "product" },
+    { "id": "IDEA-59", "status": "promoted", "layer": "domain" },
+    { "id": "IDEA-60", "status": "promoted", "layer": "domain" },
+    { "id": "IDEA-61", "status": "promoted", "layer": "persistence" },
+    { "id": "IDEA-62", "status": "promoted", "layer": "persistence" },
+    { "id": "IDEA-64", "status": "promoted", "layer": "persistence" },
+    { "id": "IDEA-46", "status": "promoted", "layer": "domain-merge" },
+    { "id": "IDEA-51", "status": "promoted", "layer": "api" },
+    { "id": "IDEA-52", "status": "promoted", "layer": "api" },
+    { "id": "IDEA-34", "status": "promoted", "layer": "api" },
+    { "id": "IDEA-9", "status": "promoted", "layer": "mcp" },
+    { "id": "IDEA-32", "status": "promoted", "layer": "domain-precedent" },
+    { "id": "IDEA-84", "status": "promoted", "layer": "persistence", "note": "gap report, resolved" },
+    { "id": "IDEA-85", "status": "promoted", "layer": "persistence", "note": "resolution per user direction, ratified by promotion" }
+  ],
+  "subGoals": [
+    {
+      "id": "SG1",
+      "layer": "domain",
+      "dependsOn": [],
+      "objective": "Define Artifact + ChunkArtifactAssociation domain types and immutability invariant.",
+      "acceptanceCriteria": [
+        "Artifact type: id, uri, mimeType, createdAt, createdByStakeholderId; no mutation of existing artifact fields",
+        "ChunkArtifactAssociation type: chunkLabel, artifactId, branchId, originBranchId, status(active/superseded/deactivated), audit columns; superseded is schema-level parity only, unused by any G08 write path",
+        "Unit test asserts no domain path mutates an existing artifact's blob reference in place"
+      ],
+      "verification": "pnpm test:store",
+      "status": "done"
+    },
+    {
+      "id": "SG2",
+      "layer": "persistence",
+      "dependsOn": ["SG1"],
+      "objective": "Migration 0009 (artifacts + chunk_artifacts tables + partial unique index), ArtifactRepository, ChunkArtifactRepository.findEffectiveForChunk, ArtifactBlobStore interface + LocalFileBlobStore.",
+      "acceptanceCriteria": [
+        "Migration creates artifacts + chunk_artifacts tables and IDEA-64's partial unique index",
+        "ArtifactRepository.create writes blob via ArtifactBlobStore then inserts one immutable metadata row",
+        "ChunkArtifactRepository.findEffectiveForChunk(label, branchId) is a set-based overlay returning {artifactId, branchId, status} tuples: within each scope, the most-recently-created row per artifact_id is authoritative; branch-scope wins over mainline-scope. Integration-tested for (a) mainline A+B/no branch rows -> {A:null,B:null}, (b) mainline A+B/branch deactivates A -> {B:null}, (c) mainline A/branch adds active C -> {A:null,C:branchId}"
+      ],
+      "verification": "pnpm test:store",
+      "status": "done"
+    },
+    {
+      "id": "SG3",
+      "layer": "api",
+      "dependsOn": ["SG2"],
+      "objective": "ArtifactsController: POST /artifacts, POST /chunks/:label/artifacts, DELETE /chunks/:label/artifacts/:artifactId?branchId=&stakeholderId=.",
+      "acceptanceCriteria": [
+        "POST /artifacts returns 201 with artifact id + uri metadata only",
+        "POST /chunks/:label/artifacts returns 201 with association; 404 for unknown chunk/artifact",
+        "DELETE .../artifacts/:artifactId?branchId=&stakeholderId= inserts a deactivated row; 400 if branchId query parameter is omitted"
+      ],
+      "verification": "pnpm test:store",
+      "status": "done"
+    },
+    {
+      "id": "SG4",
+      "layer": "api",
+      "dependsOn": ["SG3"],
+      "objective": "GET /chunks/:label/artifacts?branchId= effective read (returns {artifactId, branchId, status} tuples); GET /artifacts/:id/download-token + GET /artifacts/content/:token signed-token issuance + streaming.",
+      "acceptanceCriteria": [
+        "GET /chunks/:label/artifacts?branchId= returns the full set-based effective {artifactId, branchId, status} tuples with correct branch overlay",
+        "GET /artifacts/:id/download-token issues an HMAC token that expires",
+        "GET /artifacts/content/:token rejects expired/tampered tokens and returns exact originally-uploaded bytes for a valid token"
+      ],
+      "verification": "pnpm test:store",
+      "status": "done"
+    },
+    {
+      "id": "SG5",
+      "layer": "persistence-domain",
+      "dependsOn": ["SG4"],
+      "objective": "Extend BranchRepository.merge to atomically promote only the authoritative (most-recently-created) branch-scoped chunk_artifacts row per (chunk_label, artifact_id) pair; conflict-check active-pair collisions using the same repo-local identity-collision scope G06 established for chunks/edges (IDEA-46 names chunk-artifact modifications as in-scope for conflict detection; the collision mechanics are a repo-local extension, not verbatim IDEA-46 text).",
+      "acceptanceCriteria": [
+        "Merging a verified branch promotes only the authoritative (most-recently-created) active chunk_artifacts row per (chunk_label, artifact_id) pair to branch_id=NULL",
+        "Merging a verified branch promotes only the authoritative (most-recently-created) deactivated chunk_artifacts row per (chunk_label, artifact_id) pair to branch_id=NULL unconditionally, with no collision check",
+        "Older, non-authoritative branch-scoped rows sharing a (chunk_label, artifact_id) pair remain branch history and are never promoted, so promotion cannot violate IDEA-64's unique index",
+        "A colliding active mainline (chunk_label, artifact_id) pair yields kind:'conflict' with zero rows mutated"
+      ],
+      "verification": "pnpm test:store",
+      "status": "open"
+    },
+    {
+      "id": "SG6",
+      "layer": "mcp",
+      "dependsOn": ["SG5"],
+      "objective": "upload-artifact and attach-artifact-to-chunk MCP tools, delegated-actor pattern, inline base64 content only.",
+      "acceptanceCriteria": [
+        "upload-artifact forwards base64 content + mimeType, returns created artifact id",
+        "upload-artifact returns a clear client error (no crash) when decoded content exceeds max size",
+        "attach-artifact-to-chunk forwards chunkLabel/artifactId/branchId/stakeholderId, returns created association"
+      ],
+      "verification": "pnpm test:mcp",
+      "status": "open"
+    },
+    {
+      "id": "SG7",
+      "layer": "docker-e2e",
+      "dependsOn": ["SG6"],
+      "objective": "Full Docker end-to-end exercise: upload, attach, effective read, signed download, submit/verify/merge with a real dev-session-token, confirm mainline artifact association.",
+      "acceptanceCriteria": [
+        "docker compose up --build spoolstore is running",
+        "Session token obtained via pnpm dev:session-token used for submit/verify/merge (attach/detach use stakeholderId, consistent with existing chunk/edge writes)",
+        "Upload -> attach -> GET /chunks/:label/artifacts?branchId= (tuple shows branchId = branch id) -> GET signed download -> submit/verify/merge -> GET /chunks/:label/artifacts (no branchId; tuple shows branchId: null) all verified against the live container"
+      ],
+      "verification": "manual HTTP exercise against running spoolstore container",
+      "status": "open"
+    }
+  ],
+  "openQuestions": []
+}
+</script>
+
+<script>
+  mermaid.initialize({ startOnLoad: true, theme: 'neutral' });
+  const data = JSON.parse(document.getElementById('goal-data').textContent);
+  document.querySelectorAll('.sg-badge').forEach((el) => {
+    const sg = data.subGoals.find((s) => s.id === el.dataset.sg);
+    if (sg) {
+      el.textContent = sg.status;
+      el.className = `badge badge-${sg.status.replace('_', '-')} sg-badge`;
+    }
+  });
+</script>
+
+</body>
+</html>

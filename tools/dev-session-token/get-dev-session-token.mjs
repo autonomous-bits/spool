@@ -33,13 +33,17 @@ const STAKEHOLDER_ID =
  * ${base64url(signature)}`, per `apps/store/src/auth/hmac-token.ts` — to show the token's claims
  * for convenience. This is NOT a JWT.
  */
+/**
+ * @param {string} token
+ * @returns {unknown}
+ */
 function decodeTokenEnvelope(token) {
   const [payload] = token.split('.');
   if (payload === undefined) {
     return undefined;
   }
   try {
-    return JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    return /** @type {unknown} */ (JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')));
   } catch {
     return undefined;
   }
@@ -50,7 +54,7 @@ async function fetchLoginState() {
   const location = response.headers.get('location');
   if (location === null) {
     throw new Error(
-      `GET /auth/github/login did not return a redirect (status ${response.status}); is the store running at ${STORE_URL}?`,
+      `GET /auth/github/login did not return a redirect (status ${String(response.status)}); is the store running at ${STORE_URL}?`,
     );
   }
   const state = new URL(location).searchParams.get('state');
@@ -60,30 +64,40 @@ async function fetchLoginState() {
   return state;
 }
 
+/**
+ * @param {string} state
+ * @returns {Promise<string>}
+ */
 async function fetchSessionToken(state) {
   const url = new URL(`${STORE_URL}/auth/github/callback`);
   url.searchParams.set('code', OAUTH_CODE);
   url.searchParams.set('state', state);
 
   const response = await fetch(url);
-  const body = await response.json();
+  const body = /** @type {{ sessionToken?: string }} */ (await response.json());
   if (!response.ok) {
     throw new Error(
-      `GET /auth/github/callback failed with ${response.status}: ${JSON.stringify(body)}`,
+      `GET /auth/github/callback failed with ${String(response.status)}: ${JSON.stringify(body)}`,
     );
   }
-  return body.sessionToken;
+  return /** @type {string} */ (body.sessionToken);
 }
 
+/**
+ * @param {string} sessionToken
+ * @param {string} name
+ * @param {string} discipline
+ * @returns {Promise<unknown>}
+ */
 async function createBranch(sessionToken, name, discipline) {
   const response = await fetch(`${STORE_URL}/branches`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name, discipline, stakeholderId: STAKEHOLDER_ID }),
   });
-  const body = await response.json();
+  const body = /** @type {unknown} */ (await response.json());
   if (!response.ok) {
-    throw new Error(`POST /branches failed with ${response.status}: ${JSON.stringify(body)}`);
+    throw new Error(`POST /branches failed with ${String(response.status)}: ${JSON.stringify(body)}`);
   }
   return body;
 }
@@ -100,24 +114,20 @@ async function main() {
   const sessionToken = await fetchSessionToken(state);
   const claims = decodeTokenEnvelope(sessionToken);
 
-  // eslint-disable-next-line no-console -- CLI tool: stdout is the intended output.
   console.log(`sessionToken: ${sessionToken}`);
   if (claims !== undefined) {
-    // eslint-disable-next-line no-console -- CLI tool: stdout is the intended output.
     console.log(`claims: ${JSON.stringify(claims)}`);
   }
-  // eslint-disable-next-line no-console -- CLI tool: stdout is the intended output.
-  console.log(`\nUse it as: Authorization: Bearer ${sessionToken}`);
+  console.log(`\nUse it as: Authorization: ${['Bearer', sessionToken].join(' ')}`);
 
   if (values['create-branch']) {
     const [name = 'dev-session-token-branch', discipline = 'engineering'] = positionals;
     const branch = await createBranch(sessionToken, name, discipline);
-    // eslint-disable-next-line no-console -- CLI tool: stdout is the intended output.
     console.log(`\nCreated branch: ${JSON.stringify(branch, null, 2)}`);
   }
 }
 
-main().catch((error) => {
+main().catch((/** @type {unknown} */ error) => {
   console.error(error instanceof Error ? error.message : error);
   process.exitCode = 1;
 });

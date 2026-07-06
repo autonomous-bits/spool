@@ -2,8 +2,9 @@ import { BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthService } from './auth.service.js';
 import type { GithubOAuthClient } from './github-oauth-client.js';
-import { InvalidOAuthStateError, OAuthStateService } from './oauth-state.service.js';
-import { SessionTokenService } from './session-token.service.js';
+import type { OAuthStateService } from './oauth-state.service.js';
+import { InvalidOAuthStateError } from './oauth-state.service.js';
+import type { SessionTokenService } from './session-token.service.js';
 import type { StakeholderRepository } from '../persistence/stakeholder.repository.js';
 
 describe('AuthService', () => {
@@ -13,11 +14,23 @@ describe('AuthService', () => {
   let stakeholderRepository: Pick<StakeholderRepository, 'findByGithubLogin'>;
   let service: AuthService;
 
+  // Kept as standalone typed mock references (rather than reading them back off
+  // `githubOAuthClient.*`) so assertions below don't trip `unbound-method`: `GithubOAuthClient`
+  // declares its members with method-shorthand syntax, and accessing a method-shorthand member
+  // without calling it looks like an unbound `this` reference to that rule, even though these
+  // are plain `vi.fn()` mocks with no `this` usage.
+  let buildAuthorizeUrl: ReturnType<typeof vi.fn>;
+  let exchangeCodeForAccessToken: ReturnType<typeof vi.fn>;
+  let fetchGithubUser: ReturnType<typeof vi.fn>;
+
   beforeEach(() => {
+    buildAuthorizeUrl = vi.fn().mockReturnValue('https://github.com/login/oauth/authorize?state=abc');
+    exchangeCodeForAccessToken = vi.fn().mockResolvedValue('gh-access-token');
+    fetchGithubUser = vi.fn().mockResolvedValue({ login: 'octocat' });
     githubOAuthClient = {
-      buildAuthorizeUrl: vi.fn().mockReturnValue('https://github.com/login/oauth/authorize?state=abc'),
-      exchangeCodeForAccessToken: vi.fn().mockResolvedValue('gh-access-token'),
-      fetchGithubUser: vi.fn().mockResolvedValue({ login: 'octocat' }),
+      buildAuthorizeUrl,
+      exchangeCodeForAccessToken,
+      fetchGithubUser,
     };
     oauthStateService = {
       issue: vi.fn().mockReturnValue('signed-state'),
@@ -42,7 +55,7 @@ describe('AuthService', () => {
     const url = service.buildLoginRedirectUrl();
 
     expect(oauthStateService.issue).toHaveBeenCalledOnce();
-    expect(githubOAuthClient.buildAuthorizeUrl).toHaveBeenCalledWith('signed-state');
+    expect(buildAuthorizeUrl).toHaveBeenCalledWith('signed-state');
     expect(url).toBe('https://github.com/login/oauth/authorize?state=abc');
   });
 
@@ -50,8 +63,8 @@ describe('AuthService', () => {
     const token = await service.handleCallback('a-code', 'signed-state');
 
     expect(oauthStateService.verify).toHaveBeenCalledWith('signed-state');
-    expect(githubOAuthClient.exchangeCodeForAccessToken).toHaveBeenCalledWith('a-code');
-    expect(githubOAuthClient.fetchGithubUser).toHaveBeenCalledWith('gh-access-token');
+    expect(exchangeCodeForAccessToken).toHaveBeenCalledWith('a-code');
+    expect(fetchGithubUser).toHaveBeenCalledWith('gh-access-token');
     expect(stakeholderRepository.findByGithubLogin).toHaveBeenCalledWith('octocat');
     expect(sessionTokenService.sign).toHaveBeenCalledWith(
       expect.objectContaining({ stakeholderId: 'stakeholder-1', discipline: 'engineering' }),

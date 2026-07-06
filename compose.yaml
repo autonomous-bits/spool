@@ -11,12 +11,17 @@ services:
       STORE_DB_USER: spool
       STORE_DB_PASSWORD: spool_dev
       STORE_DB_NAME: spool
+      # Meridian IDEA-85: local-filesystem artifact blob storage on a Docker-named-volume,
+      # accessed exclusively through the ArtifactBlobStore port (G08).
+      ARTIFACT_BLOB_STORE_PATH: /usr/src/app/artifact-data
       # Points HttpGithubOAuthClient's token-exchange/user-lookup calls at the local stub
       # (github-oauth-stub) below instead of live github.com, per G04.SG5's Docker e2e scope note.
       GITHUB_OAUTH_TOKEN_URL: http://github-oauth-stub:4001/login/oauth/access_token
       GITHUB_USER_API_URL: http://github-oauth-stub:4001/user
     ports:
       - 3000:3000
+    volumes:
+      - spoolstore-artifact-data:/usr/src/app/artifact-data
     depends_on:
       postgres:
         condition: service_healthy
@@ -56,3 +61,4 @@ services:
 
 volumes:
   spoolstore-postgres-data:
+  spoolstore-artifact-data:

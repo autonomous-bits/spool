@@ -26,7 +26,7 @@ describe('BranchRepository (containerized Postgres)', () => {
   });
 
   afterAll(async () => {
-    await database?.close();
+    await database.close();
   });
 
   it('create persists a branch with status draft', async () => {
