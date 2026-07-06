@@ -34,6 +34,11 @@ interface EdgeIdentityRow extends QueryResultRow {
   type: string;
 }
 
+interface ChunkArtifactIdentityRow extends QueryResultRow {
+  chunk_label: string;
+  artifact_id: string;
+}
+
 /**
  * Result of a successful or conflicted merge attempt (Meridian IDEA-74/IDEA-46, scoped per G06
  * OQ2 to "any mainline identity collision blocks the merge"). `undefined` is reserved for the
@@ -45,6 +50,10 @@ export type BranchMergeResult =
 
 function edgeIdentityKey(row: Pick<EdgeIdentityRow, 'from_chunk_label' | 'to_chunk_label' | 'type'>): string {
   return `${row.from_chunk_label}\u0000${row.to_chunk_label}\u0000${row.type}`;
+}
+
+function chunkArtifactIdentityKey(row: ChunkArtifactIdentityRow): string {
+  return `${row.chunk_label}\u0000${row.artifact_id}`;
 }
 
 export function toBranch(row: BranchRow): Branch {
@@ -293,11 +302,20 @@ export class BranchRepository {
    *
    * Promotes every draft chunk and active edge attached to the branch (branch_id -> NULL,
    * chunk status -> 'promoted'; origin_branch_id is left untouched, since it was already set to
-   * this branch's id at capture time) and marks the branch 'merged' with merged_at/
-   * merged_by_stakeholder_id — or rejects the merge in full, with zero rows mutated, if any
-   * branch chunk label or edge identity ((from,to,type)) already exists on mainline. Returns
-   * `undefined` (no mutation at all) when the branch is not found or not in 'verified' status, so
-   * callers can distinguish "not mergeable" from a genuine identity conflict.
+   * this branch's id at capture time), promotes only the authoritative (most-recently-created)
+   * branch-scoped chunk_artifacts row per (chunk_label, artifact_id) pair (Meridian IDEA-46's
+   * chunk-artifact-modification conflict scope; the repo-local collision mechanics mirror the
+   * chunk-label/edge-identity checks below, extended to chunk_artifacts), and marks the branch
+   * 'merged' with merged_at/merged_by_stakeholder_id — or rejects the merge in full, with zero
+   * rows mutated, if any branch chunk label, edge identity ((from,to,type)), or *active*
+   * chunk-artifact pair ((chunk_label, artifact_id)) already exists on mainline. Older,
+   * non-authoritative branch-scoped chunk_artifacts rows sharing a pair are left untouched as
+   * branch history — only the authoritative row per pair is ever promoted, so promotion can never
+   * violate IDEA-64's partial unique index. A deactivated authoritative row is promoted
+   * unconditionally (no collision check), since deactivation can never collide with mainline's
+   * uniqueness constraint. Returns `undefined` (no mutation at all) when the branch is not found
+   * or not in 'verified' status, so callers can distinguish "not mergeable" from a genuine
+   * identity conflict.
    */
   async merge(branchId: string, mergedByStakeholderId: string): Promise<BranchMergeResult | undefined> {
     const client = await this.pool.connect();
@@ -360,6 +378,37 @@ export class BranchRepository {
         };
       }
 
+      // Meridian IDEA-46/IDEA-62/IDEA-64: only the most-recently-created branch-scoped
+      // chunk_artifacts row per (chunk_label, artifact_id) pair is authoritative for this branch;
+      // older rows sharing a pair are branch history and must never be promoted, so promotion
+      // can never violate IDEA-64's mainline partial unique index.
+      const chunkArtifactCollisions: QueryResult<ChunkArtifactIdentityRow> =
+        await client.query<ChunkArtifactIdentityRow>(
+          `WITH authoritative_branch_rows AS (
+             SELECT DISTINCT ON (chunk_label, artifact_id) chunk_label, artifact_id, status
+               FROM chunk_artifacts
+              WHERE branch_id = $1
+              ORDER BY chunk_label, artifact_id, created_at DESC, id DESC
+           )
+           SELECT authoritative_branch_rows.chunk_label, authoritative_branch_rows.artifact_id
+             FROM authoritative_branch_rows
+             JOIN chunk_artifacts mainline_chunk_artifacts
+               ON mainline_chunk_artifacts.chunk_label = authoritative_branch_rows.chunk_label
+              AND mainline_chunk_artifacts.artifact_id = authoritative_branch_rows.artifact_id
+              AND mainline_chunk_artifacts.branch_id IS NULL
+              AND mainline_chunk_artifacts.status = 'active'
+            WHERE authoritative_branch_rows.status = 'active'`,
+          [branchId],
+        );
+      if (chunkArtifactCollisions.rows.length > 0) {
+        await client.query('ROLLBACK');
+        transactionOpen = false;
+        return {
+          kind: 'conflict',
+          reason: `mainline chunk-artifact association collision: ${chunkArtifactCollisions.rows.map(chunkArtifactIdentityKey).join(', ')}`,
+        };
+      }
+
       await client.query(
         "UPDATE chunks SET branch_id = NULL, status = 'promoted', updated_at = now() WHERE branch_id = $1 AND status = 'draft'",
         [branchId],
@@ -367,6 +416,23 @@ export class BranchRepository {
       await client.query(
         'UPDATE edges SET branch_id = NULL, updated_at = now() WHERE branch_id = $1 AND status = $2',
         [branchId, 'active'],
+      );
+      // Promote only the authoritative (most-recently-created) branch-scoped chunk_artifacts row
+      // per (chunk_label, artifact_id) pair — active rows are safe here since the collision check
+      // above already ruled out any mainline conflict; deactivated rows are promoted
+      // unconditionally, since a deactivation can never violate IDEA-64's active-only unique
+      // index. Older, non-authoritative rows sharing a pair are intentionally left untouched.
+      await client.query(
+        `WITH authoritative_branch_rows AS (
+           SELECT DISTINCT ON (chunk_label, artifact_id) id
+             FROM chunk_artifacts
+            WHERE branch_id = $1
+            ORDER BY chunk_label, artifact_id, created_at DESC, id DESC
+         )
+         UPDATE chunk_artifacts
+            SET branch_id = NULL, updated_at = now()
+          WHERE id IN (SELECT id FROM authoritative_branch_rows)`,
+        [branchId],
       );
 
       const mergedResult: QueryResult<BranchRow> = await client.query<BranchRow>(

@@ -26,7 +26,7 @@
 
 <h1>G08 — Artifact Ingestion, Storage &amp; Retrieval</h1>
 <p>
-  <span class="badge badge-open" id="goal-status-badge">open</span>
+  <span class="badge badge-done" id="goal-status-badge">done</span>
   Size: <strong>5</strong> — new domain concepts (immutable artifact blobs, branch-scoped junction-table associations distinct
   from the existing chunk/edge delta-row pattern), a new swappable storage abstraction, two new tables + a partial unique index,
   merge-transaction extension, plus API and MCP layers.
@@ -155,7 +155,7 @@ flowchart LR
 </details>
 
 <details>
-<summary>SG5 — Merge integration: chunk_artifacts in atomic merge <span class="badge badge-open sg-badge" data-sg="SG5">open</span></summary>
+<summary>SG5 — Merge integration: chunk_artifacts in atomic merge <span class="badge badge-done sg-badge" data-sg="SG5">done</span></summary>
 <p><strong>Depends on:</strong> SG4</p>
 <p><strong>Objective:</strong> Extend <code>BranchRepository.merge</code>'s atomic transaction (<code>apps/store/src/persistence/branch.repository.ts:304-392</code>) to also promote branch-scoped <code>chunk_artifacts</code> rows to mainline (<code>branch_id -&gt; NULL</code>). Per SG2's authoritative-row rule, a branch can accumulate multiple historical rows for the same <code>(chunk_label, artifact_id)</code> pair (e.g. attach → detach → attach); promoting <strong>every</strong> such row would create duplicate mainline rows and violate IDEA-64's partial unique index. Merge therefore promotes <strong>only the authoritative (most-recently-created) branch-scoped row per <code>(chunk_label, artifact_id)</code> pair</strong> — all older same-pair branch rows are left as-is (branch-scoped, non-authoritative history; they do not migrate to mainline). The merge rejects (<code>kind:'conflict'</code>) when an authoritative branch row is <code>active</code> and that exact <code>(chunk_label, artifact_id)</code> pair is already <code>active</code> on mainline, using the same identity-collision scope (not a full three-way divergence diff) as the existing chunk-label/edge-identity checks at lines 323-363. An authoritative branch row that is <code>deactivated</code> never conflicts (that is the mechanism by which a detach reaches mainline) and is promoted unconditionally. This closes the gap flagged in review: without promoting deactivated rows too, a branch-scoped detach would never take effect on mainline after merge. IDEA-46 names chunk-artifact-association modifications as in-scope for merge conflict detection; the specific identity-collision mechanics (vs. a full three-way divergence diff) are a repo-local scoping carried forward from G06's OQ2 resolution for chunks/edges, applied here by extension — not a verbatim restatement of IDEA-46's text.</p>
 <ul>
@@ -168,7 +168,7 @@ flowchart LR
 </details>
 
 <details>
-<summary>SG6 — MCP: upload-artifact, attach-artifact-to-chunk <span class="badge badge-open sg-badge" data-sg="SG6">open</span></summary>
+<summary>SG6 — MCP: upload-artifact, attach-artifact-to-chunk <span class="badge badge-done sg-badge" data-sg="SG6">done</span></summary>
 <p><strong>Depends on:</strong> SG5</p>
 <p><strong>Objective:</strong> Add <code>upload-artifact</code> and <code>attach-artifact-to-chunk</code> MCP tools in <code>apps/mcp/src/tools</code>, calling the store's <code>POST /artifacts</code> / <code>POST /chunks/:label/artifacts</code> as a delegated actor (IDEA-9), consistent with the <code>capture-chunk</code>/<code>create-edge</code> precedent. Given the MCP server's existing ~1MB in-memory request-body cap and JSON-only transport, <code>upload-artifact</code> accepts inline base64 content up to that cap only; larger binary artifacts are explicitly out of scope for this goal.</p>
 <ul>
@@ -209,7 +209,7 @@ flowchart LR
   "goalId": "G08",
   "slug": "artifact-ingestion-storage-retrieval",
   "title": "Artifact Ingestion, Storage & Retrieval",
-  "status": "open",
+  "status": "done",
   "size": 5,
   "sizeJustification": "New domain concepts (immutable blobs, junction-table branch-scoped associations), new swappable storage abstraction, two new tables + partial unique index, merge-transaction extension, plus API and MCP layers.",
   "meridianChunks": [
@@ -293,7 +293,7 @@ flowchart LR
         "A colliding active mainline (chunk_label, artifact_id) pair yields kind:'conflict' with zero rows mutated"
       ],
       "verification": "pnpm test:store",
-      "status": "open"
+      "status": "done"
     },
     {
       "id": "SG6",
@@ -306,7 +306,7 @@ flowchart LR
         "attach-artifact-to-chunk forwards chunkLabel/artifactId/branchId/stakeholderId, returns created association"
       ],
       "verification": "pnpm test:mcp",
-      "status": "open"
+      "status": "done"
     },
     {
       "id": "SG7",
@@ -319,7 +319,7 @@ flowchart LR
         "Upload -> attach -> GET /chunks/:label/artifacts?branchId= (tuple shows branchId = branch id) -> GET signed download -> submit/verify/merge -> GET /chunks/:label/artifacts (no branchId; tuple shows branchId: null) all verified against the live container"
       ],
       "verification": "manual HTTP exercise against running spoolstore container",
-      "status": "open"
+      "status": "done"
     }
   ],
   "openQuestions": []
