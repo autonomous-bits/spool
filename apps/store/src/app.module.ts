@@ -9,6 +9,7 @@ import { NotificationsModule } from './notifications/notifications.module.js';
 import { PersistenceModule } from './persistence/persistence.module.js';
 import { SuggestionsModule } from './suggestions/suggestions.module.js';
 import { VerificationSignalsModule } from './verification-signals/verification-signals.module.js';
+import { WorkspacesModule } from './workspaces/workspaces.module.js';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { VerificationSignalsModule } from './verification-signals/verification-s
     ArtifactsModule,
     VerificationSignalsModule,
     NotificationsModule,
+    WorkspacesModule,
   ],
   controllers: [HealthController],
 })
