@@ -4,6 +4,7 @@ import { parseChunkArtifactAssociationStatus } from './types/vocabulary/chunk-ar
 
 export interface ChunkArtifactAssociationProps {
   id?: string;
+  workspaceId: string;
   chunkLabel: string;
   artifactId: string;
   status?: ChunkArtifactAssociationStatus;
@@ -34,6 +35,7 @@ function requireNonBlank(value: string, fieldName: string): string {
  */
 export class ChunkArtifactAssociation {
   readonly id: string;
+  readonly workspaceId: string;
   readonly chunkLabel: string;
   readonly artifactId: string;
   readonly status: ChunkArtifactAssociationStatus;
@@ -45,6 +47,7 @@ export class ChunkArtifactAssociation {
   readonly updatedAt: Date;
 
   constructor(props: ChunkArtifactAssociationProps) {
+    this.workspaceId = requireNonBlank(props.workspaceId, 'workspaceId');
     this.chunkLabel = requireNonBlank(props.chunkLabel, 'chunkLabel');
     this.artifactId = requireNonBlank(props.artifactId, 'artifactId');
     this.status = parseChunkArtifactAssociationStatus(props.status ?? 'active');

@@ -4,6 +4,8 @@ import { ChunksController } from './chunks.controller.js';
 import { ChunksService } from './chunks.service.js';
 import type { ChunkResponse } from './chunk-response.dto.js';
 
+const WORKSPACE_ID = '00000000-0000-0000-0000-00000000d0fa';
+
 describe('ChunksController', () => {
   let controller: ChunksController;
   let service: Pick<ChunksService, 'create' | 'findById'>;
@@ -37,6 +39,9 @@ describe('ChunksController', () => {
       status: 'draft',
       createdByStakeholderId: 'stakeholder-1',
       updatedByStakeholderId: 'stakeholder-1',
+      branchId: null,
+      originBranchId: null,
+      workspaceId: WORKSPACE_ID,
       createdAt: new Date(),
       updatedAt: new Date(),
     } satisfies ChunkResponse;
@@ -49,7 +54,7 @@ describe('ChunksController', () => {
       chunkType: 'feature',
       contextKind: 'permanent',
       stakeholderId: 'stakeholder-1',
-    });
+    }, WORKSPACE_ID);
 
     expect(result).toEqual(expected);
     expect(service.create).toHaveBeenCalledWith({
@@ -59,16 +64,16 @@ describe('ChunksController', () => {
       chunkType: 'feature',
       contextKind: 'permanent',
       stakeholderId: 'stakeholder-1',
-    });
+    }, WORKSPACE_ID);
   });
 
   it('delegates retrieval to ChunksService', async () => {
     const expected = { id: 'abc' } as ChunkResponse;
     vi.mocked(service.findById).mockResolvedValue(expected);
 
-    const result = await controller.findOne('abc');
+    const result = await controller.findOne('abc', WORKSPACE_ID, 'stakeholder-1');
 
     expect(result).toEqual(expected);
-    expect(service.findById).toHaveBeenCalledWith('abc');
+    expect(service.findById).toHaveBeenCalledWith('abc', WORKSPACE_ID, 'stakeholder-1');
   });
 });

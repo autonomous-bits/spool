@@ -14,6 +14,7 @@ describe('parseCreateEdgeInput', () => {
     type: 'refines',
     discipline: 'product',
     stakeholderId: 'stakeholder-1',
+    workspaceId: 'workspace-1',
   };
 
   it('accepts a well-formed body without branchId', () => {
@@ -30,7 +31,7 @@ describe('parseCreateEdgeInput', () => {
     expect(() => parseCreateEdgeInput(null)).toThrow(CreateEdgeValidationError);
   });
 
-  it.each(['fromChunkLabel', 'toChunkLabel', 'type', 'discipline', 'stakeholderId'])(
+  it.each(['fromChunkLabel', 'toChunkLabel', 'type', 'discipline', 'stakeholderId', 'workspaceId'])(
     'rejects a missing %s, never inventing one',
     (field) => {
       const body: Record<string, unknown> = { ...validBody };
@@ -62,6 +63,7 @@ describe('createEdge', () => {
     type: 'refines',
     discipline: 'product',
     stakeholderId: 'stakeholder-1',
+    workspaceId: 'workspace-1',
   };
 
   afterEach(() => {
@@ -93,10 +95,11 @@ describe('createEdge', () => {
 
     const result = await createEdge(input, 'http://harness.test');
 
+    const { workspaceId, ...expectedBody } = input;
     expect(fetchMock).toHaveBeenCalledWith('http://harness.test/edges', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(input),
+      headers: { 'content-type': 'application/json', 'x-workspace-id': workspaceId },
+      body: JSON.stringify(expectedBody),
     });
     expect(result).toEqual(expected);
     expect(result.id).toBe('edge-1');

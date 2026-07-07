@@ -1,4 +1,4 @@
-import { NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { Readable } from 'node:stream';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Artifact } from '../domain/artifact.js';
@@ -8,52 +8,60 @@ import type { ArtifactBlobStore } from '../persistence/artifact-blob-store.js';
 import type { ArtifactRepository } from '../persistence/artifact.repository.js';
 import type { ChunkArtifactRepository } from '../persistence/chunk-artifact.repository.js';
 import type { ChunkRepository } from '../persistence/chunk.repository.js';
-import type {
-  ArtifactDownloadTokenService} from './artifact-download-token.service.js';
-import {
-  InvalidArtifactDownloadTokenError,
-} from './artifact-download-token.service.js';
+import type { WorkspaceRepository } from '../persistence/workspace.repository.js';
+import type { ArtifactDownloadTokenService } from './artifact-download-token.service.js';
+import { InvalidArtifactDownloadTokenError } from './artifact-download-token.service.js';
 import { ArtifactsService } from './artifacts.service.js';
+
+const WORKSPACE_ID = '00000000-0000-0000-0000-00000000d0fa';
+const OTHER_WORKSPACE_ID = '11111111-1111-1111-1111-111111111111';
 
 describe('ArtifactsService', () => {
   let artifactRepository: Pick<ArtifactRepository, 'create' | 'findById'>;
   let chunkArtifactRepository: Pick<ChunkArtifactRepository, 'create' | 'findEffectiveForChunk'>;
   let chunkRepository: Pick<ChunkRepository, 'findByLabel'>;
+  let workspaceRepository: Pick<WorkspaceRepository, 'isMember'>;
   let downloadTokenService: Pick<ArtifactDownloadTokenService, 'issue' | 'verify'>;
   let blobStore: Pick<ArtifactBlobStore, 'createReadStream'>;
   let service: ArtifactsService;
 
-  const stakeholderId = '11111111-1111-1111-1111-111111111111';
+  const stakeholderId = '22222222-2222-2222-2222-222222222222';
 
   beforeEach(() => {
     artifactRepository = { create: vi.fn(), findById: vi.fn() };
     chunkArtifactRepository = { create: vi.fn(), findEffectiveForChunk: vi.fn() };
     chunkRepository = { findByLabel: vi.fn() };
+    workspaceRepository = { isMember: vi.fn().mockResolvedValue(true) };
     downloadTokenService = { issue: vi.fn(), verify: vi.fn() };
     blobStore = { createReadStream: vi.fn() };
     service = new ArtifactsService(
       artifactRepository as ArtifactRepository,
       chunkArtifactRepository as ChunkArtifactRepository,
       chunkRepository as ChunkRepository,
+      workspaceRepository as WorkspaceRepository,
       downloadTokenService as ArtifactDownloadTokenService,
       blobStore as ArtifactBlobStore,
     );
   });
 
   describe('createArtifact', () => {
-    it('decodes base64 content and delegates to ArtifactRepository.create', async () => {
+    it('decodes base64 content and delegates to ArtifactRepository.create with the scoped workspaceId', async () => {
       const artifact = new Artifact({
+        workspaceId: WORKSPACE_ID,
         uri: 'local-file://artifact-1',
         mimeType: 'text/plain',
         createdByStakeholderId: stakeholderId,
       });
       vi.mocked(artifactRepository.create).mockResolvedValue(artifact);
 
-      const result = await service.createArtifact({
-        content: Buffer.from('hello').toString('base64'),
-        mimeType: 'text/plain',
-        stakeholderId,
-      });
+      const result = await service.createArtifact(
+        {
+          content: Buffer.from('hello').toString('base64'),
+          mimeType: 'text/plain',
+          stakeholderId,
+        },
+        WORKSPACE_ID,
+      );
 
       expect(result).toEqual({
         id: artifact.id,
@@ -63,10 +71,41 @@ describe('ArtifactsService', () => {
         createdAt: artifact.createdAt,
       });
       expect(artifactRepository.create).toHaveBeenCalledWith({
+        workspaceId: WORKSPACE_ID,
         content: Buffer.from('hello'),
         mimeType: 'text/plain',
         createdByStakeholderId: stakeholderId,
       });
+    });
+
+    it('throws ForbiddenException when the X-Workspace-Id header is missing', async () => {
+      await expect(
+        service.createArtifact(
+          {
+            content: Buffer.from('hello').toString('base64'),
+            mimeType: 'text/plain',
+            stakeholderId,
+          },
+          undefined,
+        ),
+      ).rejects.toThrow(ForbiddenException);
+      expect(artifactRepository.create).not.toHaveBeenCalled();
+    });
+
+    it('throws ForbiddenException when the stakeholder is not a member of the header workspace', async () => {
+      vi.mocked(workspaceRepository.isMember).mockResolvedValue(false);
+
+      await expect(
+        service.createArtifact(
+          {
+            content: Buffer.from('hello').toString('base64'),
+            mimeType: 'text/plain',
+            stakeholderId,
+          },
+          WORKSPACE_ID,
+        ),
+      ).rejects.toThrow(ForbiddenException);
+      expect(artifactRepository.create).not.toHaveBeenCalled();
     });
   });
 
@@ -75,17 +114,36 @@ describe('ArtifactsService', () => {
       vi.mocked(chunkRepository.findByLabel).mockResolvedValue(undefined);
 
       await expect(
-        service.attachArtifactToChunk('ATOMIC-1', {
-          artifactId: 'artifact-1',
-          stakeholderId,
-        }),
+        service.attachArtifactToChunk(
+          'ATOMIC-1',
+          {
+            artifactId: 'artifact-1',
+            stakeholderId,
+          },
+          WORKSPACE_ID,
+        ),
       ).rejects.toThrow(NotFoundException);
       expect(chunkArtifactRepository.create).not.toHaveBeenCalled();
+    });
+
+    it('throws ForbiddenException when the X-Workspace-Id header is missing', async () => {
+      await expect(
+        service.attachArtifactToChunk(
+          'ATOMIC-1',
+          {
+            artifactId: 'artifact-1',
+            stakeholderId,
+          },
+          undefined,
+        ),
+      ).rejects.toThrow(ForbiddenException);
+      expect(chunkRepository.findByLabel).not.toHaveBeenCalled();
     });
 
     it('throws NotFoundException when the artifact does not exist', async () => {
       vi.mocked(chunkRepository.findByLabel).mockResolvedValue(
         new Chunk({
+          workspaceId: WORKSPACE_ID,
           label: 'ATOMIC-1',
           content: 'content',
           discipline: 'engineering',
@@ -97,16 +155,21 @@ describe('ArtifactsService', () => {
       vi.mocked(artifactRepository.findById).mockResolvedValue(undefined);
 
       await expect(
-        service.attachArtifactToChunk('ATOMIC-1', {
-          artifactId: 'artifact-1',
-          stakeholderId,
-        }),
+        service.attachArtifactToChunk(
+          'ATOMIC-1',
+          {
+            artifactId: 'artifact-1',
+            stakeholderId,
+          },
+          WORKSPACE_ID,
+        ),
       ).rejects.toThrow(NotFoundException);
       expect(chunkArtifactRepository.create).not.toHaveBeenCalled();
     });
 
     it('creates an active association when chunk and artifact both resolve', async () => {
       const chunk = new Chunk({
+        workspaceId: WORKSPACE_ID,
         label: 'ATOMIC-1',
         content: 'content',
         discipline: 'engineering',
@@ -115,6 +178,7 @@ describe('ArtifactsService', () => {
         createdByStakeholderId: stakeholderId,
       });
       const artifact = new Artifact({
+        workspaceId: WORKSPACE_ID,
         uri: 'local-file://artifact-1',
         mimeType: 'text/plain',
         createdByStakeholderId: stakeholderId,
@@ -122,6 +186,7 @@ describe('ArtifactsService', () => {
       vi.mocked(chunkRepository.findByLabel).mockResolvedValue(chunk);
       vi.mocked(artifactRepository.findById).mockResolvedValue(artifact);
       const created = new ChunkArtifactAssociation({
+        workspaceId: WORKSPACE_ID,
         chunkLabel: 'ATOMIC-1',
         artifactId: artifact.id,
         status: 'active',
@@ -129,14 +194,19 @@ describe('ArtifactsService', () => {
       });
       vi.mocked(chunkArtifactRepository.create).mockResolvedValue(created);
 
-      const result = await service.attachArtifactToChunk('ATOMIC-1', {
-        artifactId: artifact.id,
-        stakeholderId,
-      });
+      const result = await service.attachArtifactToChunk(
+        'ATOMIC-1',
+        {
+          artifactId: artifact.id,
+          stakeholderId,
+        },
+        WORKSPACE_ID,
+      );
 
       expect(result.status).toBe('active');
       expect(chunkArtifactRepository.create).toHaveBeenCalledWith(
         expect.objectContaining({
+          workspaceId: WORKSPACE_ID,
           chunkLabel: 'ATOMIC-1',
           artifactId: artifact.id,
           status: 'active',
@@ -149,6 +219,7 @@ describe('ArtifactsService', () => {
   describe('detachArtifactFromChunk', () => {
     it('creates a branch-scoped deactivated association', async () => {
       const chunk = new Chunk({
+        workspaceId: WORKSPACE_ID,
         label: 'ATOMIC-1',
         content: 'content',
         discipline: 'engineering',
@@ -159,6 +230,7 @@ describe('ArtifactsService', () => {
         originBranchId: 'branch-1',
       });
       const artifact = new Artifact({
+        workspaceId: WORKSPACE_ID,
         uri: 'local-file://artifact-1',
         mimeType: 'text/plain',
         createdByStakeholderId: stakeholderId,
@@ -166,6 +238,7 @@ describe('ArtifactsService', () => {
       vi.mocked(chunkRepository.findByLabel).mockResolvedValue(chunk);
       vi.mocked(artifactRepository.findById).mockResolvedValue(artifact);
       const created = new ChunkArtifactAssociation({
+        workspaceId: WORKSPACE_ID,
         chunkLabel: 'ATOMIC-1',
         artifactId: artifact.id,
         status: 'deactivated',
@@ -180,11 +253,13 @@ describe('ArtifactsService', () => {
         artifact.id,
         'branch-1',
         stakeholderId,
+        WORKSPACE_ID,
       );
 
       expect(result.status).toBe('deactivated');
       expect(chunkArtifactRepository.create).toHaveBeenCalledWith(
         expect.objectContaining({
+          workspaceId: WORKSPACE_ID,
           chunkLabel: 'ATOMIC-1',
           artifactId: artifact.id,
           status: 'deactivated',
@@ -198,9 +273,28 @@ describe('ArtifactsService', () => {
       vi.mocked(chunkRepository.findByLabel).mockResolvedValue(undefined);
 
       await expect(
-        service.detachArtifactFromChunk('ATOMIC-1', 'artifact-1', 'branch-1', stakeholderId),
+        service.detachArtifactFromChunk(
+          'ATOMIC-1',
+          'artifact-1',
+          'branch-1',
+          stakeholderId,
+          WORKSPACE_ID,
+        ),
       ).rejects.toThrow(NotFoundException);
       expect(chunkArtifactRepository.create).not.toHaveBeenCalled();
+    });
+
+    it('throws ForbiddenException when the X-Workspace-Id header is missing', async () => {
+      await expect(
+        service.detachArtifactFromChunk(
+          'ATOMIC-1',
+          'artifact-1',
+          'branch-1',
+          stakeholderId,
+          undefined,
+        ),
+      ).rejects.toThrow(ForbiddenException);
+      expect(chunkRepository.findByLabel).not.toHaveBeenCalled();
     });
   });
 
@@ -209,13 +303,21 @@ describe('ArtifactsService', () => {
       vi.mocked(chunkRepository.findByLabel).mockResolvedValue(undefined);
 
       await expect(
-        service.getEffectiveArtifactsForChunk('ATOMIC-1', undefined),
+        service.getEffectiveArtifactsForChunk('ATOMIC-1', undefined, stakeholderId, WORKSPACE_ID),
       ).rejects.toThrow(NotFoundException);
       expect(chunkArtifactRepository.findEffectiveForChunk).not.toHaveBeenCalled();
     });
 
+    it('throws ForbiddenException when the X-Workspace-Id header is missing', async () => {
+      await expect(
+        service.getEffectiveArtifactsForChunk('ATOMIC-1', undefined, stakeholderId, undefined),
+      ).rejects.toThrow(ForbiddenException);
+      expect(chunkRepository.findByLabel).not.toHaveBeenCalled();
+    });
+
     it('delegates to ChunkArtifactRepository.findEffectiveForChunk when the chunk resolves', async () => {
       const chunk = new Chunk({
+        workspaceId: WORKSPACE_ID,
         label: 'ATOMIC-1',
         content: 'content',
         discipline: 'engineering',
@@ -227,12 +329,18 @@ describe('ArtifactsService', () => {
       const effective = [{ artifactId: 'artifact-1', branchId: null, status: 'active' as const }];
       vi.mocked(chunkArtifactRepository.findEffectiveForChunk).mockResolvedValue(effective);
 
-      const result = await service.getEffectiveArtifactsForChunk('ATOMIC-1', 'branch-1');
+      const result = await service.getEffectiveArtifactsForChunk(
+        'ATOMIC-1',
+        'branch-1',
+        stakeholderId,
+        WORKSPACE_ID,
+      );
 
       expect(result).toEqual(effective);
       expect(chunkArtifactRepository.findEffectiveForChunk).toHaveBeenCalledWith(
         'ATOMIC-1',
         'branch-1',
+        WORKSPACE_ID,
       );
     });
   });
@@ -241,12 +349,22 @@ describe('ArtifactsService', () => {
     it('throws NotFoundException when the artifact does not exist', async () => {
       vi.mocked(artifactRepository.findById).mockResolvedValue(undefined);
 
-      await expect(service.issueDownloadToken('artifact-1')).rejects.toThrow(NotFoundException);
+      await expect(
+        service.issueDownloadToken('artifact-1', stakeholderId, WORKSPACE_ID),
+      ).rejects.toThrow(NotFoundException);
       expect(downloadTokenService.issue).not.toHaveBeenCalled();
     });
 
-    it('delegates to ArtifactDownloadTokenService.issue when the artifact exists', async () => {
+    it('throws ForbiddenException when the X-Workspace-Id header is missing', async () => {
+      await expect(
+        service.issueDownloadToken('artifact-1', stakeholderId, undefined),
+      ).rejects.toThrow(ForbiddenException);
+      expect(artifactRepository.findById).not.toHaveBeenCalled();
+    });
+
+    it('delegates to ArtifactDownloadTokenService.issue with the scoped workspaceId when the artifact exists', async () => {
       const artifact = new Artifact({
+        workspaceId: WORKSPACE_ID,
         uri: 'local-file://artifact-1',
         mimeType: 'text/plain',
         createdByStakeholderId: stakeholderId,
@@ -255,10 +373,10 @@ describe('ArtifactsService', () => {
       const issued = { token: 'signed-token', expiresAt: new Date('2026-01-01T00:00:00Z') };
       vi.mocked(downloadTokenService.issue).mockReturnValue(issued);
 
-      const result = await service.issueDownloadToken(artifact.id);
+      const result = await service.issueDownloadToken(artifact.id, stakeholderId, WORKSPACE_ID);
 
       expect(result).toEqual(issued);
-      expect(downloadTokenService.issue).toHaveBeenCalledWith(artifact.id);
+      expect(downloadTokenService.issue).toHaveBeenCalledWith(artifact.id, WORKSPACE_ID);
     });
   });
 
@@ -275,7 +393,10 @@ describe('ArtifactsService', () => {
     });
 
     it('throws NotFoundException when the verified artifact no longer exists', async () => {
-      vi.mocked(downloadTokenService.verify).mockReturnValue({ artifactId: 'artifact-1' });
+      vi.mocked(downloadTokenService.verify).mockReturnValue({
+        artifactId: 'artifact-1',
+        workspaceId: WORKSPACE_ID,
+      });
       vi.mocked(artifactRepository.findById).mockResolvedValue(undefined);
 
       await expect(service.streamArtifactContent('good-token')).rejects.toThrow(
@@ -283,13 +404,17 @@ describe('ArtifactsService', () => {
       );
     });
 
-    it('streams the artifact blob content with its mimeType when the token is valid', async () => {
+    it('does not require an X-Workspace-Id header, using the token-carried workspaceId instead', async () => {
       const artifact = new Artifact({
+        workspaceId: OTHER_WORKSPACE_ID,
         uri: 'local-file://artifact-1',
         mimeType: 'text/plain',
         createdByStakeholderId: stakeholderId,
       });
-      vi.mocked(downloadTokenService.verify).mockReturnValue({ artifactId: artifact.id });
+      vi.mocked(downloadTokenService.verify).mockReturnValue({
+        artifactId: artifact.id,
+        workspaceId: OTHER_WORKSPACE_ID,
+      });
       vi.mocked(artifactRepository.findById).mockResolvedValue(artifact);
       const stream = Readable.from([Buffer.from('hello')]);
       vi.mocked(blobStore.createReadStream).mockReturnValue(stream);
@@ -297,6 +422,7 @@ describe('ArtifactsService', () => {
       const result = await service.streamArtifactContent('good-token');
 
       expect(result).toEqual({ stream, mimeType: 'text/plain' });
+      expect(artifactRepository.findById).toHaveBeenCalledWith(artifact.id, OTHER_WORKSPACE_ID);
       expect(blobStore.createReadStream).toHaveBeenCalledWith(artifact.uri);
     });
   });

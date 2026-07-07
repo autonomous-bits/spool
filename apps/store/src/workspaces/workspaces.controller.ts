@@ -10,6 +10,11 @@ import { WorkspacesService } from './workspaces.service.js';
 /**
  * Human-only workspace registry endpoints (Meridian IDEA-94). No MCP tool is exposed for either
  * endpoint (mirrors the human-only precedent for branch submit/verify/merge, Meridian IDEA-81).
+ *
+ * G11 SG4 (Meridian IDEA-98/IDEA-100): `POST /workspaces` requires no `X-Workspace-Id` header at
+ * all (creating a workspace necessarily precedes membership in it). `POST /workspaces/:id/members`
+ * is already token-gated, so it additionally requires `X-Workspace-Id` to equal the `:id` route
+ * param, validated against the token's workspaceId claim (the token tier).
  */
 @Controller('workspaces')
 export class WorkspacesController {
@@ -33,9 +38,10 @@ export class WorkspacesController {
     @Param('id') id: string,
     @Body() body: unknown,
     @Headers('authorization') authorizationHeader: unknown,
+    @Headers('x-workspace-id') workspaceId: string | undefined,
   ): Promise<WorkspaceMembershipResponse> {
     const claims = verifySessionClaims(authorizationHeader, this.sessionTokenService);
     const request = parseAddMemberRequest(body);
-    return this.workspaces.addMember(id, request.stakeholderId, claims);
+    return this.workspaces.addMember(id, request.stakeholderId, workspaceId, claims);
   }
 }

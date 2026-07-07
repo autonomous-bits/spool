@@ -7,6 +7,10 @@
  * branch-scoped vs. mainline association semantics are the store's responsibility (Meridian
  * IDEA-32/IDEA-60), and this tool must surface the store's own validation/404 errors rather than
  * duplicate or pre-empt them.
+ *
+ * G11 SG6 (Meridian IDEA-92/IDEA-98/IDEA-100): `POST /chunks/:label/artifacts` sits on the
+ * delegated, tokenless auth tier, so this tool requires a `workspaceId` input and forwards it as
+ * the store's `X-Workspace-Id` header (not a body field).
  */
 
 /**
@@ -19,6 +23,7 @@ export interface AttachArtifactToChunkInput {
   chunkLabel: string;
   artifactId: string;
   stakeholderId: string;
+  workspaceId: string;
   branchId?: string;
 }
 
@@ -70,6 +75,7 @@ export function parseAttachArtifactToChunkInput(body: unknown): AttachArtifactTo
   const chunkLabel = requireStringField(record, 'chunkLabel');
   const artifactId = requireStringField(record, 'artifactId');
   const stakeholderId = requireStringField(record, 'stakeholderId');
+  const workspaceId = requireStringField(record, 'workspaceId');
 
   const branchIdValue = record.branchId;
   if (branchIdValue !== undefined) {
@@ -80,11 +86,12 @@ export function parseAttachArtifactToChunkInput(body: unknown): AttachArtifactTo
       chunkLabel,
       artifactId,
       stakeholderId,
+      workspaceId,
       branchId: branchIdValue,
     } satisfies AttachArtifactToChunkInput;
   }
 
-  return { chunkLabel, artifactId, stakeholderId } satisfies AttachArtifactToChunkInput;
+  return { chunkLabel, artifactId, stakeholderId, workspaceId } satisfies AttachArtifactToChunkInput;
 }
 
 function extractErrorMessage(body: unknown, fallback: string): string {
@@ -109,10 +116,10 @@ export async function attachArtifactToChunk(
   input: AttachArtifactToChunkInput,
   harnessUrl: string,
 ): Promise<AttachArtifactToChunkResult> {
-  const { chunkLabel, ...body } = input;
+  const { chunkLabel, workspaceId, ...body } = input;
   const response = await fetch(`${harnessUrl}/chunks/${encodeURIComponent(chunkLabel)}/artifacts`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', 'x-workspace-id': workspaceId },
     body: JSON.stringify(body),
   });
 

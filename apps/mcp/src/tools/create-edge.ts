@@ -6,6 +6,11 @@
  * that it already exists. It also never re-validates the `type`/`discipline` closed vocabularies
  * itself: the store is the authoritative source for those invariants, and this tool must surface
  * the store's own validation errors rather than duplicate or pre-empt them.
+ *
+ * G11 SG6 (Meridian IDEA-92/IDEA-98/IDEA-100): `POST /edges` sits on the delegated, tokenless
+ * auth tier, so this tool requires a `workspaceId` input and forwards it as the store's
+ * `X-Workspace-Id` header (not a body field) — the store validates it against a
+ * `workspace_memberships` row for the caller-supplied `stakeholderId`.
  */
 
 /** Untrusted-input shape mirroring the store's `CreateEdgeRequest` (apps/store/src/edges). */
@@ -15,6 +20,7 @@ export interface CreateEdgeInput {
   type: string;
   discipline: string;
   stakeholderId: string;
+  workspaceId: string;
   branchId?: string;
 }
 
@@ -72,6 +78,7 @@ export function parseCreateEdgeInput(body: unknown): CreateEdgeInput {
   const type = requireStringField(record, 'type');
   const discipline = requireStringField(record, 'discipline');
   const stakeholderId = requireStringField(record, 'stakeholderId');
+  const workspaceId = requireStringField(record, 'workspaceId');
 
   const branchIdValue = record.branchId;
   if (branchIdValue !== undefined) {
@@ -84,6 +91,7 @@ export function parseCreateEdgeInput(body: unknown): CreateEdgeInput {
       type,
       discipline,
       stakeholderId,
+      workspaceId,
       branchId: branchIdValue,
     } satisfies CreateEdgeInput;
   }
@@ -94,6 +102,7 @@ export function parseCreateEdgeInput(body: unknown): CreateEdgeInput {
     type,
     discipline,
     stakeholderId,
+    workspaceId,
   } satisfies CreateEdgeInput;
 }
 
@@ -118,10 +127,11 @@ export async function createEdge(
   input: CreateEdgeInput,
   harnessUrl: string,
 ): Promise<CreateEdgeResult> {
+  const { workspaceId, ...body } = input;
   const response = await fetch(`${harnessUrl}/edges`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(input),
+    headers: { 'content-type': 'application/json', 'x-workspace-id': workspaceId },
+    body: JSON.stringify(body),
   });
 
   const payload: unknown = await response.json().catch(() => undefined);

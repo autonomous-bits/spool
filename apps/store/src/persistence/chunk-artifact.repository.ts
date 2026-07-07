@@ -6,6 +6,7 @@ import { PG_POOL } from './pg-pool.token.js';
 
 interface ChunkArtifactRow extends QueryResultRow {
   id: string;
+  workspace_id: string;
   chunk_label: string;
   artifact_id: string;
   status: string;
@@ -37,6 +38,7 @@ export interface EffectiveChunkArtifact {
 function toChunkArtifactAssociation(row: ChunkArtifactRow): ChunkArtifactAssociation {
   return new ChunkArtifactAssociation({
     id: row.id,
+    workspaceId: row.workspace_id,
     chunkLabel: row.chunk_label,
     artifactId: row.artifact_id,
     status: row.status as ChunkArtifactAssociationStatus,
@@ -61,14 +63,15 @@ async function insertChunkArtifact(
 ): Promise<ChunkArtifactAssociation> {
   const result: QueryResult<ChunkArtifactRow> = await queryable.query<ChunkArtifactRow>(
     `INSERT INTO chunk_artifacts (
-       id, chunk_label, artifact_id, status,
+       id, workspace_id, chunk_label, artifact_id, status,
        branch_id, origin_branch_id,
        created_by_stakeholder_id, updated_by_stakeholder_id,
        created_at, updated_at
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
      RETURNING *`,
     [
       association.id,
+      association.workspaceId,
       association.chunkLabel,
       association.artifactId,
       association.status,
@@ -89,10 +92,14 @@ async function insertChunkArtifact(
   return toChunkArtifactAssociation(row);
 }
 
-async function assertDraftBranchLock(client: PoolClient, branchId: string): Promise<void> {
+async function assertDraftBranchLock(
+  client: PoolClient,
+  branchId: string,
+  workspaceId: string,
+): Promise<void> {
   const result: QueryResult<{ status: string } & QueryResultRow> = await client.query(
-    'SELECT status FROM branches WHERE id = $1 FOR UPDATE',
-    [branchId],
+    'SELECT status FROM branches WHERE id = $1 AND workspace_id = $2 FOR UPDATE',
+    [branchId, workspaceId],
   );
 
   const row = result.rows[0];
@@ -125,7 +132,7 @@ export class ChunkArtifactRepository {
       await client.query('BEGIN');
       transactionOpen = true;
 
-      await assertDraftBranchLock(client, association.branchId);
+      await assertDraftBranchLock(client, association.branchId, association.workspaceId);
       await client.query('UPDATE branches SET updated_at = clock_timestamp() WHERE id = $1', [
         association.branchId,
       ]);
@@ -162,13 +169,14 @@ export class ChunkArtifactRepository {
   async findEffectiveForChunk(
     chunkLabel: string,
     branchId: string | undefined,
+    workspaceId: string,
   ): Promise<EffectiveChunkArtifact[]> {
     const mainlineRows = await this.pool.query<EffectiveRow>(
       `SELECT DISTINCT ON (artifact_id) artifact_id, status
        FROM chunk_artifacts
-       WHERE chunk_label = $1 AND branch_id IS NULL
+       WHERE chunk_label = $1 AND branch_id IS NULL AND workspace_id = $2
        ORDER BY artifact_id, created_at DESC, id DESC`,
-      [chunkLabel],
+      [chunkLabel, workspaceId],
     );
 
     const effective = new Map<string, EffectiveChunkArtifact>();
@@ -184,9 +192,9 @@ export class ChunkArtifactRepository {
       const branchRows = await this.pool.query<EffectiveRow>(
         `SELECT DISTINCT ON (artifact_id) artifact_id, status
          FROM chunk_artifacts
-         WHERE chunk_label = $1 AND branch_id = $2
+         WHERE chunk_label = $1 AND branch_id = $2 AND workspace_id = $3
          ORDER BY artifact_id, created_at DESC, id DESC`,
-        [chunkLabel, branchId],
+        [chunkLabel, branchId, workspaceId],
       );
 
       for (const row of branchRows.rows) {

@@ -17,8 +17,11 @@ import { BOOTSTRAP_STAKEHOLDER_ID } from '../../src/persistence/bootstrap-stakeh
 import { LocalFileBlobStore } from '../../src/persistence/local-file-blob-store.js';
 import { setUpTestDatabase, type TestDatabase } from '../support/test-database.js';
 
+const WORKSPACE_ID = '00000000-0000-0000-0000-00000000d0fa';
+
 function buildBranch(overrides: Partial<ConstructorParameters<typeof Branch>[0]> = {}): Branch {
   return new Branch({
+    workspaceId: WORKSPACE_ID,
     name: `branch-${Math.random().toString(36).slice(2, 10)}`,
     discipline: 'engineering',
     createdByStakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
@@ -28,6 +31,7 @@ function buildBranch(overrides: Partial<ConstructorParameters<typeof Branch>[0]>
 
 function buildChunk(overrides: Partial<ConstructorParameters<typeof Chunk>[0]> = {}): Chunk {
   return new Chunk({
+    workspaceId: WORKSPACE_ID,
     label: `chunk-${Math.random().toString(36).slice(2, 10)}`,
     content: 'Some atomic idea content.',
     discipline: 'engineering',
@@ -40,6 +44,7 @@ function buildChunk(overrides: Partial<ConstructorParameters<typeof Chunk>[0]> =
 
 function buildEdge(overrides: Partial<ConstructorParameters<typeof Edge>[0]> = {}): Edge {
   return new Edge({
+    workspaceId: WORKSPACE_ID,
     fromChunkLabel: `from-${Math.random().toString(36).slice(2, 10)}`,
     toChunkLabel: `to-${Math.random().toString(36).slice(2, 10)}`,
     type: 'depends-on',
@@ -54,6 +59,7 @@ function buildAssociation(
     Pick<ConstructorParameters<typeof ChunkArtifactAssociation>[0], 'chunkLabel' | 'artifactId'>,
 ): ChunkArtifactAssociation {
   return new ChunkArtifactAssociation({
+    workspaceId: WORKSPACE_ID,
     createdByStakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
     ...overrides,
   });
@@ -87,6 +93,7 @@ describe('BranchRepository.merge (containerized Postgres)', () => {
     basePath = await mkdtemp(join(tmpdir(), 'spool-branch-merge-artifacts-test-'));
     artifactRepository = new ArtifactRepository(pool, new LocalFileBlobStore({ basePath }));
     artifactA = await artifactRepository.create({
+      workspaceId: WORKSPACE_ID,
       content: Buffer.from('artifact A'),
       mimeType: 'text/plain',
       createdByStakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
@@ -104,8 +111,8 @@ describe('BranchRepository.merge (containerized Postgres)', () => {
   }
 
   async function verifyBranch(branchId: string): Promise<Branch> {
-    await branchRepository.submit(branchId);
-    const verified = await branchRepository.verify(branchId);
+    await branchRepository.submit(branchId, WORKSPACE_ID);
+    const verified = await branchRepository.verify(branchId, WORKSPACE_ID);
     if (verified === undefined) {
       throw new Error('verifyBranch: verify unexpectedly returned undefined');
     }
@@ -127,7 +134,7 @@ describe('BranchRepository.merge (containerized Postgres)', () => {
     );
     const branch = await verifyBranch(draftBranch.id);
 
-    const result = await branchRepository.merge(branch.id, BOOTSTRAP_STAKEHOLDER_ID);
+    const result = await branchRepository.merge(branch.id, WORKSPACE_ID, BOOTSTRAP_STAKEHOLDER_ID);
 
     expect(result?.kind).toBe('merged');
     if (result?.kind !== 'merged') {
@@ -175,7 +182,7 @@ describe('BranchRepository.merge (containerized Postgres)', () => {
     );
     const branch = await verifyBranch(draftBranch.id);
 
-    const result = await branchRepository.merge(branch.id, BOOTSTRAP_STAKEHOLDER_ID);
+    const result = await branchRepository.merge(branch.id, WORKSPACE_ID, BOOTSTRAP_STAKEHOLDER_ID);
 
     expect(result?.kind).toBe('conflict');
 
@@ -213,7 +220,7 @@ describe('BranchRepository.merge (containerized Postgres)', () => {
     );
     const branch = await verifyBranch(draftBranch.id);
 
-    const result = await branchRepository.merge(branch.id, BOOTSTRAP_STAKEHOLDER_ID);
+    const result = await branchRepository.merge(branch.id, WORKSPACE_ID, BOOTSTRAP_STAKEHOLDER_ID);
 
     expect(result?.kind).toBe('conflict');
 
@@ -237,7 +244,7 @@ describe('BranchRepository.merge (containerized Postgres)', () => {
       buildChunk({ branchId: branch.id, originBranchId: branch.id }),
     );
 
-    const result = await branchRepository.merge(branch.id, BOOTSTRAP_STAKEHOLDER_ID);
+    const result = await branchRepository.merge(branch.id, WORKSPACE_ID, BOOTSTRAP_STAKEHOLDER_ID);
 
     expect(result).toBeUndefined();
 
@@ -283,7 +290,7 @@ describe('BranchRepository.merge (containerized Postgres)', () => {
     );
     const branch = await verifyBranch(draftBranch.id);
 
-    const result = await branchRepository.merge(branch.id, BOOTSTRAP_STAKEHOLDER_ID);
+    const result = await branchRepository.merge(branch.id, WORKSPACE_ID, BOOTSTRAP_STAKEHOLDER_ID);
 
     expect(result?.kind).toBe('merged');
 
@@ -317,7 +324,7 @@ describe('BranchRepository.merge (containerized Postgres)', () => {
     );
     const branch = await verifyBranch(draftBranch.id);
 
-    const result = await branchRepository.merge(branch.id, BOOTSTRAP_STAKEHOLDER_ID);
+    const result = await branchRepository.merge(branch.id, WORKSPACE_ID, BOOTSTRAP_STAKEHOLDER_ID);
 
     expect(result?.kind).toBe('merged');
 
@@ -344,7 +351,7 @@ describe('BranchRepository.merge (containerized Postgres)', () => {
     );
     const branch = await verifyBranch(draftBranch.id);
 
-    const result = await branchRepository.merge(branch.id, BOOTSTRAP_STAKEHOLDER_ID);
+    const result = await branchRepository.merge(branch.id, WORKSPACE_ID, BOOTSTRAP_STAKEHOLDER_ID);
 
     expect(result?.kind).toBe('conflict');
 
@@ -406,7 +413,7 @@ describe('BranchRepository.merge (containerized Postgres)', () => {
     const poisonedBranchRepository = new BranchRepository(poisonedPool as Pool);
 
     await expect(
-      poisonedBranchRepository.merge(branch.id, BOOTSTRAP_STAKEHOLDER_ID),
+      poisonedBranchRepository.merge(branch.id, WORKSPACE_ID, BOOTSTRAP_STAKEHOLDER_ID),
     ).rejects.toThrow('Simulated mid-transaction failure');
 
     const branchRow = await pool.query<{ status: string; merged_at: Date | null }>(

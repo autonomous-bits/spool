@@ -20,18 +20,20 @@ export class NotificationsController {
   @Get()
   async findAll(
     @Headers('authorization') authorizationHeader: unknown,
+    @Headers('x-workspace-id') workspaceId: string | undefined,
     @Query('status') status?: string,
   ): Promise<NotificationResponse[]> {
     const claims = verifySessionClaims(authorizationHeader, this.sessionTokenService);
-    return this.notifications.findAll(claims, status);
+    return this.notifications.findAll(claims, workspaceId, status);
   }
 
   @Post(':id/read')
   async markAsRead(
     @Param('id') id: string,
     @Headers('authorization') authorizationHeader: unknown,
+    @Headers('x-workspace-id') workspaceId: string | undefined,
   ): Promise<NotificationResponse> {
     const claims = verifySessionClaims(authorizationHeader, this.sessionTokenService);
-    return this.notifications.markAsRead(id, claims);
+    return this.notifications.markAsRead(id, claims, workspaceId);
   }
 }

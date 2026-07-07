@@ -164,6 +164,20 @@ export class WorkspaceRepository {
   }
 
   /**
+   * Reports whether a stakeholder currently belongs to any workspace at all. Used by G11 SG2's
+   * OAuth callback bootstrap path (Meridian IDEA-101): a stakeholder with zero memberships may
+   * mint a workspace-less bootstrap token; a stakeholder with at least one membership may not.
+   */
+  async hasAnyMembership(stakeholderId: string): Promise<boolean> {
+    const result = await this.pool.query(
+      'SELECT 1 FROM workspace_memberships WHERE stakeholder_id = $1 LIMIT 1',
+      [stakeholderId],
+    );
+
+    return result.rows.length > 0;
+  }
+
+  /**
    * Adds a target stakeholder as a member of a workspace, on behalf of an acting stakeholder who
    * must already be a member (SG1's assertCanAddMember, Meridian IDEA-88's direct-add-only-by-
    * existing-member rule). One transaction: SELECT workspace FOR UPDATE (report

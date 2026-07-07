@@ -8,6 +8,11 @@
  * `discipline` closed vocabularies itself: the store is the authoritative source for those
  * invariants, and this tool must surface the store's own validation errors rather than duplicate
  * or pre-empt them.
+ *
+ * G11 SG6 (Meridian IDEA-92/IDEA-98/IDEA-100): `POST /suggestions` sits on the delegated,
+ * tokenless auth tier, so this tool requires a `workspaceId` input and forwards it as the
+ * store's `X-Workspace-Id` header (not a body field) — the store validates it against a
+ * `workspace_memberships` row for the caller-supplied `stakeholderId`.
  */
 
 /**
@@ -19,6 +24,7 @@
 export interface SubmitSuggestionInput {
   discipline: string;
   stakeholderId: string;
+  workspaceId: string;
   label?: string;
   content?: string;
   fromChunkLabel?: string;
@@ -85,6 +91,7 @@ export function parseSubmitSuggestionInput(body: unknown): SubmitSuggestionInput
 
   const discipline = requireStringField(record, 'discipline');
   const stakeholderId = requireStringField(record, 'stakeholderId');
+  const workspaceId = requireStringField(record, 'workspaceId');
 
   const hasAnyChunkField = isNonEmptyString(record.label) || isNonEmptyString(record.content);
   const hasAnyEdgeField =
@@ -103,7 +110,7 @@ export function parseSubmitSuggestionInput(body: unknown): SubmitSuggestionInput
   if (hasAnyChunkField) {
     const label = requireStringField(record, 'label');
     const content = requireStringField(record, 'content');
-    return { discipline, stakeholderId, label, content } satisfies SubmitSuggestionInput;
+    return { discipline, stakeholderId, workspaceId, label, content } satisfies SubmitSuggestionInput;
   }
 
   if (hasAnyEdgeField) {
@@ -113,6 +120,7 @@ export function parseSubmitSuggestionInput(body: unknown): SubmitSuggestionInput
     return {
       discipline,
       stakeholderId,
+      workspaceId,
       fromChunkLabel,
       toChunkLabel,
       relationshipType,
@@ -148,10 +156,11 @@ export async function submitSuggestion(
   input: SubmitSuggestionInput,
   harnessUrl: string,
 ): Promise<SubmitSuggestionResult> {
+  const { workspaceId, ...body } = input;
   const response = await fetch(`${harnessUrl}/suggestions`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(input),
+    headers: { 'content-type': 'application/json', 'x-workspace-id': workspaceId },
+    body: JSON.stringify(body),
   });
 
   const payload: unknown = await response.json().catch(() => undefined);

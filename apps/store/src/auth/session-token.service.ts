@@ -19,17 +19,25 @@ export interface SessionTokenClaims {
   stakeholderId: string;
   discipline: string | null;
   authTime: number;
+  /**
+   * The workspace this token is bound to, per Meridian IDEA-92/IDEA-100. `null` marks a
+   * workspace-less bootstrap token (Meridian IDEA-101), which is usable for exactly one purpose:
+   * calling `POST /workspaces`.
+   */
+  workspaceId: string | null;
 }
 
 function isValidClaims(claims: Record<string, unknown>): claims is SessionTokenClaims & Record<string, unknown> {
   const stakeholderId = claims.stakeholderId;
   const discipline = claims.discipline;
   const authTime = claims.authTime;
+  const workspaceId = claims.workspaceId;
 
   return (
     typeof stakeholderId === 'string' &&
     (discipline === null || typeof discipline === 'string') &&
-    typeof authTime === 'number'
+    typeof authTime === 'number' &&
+    (workspaceId === null || typeof workspaceId === 'string')
   );
 }
 
@@ -44,7 +52,12 @@ export class SessionTokenService {
 
   sign(claims: SessionTokenClaims): string {
     return signHmacToken(
-      { stakeholderId: claims.stakeholderId, discipline: claims.discipline, authTime: claims.authTime },
+      {
+        stakeholderId: claims.stakeholderId,
+        discipline: claims.discipline,
+        authTime: claims.authTime,
+        workspaceId: claims.workspaceId,
+      },
       this.config.sessionTokenSecret,
       this.config.sessionTokenMaxAgeSeconds,
     );
@@ -73,6 +86,7 @@ export class SessionTokenService {
       stakeholderId: claims.stakeholderId,
       discipline: claims.discipline,
       authTime: claims.authTime,
+      workspaceId: claims.workspaceId,
     };
   }
 }

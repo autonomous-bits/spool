@@ -14,6 +14,7 @@ export type ChunkStatus = 'draft' | 'promoted' | 'superseded' | 'deactivated';
 
 export interface ChunkProps {
   id?: string;
+  workspaceId: string;
   label: string;
   content: string;
   discipline: Discipline;
@@ -45,6 +46,7 @@ function requireNonBlank(value: string, fieldName: string): string {
  */
 export class Chunk {
   readonly id: string;
+  readonly workspaceId: string;
   readonly label: string;
   readonly content: string;
   readonly discipline: Discipline;
@@ -59,6 +61,7 @@ export class Chunk {
   readonly updatedAt: Date;
 
   constructor(props: ChunkProps) {
+    this.workspaceId = requireNonBlank(props.workspaceId, 'workspaceId');
     this.label = requireNonBlank(props.label, 'label');
     this.content = requireNonBlank(props.content, 'content');
     this.discipline = parseDiscipline(props.discipline);

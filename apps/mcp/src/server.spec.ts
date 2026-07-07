@@ -58,6 +58,7 @@ describe('MCP HTTP server scaffold', () => {
       chunkType: 'feature',
       contextKind: 'permanent',
       stakeholderId: 'stakeholder-1',
+      workspaceId: 'workspace-1',
     };
 
     async function startServer(): Promise<number> {
@@ -140,6 +141,7 @@ describe('MCP HTTP server scaffold', () => {
       name: 'feature/foo',
       discipline: 'product',
       stakeholderId: 'stakeholder-1',
+      workspaceId: 'workspace-1',
     };
 
     async function startServer(): Promise<number> {
@@ -224,6 +226,7 @@ describe('MCP HTTP server scaffold', () => {
       type: 'refines',
       discipline: 'product',
       stakeholderId: 'stakeholder-1',
+      workspaceId: 'workspace-1',
     };
 
     async function startServer(): Promise<number> {
@@ -310,6 +313,7 @@ describe('MCP HTTP server scaffold', () => {
       content: 'content',
       discipline: 'product',
       stakeholderId: 'stakeholder-1',
+      workspaceId: 'workspace-1',
     };
 
     async function startServer(): Promise<number> {
@@ -407,6 +411,7 @@ describe('MCP HTTP server scaffold', () => {
       verifierName: 'ci-evaluator',
       status: 'pass',
       reason: 'Checks passed.',
+      workspaceId: 'workspace-1',
     };
 
     async function startServer(): Promise<number> {
@@ -499,6 +504,7 @@ describe('MCP HTTP server scaffold', () => {
       content: Buffer.from('hello world').toString('base64'),
       mimeType: 'text/plain',
       stakeholderId: 'stakeholder-1',
+      workspaceId: 'workspace-1',
     };
 
     async function startServer(): Promise<number> {
@@ -579,6 +585,7 @@ describe('MCP HTTP server scaffold', () => {
       chunkLabel: 'IDEA-1',
       artifactId: 'artifact-1',
       stakeholderId: 'stakeholder-1',
+      workspaceId: 'workspace-1',
     };
 
     async function startServer(): Promise<number> {

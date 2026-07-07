@@ -5,8 +5,11 @@ import { BranchRepository } from '../../src/persistence/branch.repository.js';
 import { BOOTSTRAP_STAKEHOLDER_ID } from '../../src/persistence/bootstrap-stakeholder.js';
 import { setUpTestDatabase, type TestDatabase } from '../support/test-database.js';
 
+const WORKSPACE_ID = '00000000-0000-0000-0000-00000000d0fa';
+
 function buildBranch(overrides: Partial<ConstructorParameters<typeof Branch>[0]> = {}): Branch {
   return new Branch({
+    workspaceId: WORKSPACE_ID,
     name: `branch-${Math.random().toString(36).slice(2, 10)}`,
     discipline: 'engineering',
     createdByStakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
@@ -53,14 +56,14 @@ describe('BranchRepository (containerized Postgres)', () => {
     });
 
     const created = await repository.create(branch);
-    const found = await repository.findById(created.id);
+    const found = await repository.findById(created.id, WORKSPACE_ID);
 
     expect(found).toBeDefined();
     expect(found).toEqual(created);
   });
 
   it('findById returns an explicit not-found result (undefined) for an unknown id', async () => {
-    const found = await repository.findById('00000000-0000-0000-0000-00000000dead');
+    const found = await repository.findById('00000000-0000-0000-0000-00000000dead', WORKSPACE_ID);
 
     expect(found).toBeUndefined();
   });
@@ -68,8 +71,8 @@ describe('BranchRepository (containerized Postgres)', () => {
   it('submit transitions a draft branch once and returns undefined on repeat submit', async () => {
     const created = await repository.create(buildBranch());
 
-    const submitted = await repository.submit(created.id);
-    const repeated = await repository.submit(created.id);
+    const submitted = await repository.submit(created.id, WORKSPACE_ID);
+    const repeated = await repository.submit(created.id, WORKSPACE_ID);
 
     expect(submitted).toBeDefined();
     expect(submitted?.status).toBe('submitted');
@@ -80,8 +83,8 @@ describe('BranchRepository (containerized Postgres)', () => {
   it('submit persists submitted_at and round-trips it through the branch mapper', async () => {
     const created = await repository.create(buildBranch());
 
-    const submitted = await repository.submit(created.id);
-    const found = await repository.findById(created.id);
+    const submitted = await repository.submit(created.id, WORKSPACE_ID);
+    const found = await repository.findById(created.id, WORKSPACE_ID);
     const row = await pool.query<{ submitted_at: Date | null; status: string }>(
       'SELECT submitted_at, status FROM branches WHERE id = $1',
       [created.id],
@@ -98,10 +101,10 @@ describe('BranchRepository (containerized Postgres)', () => {
 
   it('verify succeeds once from a submitted branch and returns undefined on repeat verify', async () => {
     const created = await repository.create(buildBranch());
-    await repository.submit(created.id);
+    await repository.submit(created.id, WORKSPACE_ID);
 
-    const verified = await repository.verify(created.id);
-    const repeated = await repository.verify(created.id);
+    const verified = await repository.verify(created.id, WORKSPACE_ID);
+    const repeated = await repository.verify(created.id, WORKSPACE_ID);
 
     expect(verified).toBeDefined();
     expect(verified?.status).toBe('verified');
@@ -111,10 +114,10 @@ describe('BranchRepository (containerized Postgres)', () => {
 
   it('reject succeeds from a submitted branch and clears submitted/verified timestamps', async () => {
     const created = await repository.create(buildBranch());
-    await repository.submit(created.id);
+    await repository.submit(created.id, WORKSPACE_ID);
 
-    const rejected = await repository.reject(created.id);
-    const found = await repository.findById(created.id);
+    const rejected = await repository.reject(created.id, WORKSPACE_ID);
+    const found = await repository.findById(created.id, WORKSPACE_ID);
     const row = await pool.query<{ status: string; submitted_at: Date | null; verified_at: Date | null }>(
       'SELECT status, submitted_at, verified_at FROM branches WHERE id = $1',
       [created.id],
@@ -136,11 +139,11 @@ describe('BranchRepository (containerized Postgres)', () => {
 
   it('reject succeeds from a verified branch and clears submitted/verified timestamps', async () => {
     const created = await repository.create(buildBranch());
-    await repository.submit(created.id);
-    await repository.verify(created.id);
+    await repository.submit(created.id, WORKSPACE_ID);
+    await repository.verify(created.id, WORKSPACE_ID);
 
-    const rejected = await repository.reject(created.id);
-    const found = await repository.findById(created.id);
+    const rejected = await repository.reject(created.id, WORKSPACE_ID);
+    const found = await repository.findById(created.id, WORKSPACE_ID);
     const row = await pool.query<{ status: string; submitted_at: Date | null; verified_at: Date | null }>(
       'SELECT status, submitted_at, verified_at FROM branches WHERE id = $1',
       [created.id],
@@ -163,7 +166,7 @@ describe('BranchRepository (containerized Postgres)', () => {
   it('reject returns undefined when called on a draft branch', async () => {
     const created = await repository.create(buildBranch());
 
-    const rejected = await repository.reject(created.id);
+    const rejected = await repository.reject(created.id, WORKSPACE_ID);
 
     expect(rejected).toBeUndefined();
   });
@@ -174,7 +177,7 @@ describe('BranchRepository (containerized Postgres)', () => {
       created.id,
     ]);
 
-    const rejected = await repository.reject(created.id);
+    const rejected = await repository.reject(created.id, WORKSPACE_ID);
 
     expect(rejected).toBeUndefined();
   });

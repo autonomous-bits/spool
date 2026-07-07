@@ -1,8 +1,10 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Edge } from '../domain/edge.js';
+import { assertWorkspaceScope, WorkspaceScopeViolationError } from '../domain/workspace-scope.js';
 import { BranchRepository } from '../persistence/branch.repository.js';
 import { ChunkRepository } from '../persistence/chunk.repository.js';
 import { EdgeRepository } from '../persistence/edge.repository.js';
+import { WorkspaceRepository } from '../persistence/workspace.repository.js';
 import { toEdgeResponse, type EdgeResponse } from './edge-response.dto.js';
 import type { CreateEdgeRequest } from './create-edge-request.dto.js';
 
@@ -23,6 +25,10 @@ function isPgErrorWithCode(error: unknown, code: string): boolean {
  * sitting between the HTTP controller and the `EdgeRepository`/`ChunkRepository`/`BranchRepository`
  * persistence layers. Enforces branch-local endpoint existence and the single-active-edge
  * invariant; this goal's write path only ever produces 'active' edges.
+ *
+ * G11 SG4 (Meridian IDEA-98/IDEA-100): both `create` and `findById` sit on the delegated,
+ * tokenless auth tier — the request's `X-Workspace-Id` header is validated against a
+ * `workspace_memberships` row for the caller-declared `stakeholderId`, not a session token.
  */
 @Injectable()
 export class EdgesService {
@@ -30,13 +36,37 @@ export class EdgesService {
     private readonly edgeRepository: EdgeRepository,
     private readonly chunkRepository: ChunkRepository,
     private readonly branchRepository: BranchRepository,
+    private readonly workspaceRepository: WorkspaceRepository,
   ) {}
 
-  async create(request: CreateEdgeRequest): Promise<EdgeResponse> {
+  private async assertDelegatedScope(
+    headerWorkspaceId: string | null | undefined,
+    stakeholderId: string,
+  ): Promise<string> {
+    const isMember =
+      headerWorkspaceId === null || headerWorkspaceId === undefined || headerWorkspaceId.trim().length === 0
+        ? false
+        : await this.workspaceRepository.isMember(headerWorkspaceId, stakeholderId);
+
+    try {
+      assertWorkspaceScope(headerWorkspaceId, { tier: 'delegated', isMember });
+    } catch (error) {
+      if (error instanceof WorkspaceScopeViolationError) {
+        throw new ForbiddenException(error.message);
+      }
+      throw error;
+    }
+
+    return headerWorkspaceId;
+  }
+
+  async create(request: CreateEdgeRequest, headerWorkspaceId: string | null | undefined): Promise<EdgeResponse> {
+    const workspaceId = await this.assertDelegatedScope(headerWorkspaceId, request.stakeholderId);
+
     let branchId: string | undefined;
 
     if (request.branchId !== undefined) {
-      const branch = await this.branchRepository.findById(request.branchId);
+      const branch = await this.branchRepository.findById(request.branchId, workspaceId);
       if (branch === undefined) {
         throw new NotFoundException(`Branch ${request.branchId} not found`);
       }
@@ -51,14 +81,14 @@ export class EdgesService {
       branchId = branch.id;
     }
 
-    const fromChunk = await this.chunkRepository.findByLabel(request.fromChunkLabel, branchId);
+    const fromChunk = await this.chunkRepository.findByLabel(request.fromChunkLabel, branchId, workspaceId);
     if (fromChunk === undefined) {
       throw new NotFoundException(
         `Chunk with label ${request.fromChunkLabel} not found in this scope`,
       );
     }
 
-    const toChunk = await this.chunkRepository.findByLabel(request.toChunkLabel, branchId);
+    const toChunk = await this.chunkRepository.findByLabel(request.toChunkLabel, branchId, workspaceId);
     if (toChunk === undefined) {
       throw new NotFoundException(
         `Chunk with label ${request.toChunkLabel} not found in this scope`,
@@ -68,6 +98,7 @@ export class EdgesService {
     let edge: Edge;
     try {
       edge = new Edge({
+        workspaceId,
         fromChunkLabel: request.fromChunkLabel,
         toChunkLabel: request.toChunkLabel,
         type: request.type,
@@ -97,8 +128,14 @@ export class EdgesService {
     }
   }
 
-  async findById(id: string): Promise<EdgeResponse> {
-    const edge = await this.edgeRepository.findById(id);
+  async findById(
+    id: string,
+    headerWorkspaceId: string | null | undefined,
+    stakeholderId: string,
+  ): Promise<EdgeResponse> {
+    const workspaceId = await this.assertDelegatedScope(headerWorkspaceId, stakeholderId);
+
+    const edge = await this.edgeRepository.findById(id, workspaceId);
     if (edge === undefined) {
       throw new NotFoundException(`Edge ${id} not found`);
     }

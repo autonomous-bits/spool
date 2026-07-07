@@ -60,11 +60,12 @@ describe('Workspaces HTTP API (containerized Postgres)', () => {
     await database.close();
   });
 
-  function mintSessionToken(stakeholderId: string, discipline: string | null): string {
+  function mintSessionToken(stakeholderId: string, discipline: string | null, workspaceId: string | null = null): string {
     return sessionTokenService.sign({
       stakeholderId,
       discipline,
       authTime: Math.floor(Date.now() / 1000),
+      workspaceId,
     });
   }
 
@@ -122,11 +123,12 @@ describe('Workspaces HTTP API (containerized Postgres)', () => {
 
   it('POST /workspaces/:id/members adds an existing member as a new member', async () => {
     const workspaceId = await createWorkspace(creatorStakeholderId);
-    const token = mintSessionToken(creatorStakeholderId, 'engineering');
+    const token = mintSessionToken(creatorStakeholderId, 'engineering', workspaceId);
 
     const response = await request(app.getHttpServer())
       .post(`/workspaces/${workspaceId}/members`)
       .set('Authorization', `Bearer ${token}`)
+      .set('X-Workspace-Id', workspaceId)
       .send({ stakeholderId: otherStakeholderId });
 
     expect(response.status).toBe(201);
@@ -147,17 +149,19 @@ describe('Workspaces HTTP API (containerized Postgres)', () => {
 
     const response = await request(app.getHttpServer())
       .post(`/workspaces/${workspaceId}/members`)
+      .set('X-Workspace-Id', workspaceId)
       .send({ stakeholderId: otherStakeholderId });
 
     expect(response.status).toBe(401);
   });
 
   it('POST /workspaces/:id/members returns 404 for an unknown workspace id', async () => {
-    const token = mintSessionToken(creatorStakeholderId, 'engineering');
+    const token = mintSessionToken(creatorStakeholderId, 'engineering', '00000000-0000-0000-0000-00000000dead');
 
     const response = await request(app.getHttpServer())
       .post('/workspaces/00000000-0000-0000-0000-00000000dead/members')
       .set('Authorization', `Bearer ${token}`)
+      .set('X-Workspace-Id', '00000000-0000-0000-0000-00000000dead')
       .send({ stakeholderId: otherStakeholderId });
 
     expect(response.status).toBe(404);
@@ -165,11 +169,12 @@ describe('Workspaces HTTP API (containerized Postgres)', () => {
 
   it('POST /workspaces/:id/members returns 403 when the caller is not a member', async () => {
     const workspaceId = await createWorkspace(creatorStakeholderId);
-    const token = mintSessionToken(nonMemberStakeholderId, null);
+    const token = mintSessionToken(nonMemberStakeholderId, null, workspaceId);
 
     const response = await request(app.getHttpServer())
       .post(`/workspaces/${workspaceId}/members`)
       .set('Authorization', `Bearer ${token}`)
+      .set('X-Workspace-Id', workspaceId)
       .send({ stakeholderId: otherStakeholderId });
 
     expect(response.status).toBe(403);
@@ -177,11 +182,12 @@ describe('Workspaces HTTP API (containerized Postgres)', () => {
 
   it('POST /workspaces/:id/members returns 404 for an unknown target stakeholderId', async () => {
     const workspaceId = await createWorkspace(creatorStakeholderId);
-    const token = mintSessionToken(creatorStakeholderId, 'engineering');
+    const token = mintSessionToken(creatorStakeholderId, 'engineering', workspaceId);
 
     const response = await request(app.getHttpServer())
       .post(`/workspaces/${workspaceId}/members`)
       .set('Authorization', `Bearer ${token}`)
+      .set('X-Workspace-Id', workspaceId)
       .send({ stakeholderId: '00000000-0000-0000-0000-00000000beef' });
 
     expect(response.status).toBe(404);
@@ -189,17 +195,19 @@ describe('Workspaces HTTP API (containerized Postgres)', () => {
 
   it('POST /workspaces/:id/members returns 409 when the target is already a member', async () => {
     const workspaceId = await createWorkspace(creatorStakeholderId);
-    const token = mintSessionToken(creatorStakeholderId, 'engineering');
+    const token = mintSessionToken(creatorStakeholderId, 'engineering', workspaceId);
 
     const firstResponse = await request(app.getHttpServer())
       .post(`/workspaces/${workspaceId}/members`)
       .set('Authorization', `Bearer ${token}`)
+      .set('X-Workspace-Id', workspaceId)
       .send({ stakeholderId: otherStakeholderId });
     expect(firstResponse.status).toBe(201);
 
     const repeatedResponse = await request(app.getHttpServer())
       .post(`/workspaces/${workspaceId}/members`)
       .set('Authorization', `Bearer ${token}`)
+      .set('X-Workspace-Id', workspaceId)
       .send({ stakeholderId: otherStakeholderId });
 
     expect(repeatedResponse.status).toBe(409);
@@ -207,11 +215,12 @@ describe('Workspaces HTTP API (containerized Postgres)', () => {
 
   it('POST /workspaces/:id/members returns 400 for a missing stakeholderId', async () => {
     const workspaceId = await createWorkspace(creatorStakeholderId);
-    const token = mintSessionToken(creatorStakeholderId, 'engineering');
+    const token = mintSessionToken(creatorStakeholderId, 'engineering', workspaceId);
 
     const response = await request(app.getHttpServer())
       .post(`/workspaces/${workspaceId}/members`)
       .set('Authorization', `Bearer ${token}`)
+      .set('X-Workspace-Id', workspaceId)
       .send({});
 
     expect(response.status).toBe(400);

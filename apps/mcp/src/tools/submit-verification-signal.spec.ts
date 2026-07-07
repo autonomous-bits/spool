@@ -12,6 +12,7 @@ describe('parseSubmitVerificationSignalInput', () => {
     branchId: 'branch-1',
     verifierName: 'ci-evaluator',
     status: 'pass',
+    workspaceId: 'workspace-1',
     reason: 'Checks passed.',
   };
 
@@ -35,7 +36,7 @@ describe('parseSubmitVerificationSignalInput', () => {
     );
   });
 
-  it.each(['branchId', 'verifierName', 'status'])(
+  it.each(['branchId', 'verifierName', 'status', 'workspaceId'])(
     'rejects a missing or blank %s',
     (field) => {
       const missing: Record<string, unknown> = { ...validBody };
@@ -65,6 +66,7 @@ describe('submitVerificationSignal', () => {
     branchId: 'branch-1',
     verifierName: 'ci-evaluator',
     status: 'pass',
+    workspaceId: 'workspace-1',
     reason: 'Checks passed.',
   };
 
@@ -94,7 +96,7 @@ describe('submitVerificationSignal', () => {
       'http://harness.test/branches/branch-1/verification-signals',
       {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', 'x-workspace-id': input.workspaceId },
         body: JSON.stringify({
           verifierName: input.verifierName,
           status: input.status,

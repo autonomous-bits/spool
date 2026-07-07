@@ -6,10 +6,10 @@ import type { VerificationSignalStatus } from '../domain/types/vocabulary/verifi
 import { parseBranchStatus } from '../domain/types/vocabulary/branch-status.js';
 import { PG_POOL } from './pg-pool.token.js';
 import type { BranchRow } from './branch.repository.js';
-import { StakeholderRepository } from './stakeholder.repository.js';
 
 export interface VerificationSignalRow extends QueryResultRow {
   id: string;
+  workspace_id: string;
   branch_id: string;
   verifier_name: string;
   status: string;
@@ -20,6 +20,7 @@ export interface VerificationSignalRow extends QueryResultRow {
 export function toVerificationSignal(row: VerificationSignalRow): VerificationSignal {
   return new VerificationSignal({
     id: row.id,
+    workspaceId: row.workspace_id,
     branchId: row.branch_id,
     verifierName: row.verifier_name,
     status: row.status as VerificationSignalStatus,
@@ -40,6 +41,7 @@ export type VerificationSignalCreateResult =
 
 export interface CreateVerificationSignalParams {
   branchId: string;
+  workspaceId: string;
   verifierName: string;
   status: VerificationSignalStatus;
   reason?: string;
@@ -51,13 +53,19 @@ export interface CreateVerificationSignalParams {
  * it is reviewable (submitted/verified), insert the signal, then fan out one unread
  * feedback_notification per stakeholder -- all-or-nothing, and the branch's own status/updated_at
  * are never mutated (Meridian IDEA-43's no-auto-transition rule).
+ *
+ * G11 SG5 workspace scoping (Meridian IDEA-98/IDEA-100, interim resolution captured in gap-report
+ * IDEA-103): verification signals have no `stakeholderId`/caller-identity concept — `verifierName`
+ * is intentionally broad free text (Meridian IDEA-21), so there is no membership check to make.
+ * Instead, `params.workspaceId` (the request's `X-Workspace-Id` header) is compared directly
+ * against the target branch's own `workspace_id`; a mismatch is treated as `not_found` (404),
+ * mirroring `ChunkRepository.findById`'s cross-workspace-as-404 precedent, so a mismatched
+ * workspace never leaks whether the branch id exists. The fan-out notifies only members of the
+ * branch's workspace (`workspace_memberships`), not every stakeholder in the system.
  */
 @Injectable()
 export class VerificationSignalRepository {
-  constructor(
-    @Inject(PG_POOL) private readonly pool: Pool,
-    private readonly stakeholderRepository: StakeholderRepository,
-  ) {}
+  constructor(@Inject(PG_POOL) private readonly pool: Pool) {}
 
   async create(params: CreateVerificationSignalParams): Promise<VerificationSignalCreateResult> {
     const client = await this.pool.connect();
@@ -72,7 +80,7 @@ export class VerificationSignalRepository {
         [params.branchId],
       );
       const branchRow = branchResult.rows[0];
-      if (branchRow === undefined) {
+      if (branchRow === undefined || branchRow.workspace_id !== params.workspaceId) {
         await client.query('ROLLBACK');
         transactionOpen = false;
         return { kind: 'not_found' };
@@ -89,10 +97,10 @@ export class VerificationSignalRepository {
       }
 
       const result: QueryResult<VerificationSignalRow> = await client.query<VerificationSignalRow>(
-        `INSERT INTO verification_signals (id, branch_id, verifier_name, status, reason, created_at)
-         VALUES (gen_random_uuid(), $1, $2, $3, $4, now())
+        `INSERT INTO verification_signals (id, workspace_id, branch_id, verifier_name, status, reason, created_at)
+         VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, now())
          RETURNING *`,
-        [params.branchId, params.verifierName, params.status, params.reason ?? null],
+        [params.workspaceId, params.branchId, params.verifierName, params.status, params.reason ?? null],
       );
 
       const row = result.rows[0];
@@ -100,13 +108,16 @@ export class VerificationSignalRepository {
         throw new Error('VerificationSignalRepository.create: INSERT ... RETURNING * produced no row');
       }
 
-      const stakeholders = await this.stakeholderRepository.findAll(client);
-      for (const stakeholder of stakeholders) {
+      const memberRows: QueryResult<{ stakeholder_id: string } & QueryResultRow> = await client.query(
+        'SELECT stakeholder_id FROM workspace_memberships WHERE workspace_id = $1',
+        [params.workspaceId],
+      );
+      for (const member of memberRows.rows) {
         await client.query(
           `INSERT INTO feedback_notifications (
-             id, branch_id, stakeholder_id, signal_id, status, created_at, updated_at
-           ) VALUES (gen_random_uuid(), $1, $2, $3, 'unread', now(), now())`,
-          [params.branchId, stakeholder.id, row.id],
+             id, workspace_id, branch_id, stakeholder_id, signal_id, status, created_at, updated_at
+           ) VALUES (gen_random_uuid(), $1, $2, $3, $4, 'unread', now(), now())`,
+          [params.workspaceId, params.branchId, member.stakeholder_id, row.id],
         );
       }
 
@@ -124,14 +135,14 @@ export class VerificationSignalRepository {
   }
 
   /**
-   * Lists verification signals for a branch ordered oldest-first (G09 SG1). Deliberately
-   * unauthenticated, matching this codebase's existing GET /branches, GET /suggestions
-   * precedent of unauthenticated reads.
+   * Lists verification signals for a branch ordered oldest-first (G09 SG1), scoped to
+   * `workspaceId` (G11 SG5). Deliberately unauthenticated beyond the workspace-header check,
+   * matching this codebase's existing GET /branches, GET /suggestions precedent.
    */
-  async findByBranchId(branchId: string): Promise<VerificationSignal[]> {
+  async findByBranchId(branchId: string, workspaceId: string): Promise<VerificationSignal[]> {
     const result: QueryResult<VerificationSignalRow> = await this.pool.query<VerificationSignalRow>(
-      'SELECT * FROM verification_signals WHERE branch_id = $1 ORDER BY created_at ASC',
-      [branchId],
+      'SELECT * FROM verification_signals WHERE branch_id = $1 AND workspace_id = $2 ORDER BY created_at ASC',
+      [branchId, workspaceId],
     );
 
     return result.rows.map(toVerificationSignal);

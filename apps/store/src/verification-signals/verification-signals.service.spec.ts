@@ -1,9 +1,11 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { VerificationSignal } from '../domain/verification-signal.js';
 import { VerificationSignalRepository } from '../persistence/verification-signal.repository.js';
 import { VerificationSignalsService } from './verification-signals.service.js';
+
+const WORKSPACE_ID = '00000000-0000-0000-0000-00000000d0fa';
 
 describe('VerificationSignalsService', () => {
   let service: VerificationSignalsService;
@@ -29,13 +31,18 @@ describe('VerificationSignalsService', () => {
 
   it('creates a signal and returns its response shape', async () => {
     const signal = new VerificationSignal({
+      workspaceId: WORKSPACE_ID,
       branchId: 'branch-1',
       verifierName: 'ci-evaluator',
       status: 'pass',
     });
     vi.mocked(repository.create).mockResolvedValue({ kind: 'created', signal });
 
-    const result = await service.create('branch-1', { verifierName: 'ci-evaluator', status: 'pass' });
+    const result = await service.create(
+      'branch-1',
+      { verifierName: 'ci-evaluator', status: 'pass' },
+      WORKSPACE_ID,
+    );
 
     expect(result.id).toBe(signal.id);
     expect(result.branchId).toBe('branch-1');
@@ -43,6 +50,7 @@ describe('VerificationSignalsService', () => {
     expect(result.reason).toBeNull();
     expect(repository.create).toHaveBeenCalledWith({
       branchId: 'branch-1',
+      workspaceId: WORKSPACE_ID,
       verifierName: 'ci-evaluator',
       status: 'pass',
     });
@@ -50,6 +58,7 @@ describe('VerificationSignalsService', () => {
 
   it('forwards an optional reason to the repository', async () => {
     const signal = new VerificationSignal({
+      workspaceId: WORKSPACE_ID,
       branchId: 'branch-1',
       verifierName: 'ci-evaluator',
       status: 'fail',
@@ -57,14 +66,15 @@ describe('VerificationSignalsService', () => {
     });
     vi.mocked(repository.create).mockResolvedValue({ kind: 'created', signal });
 
-    await service.create('branch-1', {
-      verifierName: 'ci-evaluator',
-      status: 'fail',
-      reason: 'missing tests',
-    });
+    await service.create(
+      'branch-1',
+      { verifierName: 'ci-evaluator', status: 'fail', reason: 'missing tests' },
+      WORKSPACE_ID,
+    );
 
     expect(repository.create).toHaveBeenCalledWith({
       branchId: 'branch-1',
+      workspaceId: WORKSPACE_ID,
       verifierName: 'ci-evaluator',
       status: 'fail',
       reason: 'missing tests',
@@ -75,7 +85,11 @@ describe('VerificationSignalsService', () => {
     vi.mocked(repository.create).mockResolvedValue({ kind: 'not_found' });
 
     await expect(
-      service.create('unknown-branch', { verifierName: 'ci-evaluator', status: 'pass' }),
+      service.create(
+        'unknown-branch',
+        { verifierName: 'ci-evaluator', status: 'pass' },
+        WORKSPACE_ID,
+      ),
     ).rejects.toThrow(NotFoundException);
   });
 
@@ -86,26 +100,49 @@ describe('VerificationSignalsService', () => {
     });
 
     await expect(
-      service.create('branch-1', { verifierName: 'ci-evaluator', status: 'pass' }),
+      service.create('branch-1', { verifierName: 'ci-evaluator', status: 'pass' }, WORKSPACE_ID),
     ).rejects.toThrow(ConflictException);
+  });
+
+  it('throws ForbiddenException when the X-Workspace-Id header is missing on create', async () => {
+    await expect(
+      service.create('branch-1', { verifierName: 'ci-evaluator', status: 'pass' }, undefined),
+    ).rejects.toThrow(ForbiddenException);
+    expect(repository.create).not.toHaveBeenCalled();
+  });
+
+  it('throws ForbiddenException when the X-Workspace-Id header is blank on create', async () => {
+    await expect(
+      service.create('branch-1', { verifierName: 'ci-evaluator', status: 'pass' }, '   '),
+    ).rejects.toThrow(ForbiddenException);
+    expect(repository.create).not.toHaveBeenCalled();
   });
 
   it('lists signals for a branch ordered as returned by the repository', async () => {
     const first = new VerificationSignal({
+      workspaceId: WORKSPACE_ID,
       branchId: 'branch-1',
       verifierName: 'first',
       status: 'pass',
     });
     const second = new VerificationSignal({
+      workspaceId: WORKSPACE_ID,
       branchId: 'branch-1',
       verifierName: 'second',
       status: 'fail',
     });
     vi.mocked(repository.findByBranchId).mockResolvedValue([first, second]);
 
-    const result = await service.findAllForBranch('branch-1');
+    const result = await service.findAllForBranch('branch-1', WORKSPACE_ID);
 
     expect(result.map((signal) => signal.id)).toEqual([first.id, second.id]);
-    expect(repository.findByBranchId).toHaveBeenCalledWith('branch-1');
+    expect(repository.findByBranchId).toHaveBeenCalledWith('branch-1', WORKSPACE_ID);
+  });
+
+  it('throws ForbiddenException when the X-Workspace-Id header is missing on findAllForBranch', async () => {
+    await expect(service.findAllForBranch('branch-1', undefined)).rejects.toThrow(
+      ForbiddenException,
+    );
+    expect(repository.findByBranchId).not.toHaveBeenCalled();
   });
 });

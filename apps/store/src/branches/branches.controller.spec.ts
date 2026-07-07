@@ -6,6 +6,8 @@ import { BranchesController } from './branches.controller.js';
 import { BranchesService } from './branches.service.js';
 import type { BranchResponse } from './branch-response.dto.js';
 
+const WORKSPACE_ID = '00000000-0000-0000-0000-00000000d0fa';
+
 const claims = {
   stakeholderId: 'stakeholder-1',
   discipline: 'product',
@@ -63,6 +65,7 @@ describe('BranchesController', () => {
       createdAt: new Date(),
       updatedAt: new Date(),
       createdByStakeholderId: 'stakeholder-1',
+      workspaceId: WORKSPACE_ID,
     } satisfies BranchResponse;
     vi.mocked(service.create).mockResolvedValue(expected);
 
@@ -70,14 +73,14 @@ describe('BranchesController', () => {
       name: 'feature-branch',
       discipline: 'product',
       stakeholderId: 'stakeholder-1',
-    });
+    }, WORKSPACE_ID);
 
     expect(result).toEqual(expected);
     expect(service.create).toHaveBeenCalledWith({
       name: 'feature-branch',
       discipline: 'product',
       stakeholderId: 'stakeholder-1',
-    });
+    }, WORKSPACE_ID);
   });
 
   it('verifies the bearer token and delegates submission to BranchesService', async () => {
@@ -94,25 +97,26 @@ describe('BranchesController', () => {
       createdAt: new Date(),
       updatedAt: new Date(),
       createdByStakeholderId: 'stakeholder-1',
+      workspaceId: WORKSPACE_ID,
     } satisfies BranchResponse;
     vi.mocked(sessionTokenService.verify).mockReturnValue(claims);
     vi.mocked(service.submit).mockResolvedValue(expected);
 
-    const result = await controller.submit('abc', 'Bearer signed-token');
+    const result = await controller.submit('abc', 'Bearer signed-token', WORKSPACE_ID);
 
     expect(result).toEqual(expected);
     expect(sessionTokenService.verify).toHaveBeenCalledWith('signed-token');
-    expect(service.submit).toHaveBeenCalledWith('abc', claims);
+    expect(service.submit).toHaveBeenCalledWith('abc', WORKSPACE_ID, claims);
   });
 
   it('rejects a missing Authorization header', async () => {
-    await expect(controller.submit('abc', undefined)).rejects.toThrow(UnauthorizedException);
+    await expect(controller.submit('abc', undefined, WORKSPACE_ID)).rejects.toThrow(UnauthorizedException);
     expect(sessionTokenService.verify).not.toHaveBeenCalled();
     expect(service.submit).not.toHaveBeenCalled();
   });
 
   it('rejects a malformed Authorization header', async () => {
-    await expect(controller.submit('abc', 'Token signed-token')).rejects.toThrow(
+    await expect(controller.submit('abc', 'Token signed-token', WORKSPACE_ID)).rejects.toThrow(
       UnauthorizedException,
     );
     expect(sessionTokenService.verify).not.toHaveBeenCalled();
@@ -133,19 +137,20 @@ describe('BranchesController', () => {
       createdAt: new Date(),
       updatedAt: new Date(),
       createdByStakeholderId: 'stakeholder-1',
+      workspaceId: WORKSPACE_ID,
     } satisfies BranchResponse;
     vi.mocked(sessionTokenService.verify).mockReturnValue(claims);
     vi.mocked(service.verify).mockResolvedValue(expected);
 
-    const result = await controller.verify('abc', 'Bearer signed-token');
+    const result = await controller.verify('abc', 'Bearer signed-token', WORKSPACE_ID);
 
     expect(result).toEqual(expected);
     expect(sessionTokenService.verify).toHaveBeenCalledWith('signed-token');
-    expect(service.verify).toHaveBeenCalledWith('abc', claims);
+    expect(service.verify).toHaveBeenCalledWith('abc', WORKSPACE_ID, claims);
   });
 
   it('rejects verify with a missing Authorization header', async () => {
-    await expect(controller.verify('abc', undefined)).rejects.toThrow(UnauthorizedException);
+    await expect(controller.verify('abc', undefined, WORKSPACE_ID)).rejects.toThrow(UnauthorizedException);
     expect(sessionTokenService.verify).not.toHaveBeenCalled();
     expect(service.verify).not.toHaveBeenCalled();
   });
@@ -164,19 +169,20 @@ describe('BranchesController', () => {
       createdAt: new Date(),
       updatedAt: new Date(),
       createdByStakeholderId: 'stakeholder-1',
+      workspaceId: WORKSPACE_ID,
     } satisfies BranchResponse;
     vi.mocked(sessionTokenService.verify).mockReturnValue(claims);
     vi.mocked(service.reject).mockResolvedValue(expected);
 
-    const result = await controller.reject('abc', 'Bearer signed-token');
+    const result = await controller.reject('abc', 'Bearer signed-token', WORKSPACE_ID);
 
     expect(result).toEqual(expected);
     expect(sessionTokenService.verify).toHaveBeenCalledWith('signed-token');
-    expect(service.reject).toHaveBeenCalledWith('abc', claims);
+    expect(service.reject).toHaveBeenCalledWith('abc', WORKSPACE_ID, claims);
   });
 
   it('rejects reject with a missing Authorization header', async () => {
-    await expect(controller.reject('abc', undefined)).rejects.toThrow(UnauthorizedException);
+    await expect(controller.reject('abc', undefined, WORKSPACE_ID)).rejects.toThrow(UnauthorizedException);
     expect(sessionTokenService.verify).not.toHaveBeenCalled();
     expect(service.reject).not.toHaveBeenCalled();
   });
@@ -195,25 +201,26 @@ describe('BranchesController', () => {
       createdAt: new Date(),
       updatedAt: new Date(),
       createdByStakeholderId: 'stakeholder-1',
+      workspaceId: WORKSPACE_ID,
     } satisfies BranchResponse;
     vi.mocked(sessionTokenService.verify).mockReturnValue(claims);
     vi.mocked(service.merge).mockResolvedValue(expected);
 
-    const result = await controller.merge('abc', 'Bearer signed-token');
+    const result = await controller.merge('abc', 'Bearer signed-token', WORKSPACE_ID);
 
     expect(result).toEqual(expected);
     expect(sessionTokenService.verify).toHaveBeenCalledWith('signed-token');
-    expect(service.merge).toHaveBeenCalledWith('abc', claims);
+    expect(service.merge).toHaveBeenCalledWith('abc', WORKSPACE_ID, claims);
   });
 
   it('rejects merge with a missing Authorization header', async () => {
-    await expect(controller.merge('abc', undefined)).rejects.toThrow(UnauthorizedException);
+    await expect(controller.merge('abc', undefined, WORKSPACE_ID)).rejects.toThrow(UnauthorizedException);
     expect(sessionTokenService.verify).not.toHaveBeenCalled();
     expect(service.merge).not.toHaveBeenCalled();
   });
 
   it('rejects merge with a malformed Authorization header', async () => {
-    await expect(controller.merge('abc', 'Token signed-token')).rejects.toThrow(
+    await expect(controller.merge('abc', 'Token signed-token', WORKSPACE_ID)).rejects.toThrow(
       UnauthorizedException,
     );
     expect(sessionTokenService.verify).not.toHaveBeenCalled();
@@ -234,12 +241,13 @@ describe('BranchesController', () => {
       createdAt: new Date(),
       updatedAt: new Date(),
       createdByStakeholderId: 'stakeholder-1',
+      workspaceId: WORKSPACE_ID,
     } satisfies BranchResponse;
     vi.mocked(service.findById).mockResolvedValue(expected);
 
-    const result = await controller.findOne('abc');
+    const result = await controller.findOne('abc', WORKSPACE_ID, 'stakeholder-1');
 
     expect(result).toEqual(expected);
-    expect(service.findById).toHaveBeenCalledWith('abc');
+    expect(service.findById).toHaveBeenCalledWith('abc', WORKSPACE_ID, 'stakeholder-1');
   });
 });

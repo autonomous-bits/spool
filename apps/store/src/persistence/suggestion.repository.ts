@@ -7,6 +7,7 @@ import { toBranch, type BranchRow } from './branch.repository.js';
 
 interface SuggestionRow extends QueryResultRow {
   id: string;
+  workspace_id: string;
   label: string | null;
   content: string | null;
   from_chunk_label: string | null;
@@ -49,6 +50,7 @@ function toVariant(row: SuggestionRow): SuggestionVariant {
 function toSuggestion(row: SuggestionRow): Suggestion {
   return new Suggestion({
     id: row.id,
+    workspaceId: row.workspace_id,
     variant: toVariant(row),
     discipline: row.discipline as Suggestion['discipline'],
     status: row.status as Suggestion['status'],
@@ -67,13 +69,14 @@ async function insertSuggestion(client: PoolClient, suggestion: Suggestion): Pro
   const variant = suggestion.variant;
   const result: QueryResult<SuggestionRow> = await client.query<SuggestionRow>(
     `INSERT INTO suggestions (
-       id, label, content, from_chunk_label, to_chunk_label, relationship_type,
+       id, workspace_id, label, content, from_chunk_label, to_chunk_label, relationship_type,
        discipline, status, submitted_by_stakeholder_id, submitted_by_actor_kind,
        decided_by_stakeholder_id, decided_at, created_at, updated_at
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
      RETURNING *`,
     [
       suggestion.id,
+      suggestion.workspaceId,
       variant.kind === 'chunk' ? variant.label : null,
       variant.kind === 'chunk' ? variant.content : null,
       variant.kind === 'edge' ? variant.fromChunkLabel : null,
@@ -169,13 +172,14 @@ export class SuggestionRepository {
   }
 
   /**
-   * Looks up a suggestion by id. Returns `undefined` as an explicit not-found result rather than
-   * throwing, so callers can distinguish "not found" from an actual persistence error.
+   * Looks up a suggestion by id, scoped to a workspace (Meridian IDEA-98/IDEA-100, G11 SG5). A
+   * cross-workspace id is indistinguishable from "does not exist", mirroring
+   * `ChunkRepository.findById`'s precedent.
    */
-  async findById(id: string): Promise<Suggestion | undefined> {
+  async findById(id: string, workspaceId: string): Promise<Suggestion | undefined> {
     const result: QueryResult<SuggestionRow> = await this.pool.query<SuggestionRow>(
-      'SELECT * FROM suggestions WHERE id = $1',
-      [id],
+      'SELECT * FROM suggestions WHERE id = $1 AND workspace_id = $2',
+      [id, workspaceId],
     );
 
     const row = result.rows[0];
@@ -196,6 +200,7 @@ export class SuggestionRepository {
     suggestionId: string,
     branchName: string,
     actingStakeholderId: string,
+    workspaceId: string,
   ): Promise<SuggestionAcceptResult> {
     const client = await this.pool.connect();
     let transactionOpen = false;
@@ -205,8 +210,8 @@ export class SuggestionRepository {
       transactionOpen = true;
 
       const suggestionResult: QueryResult<SuggestionRow> = await client.query<SuggestionRow>(
-        'SELECT * FROM suggestions WHERE id = $1 FOR UPDATE',
-        [suggestionId],
+        'SELECT * FROM suggestions WHERE id = $1 AND workspace_id = $2 FOR UPDATE',
+        [suggestionId, workspaceId],
       );
       const suggestionRow = suggestionResult.rows[0];
       if (suggestionRow === undefined) {
@@ -225,16 +230,16 @@ export class SuggestionRepository {
            SELECT clock_timestamp() AS persisted_at
          )
          INSERT INTO branches (
-           id, name, discipline, status, diverged_at, origin_suggestion_id,
+           id, workspace_id, name, discipline, status, diverged_at, origin_suggestion_id,
            created_by_stakeholder_id, created_at, updated_at
          )
          SELECT
-           gen_random_uuid(), $1, $2, 'draft', persisted_timestamps.persisted_at, $3, $4,
+           gen_random_uuid(), $1, $2, $3, 'draft', persisted_timestamps.persisted_at, $4, $5,
            persisted_timestamps.persisted_at,
            persisted_timestamps.persisted_at
          FROM persisted_timestamps
          RETURNING *`,
-        [branchName, suggestionRow.discipline, suggestionId, actingStakeholderId],
+        [workspaceId, branchName, suggestionRow.discipline, suggestionId, actingStakeholderId],
       );
       const branchRow = branchResult.rows[0];
       if (branchRow === undefined) {
@@ -274,7 +279,11 @@ export class SuggestionRepository {
    * `not_found`/`not_pending`), UPDATE the suggestion to rejected with decision attribution,
    * INSERT one `suggestion_state_logs` row (pending -> rejected). Never creates a branch.
    */
-  async reject(suggestionId: string, actingStakeholderId: string): Promise<SuggestionRejectResult> {
+  async reject(
+    suggestionId: string,
+    actingStakeholderId: string,
+    workspaceId: string,
+  ): Promise<SuggestionRejectResult> {
     const client = await this.pool.connect();
     let transactionOpen = false;
 
@@ -283,8 +292,8 @@ export class SuggestionRepository {
       transactionOpen = true;
 
       const suggestionResult: QueryResult<SuggestionRow> = await client.query<SuggestionRow>(
-        'SELECT * FROM suggestions WHERE id = $1 FOR UPDATE',
-        [suggestionId],
+        'SELECT * FROM suggestions WHERE id = $1 AND workspace_id = $2 FOR UPDATE',
+        [suggestionId, workspaceId],
       );
       const suggestionRow = suggestionResult.rows[0];
       if (suggestionRow === undefined) {
@@ -327,18 +336,18 @@ export class SuggestionRepository {
 
   /**
    * Lists suggestions ordered oldest-first by `created_at` (G07 SG3), optionally filtered to a
-   * single status. Backs the unauthenticated `GET /suggestions` read, matching this codebase's
-   * existing GET /branches, GET /chunks, GET /edges precedent of unauthenticated reads.
+   * single status, and scoped to `workspaceId` (G11 SG5).
    */
-  async findAll(status?: string): Promise<Suggestion[]> {
+  async findAll(status: string | undefined, workspaceId: string): Promise<Suggestion[]> {
     const result: QueryResult<SuggestionRow> =
       status === undefined
         ? await this.pool.query<SuggestionRow>(
-            'SELECT * FROM suggestions ORDER BY created_at ASC',
+            'SELECT * FROM suggestions WHERE workspace_id = $1 ORDER BY created_at ASC',
+            [workspaceId],
           )
         : await this.pool.query<SuggestionRow>(
-            'SELECT * FROM suggestions WHERE status = $1 ORDER BY created_at ASC',
-            [status],
+            'SELECT * FROM suggestions WHERE workspace_id = $1 AND status = $2 ORDER BY created_at ASC',
+            [workspaceId, status],
           );
 
     return result.rows.map(toSuggestion);

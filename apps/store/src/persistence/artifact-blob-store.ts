@@ -9,10 +9,13 @@ import type { Readable } from 'node:stream';
  */
 export interface ArtifactBlobStore {
   /**
-   * Persists `content` for `artifactId` and returns the URI recorded in the `artifacts` table.
-   * Callers must treat the written blob as immutable afterward (IDEA-59): there is no `update`.
+   * Persists `content` for `artifactId` in `workspaceId` and returns the URI recorded in the
+   * `artifacts` table. Callers must treat the written blob as immutable afterward (IDEA-59):
+   * there is no `update`. The backend must key storage by `{workspaceId}/{artifactId}` (Meridian
+   * IDEA-93) so workspace isolation is achieved through key-prefixing alone, without a separate
+   * bucket/store instance per workspace.
    */
-  write(artifactId: string, content: Buffer): Promise<string>;
+  write(artifactId: string, content: Buffer, workspaceId: string): Promise<string>;
 
   /**
    * Opens a readable stream over the blob at `uri`, for large-file-safe streaming reads (signed

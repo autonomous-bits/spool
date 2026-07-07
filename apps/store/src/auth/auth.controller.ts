@@ -15,10 +15,15 @@ interface LoginRedirect {
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
+  /**
+   * `workspaceId` is optional (Meridian IDEA-92/IDEA-101, G11 SG2): supplying it requests a
+   * workspace-bound token (subject to membership at the callback); omitting it is only valid for
+   * a stakeholder with zero workspace memberships, who receives a workspace-less bootstrap token.
+   */
   @Get('login')
   @Redirect()
-  login(): LoginRedirect {
-    const url = this.authService.buildLoginRedirectUrl();
+  login(@Query('workspaceId') workspaceId?: string): LoginRedirect {
+    const url = this.authService.buildLoginRedirectUrl(workspaceId);
     return { url, statusCode: 302 };
   }
 

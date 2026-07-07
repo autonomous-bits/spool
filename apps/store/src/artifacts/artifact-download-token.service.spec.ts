@@ -16,9 +16,9 @@ function buildConfig(overrides: Partial<ArtifactDownloadConfig> = {}): ArtifactD
 describe('ArtifactDownloadTokenService', () => {
   it('issues a token whose verify() returns the artifactId claim', () => {
     const service = new ArtifactDownloadTokenService(buildConfig());
-    const { token } = service.issue('artifact-1');
+    const { token } = service.issue('artifact-1', 'workspace-1');
 
-    expect(service.verify(token)).toEqual({ artifactId: 'artifact-1' });
+    expect(service.verify(token)).toEqual({ artifactId: 'artifact-1', workspaceId: 'workspace-1' });
   });
 
   it('issues an expiresAt in the future by maxAgeSeconds', () => {
@@ -26,7 +26,7 @@ describe('ArtifactDownloadTokenService', () => {
     try {
       vi.setSystemTime(0);
       const service = new ArtifactDownloadTokenService(buildConfig({ maxAgeSeconds: 300 }));
-      const { expiresAt } = service.issue('artifact-1');
+      const { expiresAt } = service.issue('artifact-1', 'workspace-1');
 
       expect(expiresAt.getTime()).toBe(300_000);
     } finally {
@@ -37,7 +37,7 @@ describe('ArtifactDownloadTokenService', () => {
   it('throws InvalidArtifactDownloadTokenError for a token signed with a different secret', () => {
     const service = new ArtifactDownloadTokenService(buildConfig());
     const otherService = new ArtifactDownloadTokenService(buildConfig({ secret: 'other-secret' }));
-    const { token } = otherService.issue('artifact-1');
+    const { token } = otherService.issue('artifact-1', 'workspace-1');
 
     expect(() => service.verify(token)).toThrow(InvalidArtifactDownloadTokenError);
   });
@@ -47,7 +47,7 @@ describe('ArtifactDownloadTokenService', () => {
     try {
       vi.setSystemTime(0);
       const service = new ArtifactDownloadTokenService(buildConfig({ maxAgeSeconds: 60 }));
-      const { token } = service.issue('artifact-1');
+      const { token } = service.issue('artifact-1', 'workspace-1');
 
       vi.setSystemTime(61_000);
 
@@ -59,7 +59,7 @@ describe('ArtifactDownloadTokenService', () => {
 
   it('throws InvalidArtifactDownloadTokenError for a tampered token', () => {
     const service = new ArtifactDownloadTokenService(buildConfig());
-    const { token } = service.issue('artifact-1');
+    const { token } = service.issue('artifact-1', 'workspace-1');
     const [payload] = token.split('.');
     const tamperedSignature = Buffer.from('tampered-signature').toString('base64url');
 

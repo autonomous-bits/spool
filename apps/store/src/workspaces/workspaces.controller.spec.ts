@@ -89,16 +89,17 @@ describe('WorkspacesController', () => {
       'workspace-1',
       { stakeholderId: 'stakeholder-2' },
       'Bearer signed-token',
+      '00000000-0000-0000-0000-00000000d0fa',
     );
 
     expect(result).toEqual(expected);
     expect(sessionTokenService.verify).toHaveBeenCalledWith('signed-token');
-    expect(service.addMember).toHaveBeenCalledWith('workspace-1', 'stakeholder-2', claims);
+    expect(service.addMember).toHaveBeenCalledWith('workspace-1', 'stakeholder-2', '00000000-0000-0000-0000-00000000d0fa', claims);
   });
 
   it('rejects add-member with a missing Authorization header', async () => {
     await expect(
-      controller.addMember('workspace-1', { stakeholderId: 'stakeholder-2' }, undefined),
+      controller.addMember('workspace-1', { stakeholderId: 'stakeholder-2' }, undefined, '00000000-0000-0000-0000-00000000d0fa'),
     ).rejects.toThrow(UnauthorizedException);
     expect(sessionTokenService.verify).not.toHaveBeenCalled();
     expect(service.addMember).not.toHaveBeenCalled();

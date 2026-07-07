@@ -35,27 +35,31 @@ describe('VerificationSignalsController', () => {
     createdAt: new Date(),
   } satisfies VerificationSignalResponse;
 
+  const WORKSPACE_ID = '00000000-0000-0000-0000-00000000d0fa';
+
   it('parses the body and delegates creation to VerificationSignalsService', async () => {
     vi.mocked(service.create).mockResolvedValue(response);
 
-    const result = await controller.create('branch-1', {
-      verifierName: 'ci-evaluator',
-      status: 'pass',
-    });
+    const result = await controller.create(
+      'branch-1',
+      { verifierName: 'ci-evaluator', status: 'pass' },
+      WORKSPACE_ID,
+    );
 
     expect(result).toEqual(response);
-    expect(service.create).toHaveBeenCalledWith('branch-1', {
-      verifierName: 'ci-evaluator',
-      status: 'pass',
-    });
+    expect(service.create).toHaveBeenCalledWith(
+      'branch-1',
+      { verifierName: 'ci-evaluator', status: 'pass' },
+      WORKSPACE_ID,
+    );
   });
 
   it('delegates GET /branches/:id/verification-signals to VerificationSignalsService', async () => {
     vi.mocked(service.findAllForBranch).mockResolvedValue([response]);
 
-    const result = await controller.findAll('branch-1');
+    const result = await controller.findAll('branch-1', WORKSPACE_ID);
 
     expect(result).toEqual([response]);
-    expect(service.findAllForBranch).toHaveBeenCalledWith('branch-1');
+    expect(service.findAllForBranch).toHaveBeenCalledWith('branch-1', WORKSPACE_ID);
   });
 });

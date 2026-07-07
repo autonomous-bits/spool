@@ -4,6 +4,10 @@
  * never invents an actor identity and intentionally does not re-validate the closed `status`
  * vocabulary itself: the store is authoritative for that invariant, and this tool must surface
  * the store's own validation errors rather than duplicate or pre-empt them.
+ *
+ * G11 SG6 (Meridian IDEA-92/IDEA-98/IDEA-100): `POST /branches/:id/verification-signals` sits on
+ * the delegated, tokenless auth tier, so this tool requires a `workspaceId` input and forwards
+ * it as the store's `X-Workspace-Id` header (not a body field).
  */
 
 /**
@@ -15,6 +19,7 @@ export interface SubmitVerificationSignalInput {
   branchId: string;
   verifierName: string;
   status: string;
+  workspaceId: string;
   reason?: string;
 }
 
@@ -66,6 +71,7 @@ export function parseSubmitVerificationSignalInput(body: unknown): SubmitVerific
   const branchId = requireStringField(record, 'branchId');
   const verifierName = requireStringField(record, 'verifierName');
   const status = requireStringField(record, 'status');
+  const workspaceId = requireStringField(record, 'workspaceId');
 
   const reasonValue = record.reason;
   if (reasonValue !== undefined) {
@@ -76,6 +82,7 @@ export function parseSubmitVerificationSignalInput(body: unknown): SubmitVerific
       branchId,
       verifierName,
       status,
+      workspaceId,
       reason: reasonValue,
     } satisfies SubmitVerificationSignalInput;
   }
@@ -84,6 +91,7 @@ export function parseSubmitVerificationSignalInput(body: unknown): SubmitVerific
     branchId,
     verifierName,
     status,
+    workspaceId,
   } satisfies SubmitVerificationSignalInput;
 }
 
@@ -109,10 +117,10 @@ export async function submitVerificationSignal(
   input: SubmitVerificationSignalInput,
   harnessUrl: string,
 ): Promise<SubmitVerificationSignalResult> {
-  const { branchId, verifierName, status, ...rest } = input;
+  const { branchId, verifierName, status, workspaceId, ...rest } = input;
   const response = await fetch(`${harnessUrl}/branches/${encodeURIComponent(branchId)}/verification-signals`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', 'x-workspace-id': workspaceId },
     body: JSON.stringify({ verifierName, status, ...rest }),
   });
 

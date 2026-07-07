@@ -3,10 +3,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Pool } from 'pg';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { Workspace } from '../../src/domain/workspace.js';
 import { ArtifactRepository } from '../../src/persistence/artifact.repository.js';
 import { BOOTSTRAP_STAKEHOLDER_ID } from '../../src/persistence/bootstrap-stakeholder.js';
 import { LocalFileBlobStore } from '../../src/persistence/local-file-blob-store.js';
+import { WorkspaceRepository } from '../../src/persistence/workspace.repository.js';
 import { setUpTestDatabase, type TestDatabase } from '../support/test-database.js';
+
+const WORKSPACE_ID = '00000000-0000-0000-0000-00000000d0fa';
 
 describe('ArtifactRepository (containerized Postgres)', () => {
   let database: TestDatabase;
@@ -14,10 +18,12 @@ describe('ArtifactRepository (containerized Postgres)', () => {
   let basePath: string;
   let blobStore: LocalFileBlobStore;
   let artifactRepository: ArtifactRepository;
+  let workspaceRepository: WorkspaceRepository;
 
   beforeAll(async () => {
     database = await setUpTestDatabase();
     pool = database.pool;
+    workspaceRepository = new WorkspaceRepository(pool);
   });
 
   afterAll(async () => {
@@ -38,17 +44,18 @@ describe('ArtifactRepository (containerized Postgres)', () => {
     const content = Buffer.from('sample artifact bytes');
 
     const artifact = await artifactRepository.create({
+      workspaceId: WORKSPACE_ID,
       content,
       mimeType: 'text/plain',
       createdByStakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
     });
 
     expect(artifact.mimeType).toBe('text/plain');
-    expect(artifact.uri).toBe(`local-file://${artifact.id}`);
+    expect(artifact.uri).toBe(`local-file://${WORKSPACE_ID}/${artifact.id}`);
 
     const row = await pool.query<{ count: string }>(
-      'SELECT COUNT(*)::text AS count FROM artifacts WHERE id = $1',
-      [artifact.id],
+      'SELECT COUNT(*)::text AS count FROM artifacts WHERE id = $1 AND workspace_id = $2',
+      [artifact.id, WORKSPACE_ID],
     );
     expect(row.rows[0]?.count).toBe('1');
 
@@ -61,29 +68,51 @@ describe('ArtifactRepository (containerized Postgres)', () => {
 
   it('findById round-trips a persisted artifact', async () => {
     const created = await artifactRepository.create({
+      workspaceId: WORKSPACE_ID,
       content: Buffer.from('another artifact'),
       mimeType: 'application/octet-stream',
       createdByStakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
     });
 
-    const found = await artifactRepository.findById(created.id);
+    const found = await artifactRepository.findById(created.id, WORKSPACE_ID);
 
     expect(found).toEqual(created);
   });
 
   it('findById returns an explicit not-found result (undefined) for an unknown id', async () => {
-    const found = await artifactRepository.findById('00000000-0000-0000-0000-00000000dead');
+    const found = await artifactRepository.findById(
+      '00000000-0000-0000-0000-00000000dead',
+      WORKSPACE_ID,
+    );
+
+    expect(found).toBeUndefined();
+  });
+
+  it('findById returns undefined (not the row) when the id exists but in a different workspace', async () => {
+    const otherWorkspace = await workspaceRepository.createWithFirstMember(
+      new Workspace({ name: `artifact-workspace-${Date.now()}`, createdByStakeholderId: BOOTSTRAP_STAKEHOLDER_ID }),
+    );
+    const created = await artifactRepository.create({
+      workspaceId: WORKSPACE_ID,
+      content: Buffer.from('scoped'),
+      mimeType: 'text/plain',
+      createdByStakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
+    });
+
+    const found = await artifactRepository.findById(created.id, otherWorkspace.id);
 
     expect(found).toBeUndefined();
   });
 
   it('never mutates an existing artifact row: each create produces a distinct id/uri', async () => {
     const first = await artifactRepository.create({
+      workspaceId: WORKSPACE_ID,
       content: Buffer.from('version one'),
       mimeType: 'text/plain',
       createdByStakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
     });
     const second = await artifactRepository.create({
+      workspaceId: WORKSPACE_ID,
       content: Buffer.from('version two'),
       mimeType: 'text/plain',
       createdByStakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
@@ -92,7 +121,7 @@ describe('ArtifactRepository (containerized Postgres)', () => {
     expect(second.id).not.toBe(first.id);
     expect(second.uri).not.toBe(first.uri);
 
-    const firstStillReadable = await artifactRepository.findById(first.id);
+    const firstStillReadable = await artifactRepository.findById(first.id, WORKSPACE_ID);
     expect(firstStillReadable?.uri).toBe(first.uri);
   });
 });

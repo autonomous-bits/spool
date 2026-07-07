@@ -4,6 +4,7 @@ import {
   Controller,
   Delete,
   Get,
+  Headers,
   HttpCode,
   HttpStatus,
   Param,
@@ -38,18 +39,22 @@ export class ArtifactsController {
   constructor(private readonly artifacts: ArtifactsService) {}
 
   @Post('artifacts')
-  async create(@Body() body: unknown): Promise<ArtifactResponse> {
+  async create(
+    @Body() body: unknown,
+    @Headers('x-workspace-id') workspaceId: string | undefined,
+  ): Promise<ArtifactResponse> {
     const request = parseCreateArtifactRequest(body);
-    return this.artifacts.createArtifact(request);
+    return this.artifacts.createArtifact(request, workspaceId);
   }
 
   @Post('chunks/:label/artifacts')
   async attach(
     @Param('label') label: string,
     @Body() body: unknown,
+    @Headers('x-workspace-id') workspaceId: string | undefined,
   ): Promise<ChunkArtifactResponse> {
     const request = parseCreateChunkArtifactRequest(body);
-    return this.artifacts.attachArtifactToChunk(label, request);
+    return this.artifacts.attachArtifactToChunk(label, request, workspaceId);
   }
 
   @Delete('chunks/:label/artifacts/:artifactId')
@@ -59,6 +64,7 @@ export class ArtifactsController {
     @Param('artifactId') artifactId: string,
     @Query('branchId') branchId: unknown,
     @Query('stakeholderId') stakeholderId: unknown,
+    @Headers('x-workspace-id') workspaceId: string | undefined,
   ): Promise<ChunkArtifactResponse> {
     const resolvedBranchId = requireQueryString(branchId, 'branchId');
     const resolvedStakeholderId = requireQueryString(stakeholderId, 'stakeholderId');
@@ -67,6 +73,7 @@ export class ArtifactsController {
       artifactId,
       resolvedBranchId,
       resolvedStakeholderId,
+      workspaceId,
     );
   }
 
@@ -74,14 +81,27 @@ export class ArtifactsController {
   async listEffective(
     @Param('label') label: string,
     @Query('branchId') branchId: unknown,
+    @Query('stakeholderId') stakeholderId: unknown,
+    @Headers('x-workspace-id') workspaceId: string | undefined,
   ): Promise<EffectiveChunkArtifact[]> {
     const resolvedBranchId = optionalQueryString(branchId, 'branchId');
-    return this.artifacts.getEffectiveArtifactsForChunk(label, resolvedBranchId);
+    const resolvedStakeholderId = requireQueryString(stakeholderId, 'stakeholderId');
+    return this.artifacts.getEffectiveArtifactsForChunk(
+      label,
+      resolvedBranchId,
+      resolvedStakeholderId,
+      workspaceId,
+    );
   }
 
   @Get('artifacts/:id/download-token')
-  async downloadToken(@Param('id') id: string): Promise<DownloadTokenResponse> {
-    const issued = await this.artifacts.issueDownloadToken(id);
+  async downloadToken(
+    @Param('id') id: string,
+    @Query('stakeholderId') stakeholderId: unknown,
+    @Headers('x-workspace-id') workspaceId: string | undefined,
+  ): Promise<DownloadTokenResponse> {
+    const resolvedStakeholderId = requireQueryString(stakeholderId, 'stakeholderId');
+    const issued = await this.artifacts.issueDownloadToken(id, resolvedStakeholderId, workspaceId);
     return toDownloadTokenResponse(issued);
   }
 

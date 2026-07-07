@@ -11,6 +11,7 @@ import type { EdgeType } from '../domain/types/vocabulary/edge-type.js';
  */
 export interface EdgeResponse {
   id: string;
+  workspaceId: string;
   fromChunkLabel: string;
   toChunkLabel: string;
   type: EdgeType;
@@ -28,6 +29,7 @@ export interface EdgeResponse {
 export function toEdgeResponse(edge: Edge): EdgeResponse {
   return {
     id: edge.id,
+    workspaceId: edge.workspaceId,
     fromChunkLabel: edge.fromChunkLabel,
     toChunkLabel: edge.toChunkLabel,
     type: edge.type,

@@ -1,5 +1,6 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { BranchLifecycleError } from '../domain/branch-lifecycle.js';
+import { WorkspaceScopeViolationError } from '../domain/workspace-scope.js';
 import { VerificationSignalRepository } from '../persistence/verification-signal.repository.js';
 import type { CreateVerificationSignalRequest } from './create-verification-signal-request.dto.js';
 import {
@@ -13,10 +14,33 @@ import {
  * persistence layer. Submission is deliberately unauthenticated (mirrors `POST /suggestions`
  * precedent): IDEA-21's "agents, tools, or other humans" is broader than the registered-
  * stakeholder set, so there is no ActorContext/session-token to verify here.
+ *
+ * G11 SG5 workspace scoping (interim resolution, Meridian gap-report IDEA-103): verification
+ * signals have no `stakeholderId`/caller-identity concept (`verifierName` is intentionally
+ * broad free text per IDEA-21), so neither the delegated tier's membership check nor the token
+ * tier's claim check applies here. Instead this service only asserts the `X-Workspace-Id`
+ * header is present; the actual scope enforcement -- comparing it against the target branch's
+ * own `workspace_id` -- happens in `VerificationSignalRepository`, which folds the comparison
+ * into the same atomic transaction/lookup as the rest of `create`/`findByBranchId`, and reuses
+ * the existing `not_found` result kind so a mismatched workspace never leaks whether the branch
+ * id exists.
  */
 @Injectable()
 export class VerificationSignalsService {
   constructor(private readonly verificationSignalRepository: VerificationSignalRepository) {}
+
+  private assertWorkspaceHeaderPresent(headerWorkspaceId: string | null | undefined): string {
+    if (
+      headerWorkspaceId === null ||
+      headerWorkspaceId === undefined ||
+      headerWorkspaceId.trim().length === 0
+    ) {
+      throw new ForbiddenException(
+        new WorkspaceScopeViolationError('missing X-Workspace-Id header').message,
+      );
+    }
+    return headerWorkspaceId;
+  }
 
   /**
    * Submits a verification signal against a branch. Only allowed while the branch is
@@ -25,9 +49,13 @@ export class VerificationSignalsService {
   async create(
     branchId: string,
     request: CreateVerificationSignalRequest,
+    headerWorkspaceId: string | null | undefined,
   ): Promise<VerificationSignalResponse> {
+    const workspaceId = this.assertWorkspaceHeaderPresent(headerWorkspaceId);
+
     const result = await this.verificationSignalRepository.create({
       branchId,
+      workspaceId,
       verifierName: request.verifierName,
       status: request.status,
       ...(request.reason === undefined ? {} : { reason: request.reason }),
@@ -49,11 +77,16 @@ export class VerificationSignalsService {
 
   /**
    * Lists verification signals for a branch ordered oldest-first (G09 SG1). Deliberately
-   * unauthenticated, matching this codebase's existing GET /branches, GET /suggestions
-   * precedent of unauthenticated reads.
+   * unauthenticated beyond the workspace-header check, matching this codebase's existing
+   * GET /branches, GET /suggestions precedent of unauthenticated reads.
    */
-  async findAllForBranch(branchId: string): Promise<VerificationSignalResponse[]> {
-    const signals = await this.verificationSignalRepository.findByBranchId(branchId);
+  async findAllForBranch(
+    branchId: string,
+    headerWorkspaceId: string | null | undefined,
+  ): Promise<VerificationSignalResponse[]> {
+    const workspaceId = this.assertWorkspaceHeaderPresent(headerWorkspaceId);
+
+    const signals = await this.verificationSignalRepository.findByBranchId(branchId, workspaceId);
     return signals.map(toVerificationSignalResponse);
   }
 }

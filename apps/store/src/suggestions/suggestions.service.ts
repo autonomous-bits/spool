@@ -1,14 +1,22 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import type { SessionTokenClaims } from '../auth/session-token.service.js';
 import { assertIsHumanActor } from '../domain/branch-lifecycle.js';
 import { Suggestion } from '../domain/suggestion.js';
 import type { HumanActorContext } from '../domain/types/actor/actor-context.js';
 import { isDiscipline } from '../domain/types/vocabulary/discipline.js';
 import { isSuggestionStatus } from '../domain/types/vocabulary/suggestion-status.js';
+import { assertWorkspaceScope, WorkspaceScopeViolationError } from '../domain/workspace-scope.js';
 import type { BranchResponse } from '../branches/branch-response.dto.js';
 import { toBranchResponse } from '../branches/branch-response.dto.js';
 import { StakeholderRepository } from '../persistence/stakeholder.repository.js';
 import { SuggestionRepository } from '../persistence/suggestion.repository.js';
+import { WorkspaceRepository } from '../persistence/workspace.repository.js';
 import { toSuggestionResponse, type SuggestionResponse } from './suggestion-response.dto.js';
 import type { AcceptSuggestionRequest } from './accept-suggestion-request.dto.js';
 import type { CreateSuggestionRequest } from './create-suggestion-request.dto.js';
@@ -32,18 +40,70 @@ function isPgErrorWithCode(error: unknown, code: string): boolean {
  * (Meridian IDEA-9/IDEA-75): the server always assigns `submittedByActorKind: 'delegated'`,
  * never trusting a client-supplied value. Acceptance is human-only (Meridian IDEA-75): the
  * server always assigns `kind: 'human'` from verified session-token claims.
+ *
+ * G11 SG5 (Meridian IDEA-98/IDEA-100): `create`/`findAll`/`findById` sit on the delegated,
+ * tokenless auth tier (the caller-declared `stakeholderId` is validated against
+ * `workspace_memberships`); `accept`/`reject` are already token-gated (human-only), so they sit
+ * on the token tier and additionally validate `X-Workspace-Id` against the token's
+ * `workspaceId` claim, mirroring `BranchesService`.
  */
 @Injectable()
 export class SuggestionsService {
   constructor(
     private readonly suggestionRepository: SuggestionRepository,
     private readonly stakeholderRepository: StakeholderRepository,
+    private readonly workspaceRepository: WorkspaceRepository,
   ) {}
 
-  async create(request: CreateSuggestionRequest): Promise<SuggestionResponse> {
+  private async assertDelegatedScope(
+    headerWorkspaceId: string | null | undefined,
+    stakeholderId: string,
+  ): Promise<string> {
+    const isMember =
+      headerWorkspaceId === null ||
+      headerWorkspaceId === undefined ||
+      headerWorkspaceId.trim().length === 0
+        ? false
+        : await this.workspaceRepository.isMember(headerWorkspaceId, stakeholderId);
+
+    try {
+      assertWorkspaceScope(headerWorkspaceId, { tier: 'delegated', isMember });
+    } catch (error) {
+      if (error instanceof WorkspaceScopeViolationError) {
+        throw new ForbiddenException(error.message);
+      }
+      throw error;
+    }
+
+    return headerWorkspaceId;
+  }
+
+  private assertTokenScope(
+    headerWorkspaceId: string | null | undefined,
+    claims: SessionTokenClaims,
+  ): string {
+    try {
+      assertWorkspaceScope(headerWorkspaceId, { tier: 'token', workspaceIdClaim: claims.workspaceId });
+    } catch (error) {
+      if (error instanceof WorkspaceScopeViolationError) {
+        throw new ForbiddenException(error.message);
+      }
+      throw error;
+    }
+
+    return headerWorkspaceId;
+  }
+
+  async create(
+    request: CreateSuggestionRequest,
+    headerWorkspaceId: string | null | undefined,
+  ): Promise<SuggestionResponse> {
+    const workspaceId = await this.assertDelegatedScope(headerWorkspaceId, request.stakeholderId);
+
     let suggestion: Suggestion;
     try {
       suggestion = new Suggestion({
+        workspaceId,
         variant: request.variant,
         discipline: request.discipline,
         submittedByStakeholderId: request.stakeholderId,
@@ -76,7 +136,10 @@ export class SuggestionsService {
     suggestionId: string,
     request: AcceptSuggestionRequest,
     claims: SessionTokenClaims,
+    headerWorkspaceId: string | null | undefined,
   ): Promise<BranchResponse> {
+    const workspaceId = this.assertTokenScope(headerWorkspaceId, claims);
+
     const stakeholder = await this.stakeholderRepository.findById(claims.stakeholderId);
     if (stakeholder === undefined) {
       throw new BadRequestException(
@@ -93,7 +156,12 @@ export class SuggestionsService {
 
     let result;
     try {
-      result = await this.suggestionRepository.accept(suggestionId, request.name, claims.stakeholderId);
+      result = await this.suggestionRepository.accept(
+        suggestionId,
+        request.name,
+        claims.stakeholderId,
+        workspaceId,
+      );
     } catch (error) {
       if (isPgErrorWithCode(error, UNIQUE_VIOLATION)) {
         throw new BadRequestException(`Branch name already active: ${request.name}`);
@@ -118,7 +186,13 @@ export class SuggestionsService {
    * session token (Meridian IDEA-75: human-only), matching `accept`'s auth requirements. Never
    * creates a branch.
    */
-  async reject(suggestionId: string, claims: SessionTokenClaims): Promise<SuggestionResponse> {
+  async reject(
+    suggestionId: string,
+    claims: SessionTokenClaims,
+    headerWorkspaceId: string | null | undefined,
+  ): Promise<SuggestionResponse> {
+    const workspaceId = this.assertTokenScope(headerWorkspaceId, claims);
+
     const stakeholder = await this.stakeholderRepository.findById(claims.stakeholderId);
     if (stakeholder === undefined) {
       throw new BadRequestException(
@@ -133,7 +207,11 @@ export class SuggestionsService {
     } satisfies HumanActorContext;
     assertIsHumanActor(actor);
 
-    const result = await this.suggestionRepository.reject(suggestionId, claims.stakeholderId);
+    const result = await this.suggestionRepository.reject(
+      suggestionId,
+      claims.stakeholderId,
+      workspaceId,
+    );
 
     switch (result.kind) {
       case 'not_found':
@@ -143,7 +221,7 @@ export class SuggestionsService {
           `Invalid suggestion lifecycle operation: expected pending suggestion, received a different status`,
         );
       case 'rejected': {
-        const rejected = await this.suggestionRepository.findById(suggestionId);
+        const rejected = await this.suggestionRepository.findById(suggestionId, workspaceId);
         if (rejected === undefined) {
           throw new Error(
             `SuggestionsService.reject: suggestion ${suggestionId} vanished after rejection`,
@@ -155,11 +233,17 @@ export class SuggestionsService {
   }
 
   /**
-   * Reads a single suggestion by id (G07 SG3). Deliberately unauthenticated, matching this
-   * codebase's existing GET /branches/:id, GET /chunks/:id, GET /edges/:id precedent.
+   * Reads a single suggestion by id (G07 SG3). G11 SG5 moves this onto the delegated auth tier:
+   * the caller-declared `stakeholderId` must be a member of the header workspace.
    */
-  async findById(suggestionId: string): Promise<SuggestionResponse> {
-    const suggestion = await this.suggestionRepository.findById(suggestionId);
+  async findById(
+    suggestionId: string,
+    stakeholderId: string,
+    headerWorkspaceId: string | null | undefined,
+  ): Promise<SuggestionResponse> {
+    const workspaceId = await this.assertDelegatedScope(headerWorkspaceId, stakeholderId);
+
+    const suggestion = await this.suggestionRepository.findById(suggestionId, workspaceId);
     if (suggestion === undefined) {
       throw new NotFoundException(`Suggestion ${suggestionId} not found`);
     }
@@ -168,14 +252,20 @@ export class SuggestionsService {
 
   /**
    * Lists suggestions, optionally filtered to a single status, ordered oldest-first (G07 SG3).
-   * Deliberately unauthenticated, matching this codebase's existing GET /branches, GET /chunks,
-   * GET /edges precedent.
+   * G11 SG5 moves this onto the delegated auth tier: the caller-declared `stakeholderId` must be
+   * a member of the header workspace.
    */
-  async findAll(status?: string): Promise<SuggestionResponse[]> {
+  async findAll(
+    status: string | undefined,
+    stakeholderId: string,
+    headerWorkspaceId: string | null | undefined,
+  ): Promise<SuggestionResponse[]> {
+    const workspaceId = await this.assertDelegatedScope(headerWorkspaceId, stakeholderId);
+
     if (status !== undefined && !isSuggestionStatus(status)) {
       throw new BadRequestException(`Invalid status filter: ${status}`);
     }
-    const suggestions = await this.suggestionRepository.findAll(status);
+    const suggestions = await this.suggestionRepository.findAll(status, workspaceId);
     return suggestions.map(toSuggestionResponse);
   }
 }

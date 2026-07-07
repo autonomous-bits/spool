@@ -13,6 +13,7 @@ describe('parseUploadArtifactInput', () => {
     content: Buffer.from('hello world').toString('base64'),
     mimeType: 'text/plain',
     stakeholderId: 'stakeholder-1',
+    workspaceId: 'workspace-1',
   };
 
   it('accepts a well-formed body', () => {
@@ -24,7 +25,7 @@ describe('parseUploadArtifactInput', () => {
     expect(() => parseUploadArtifactInput(null)).toThrow(UploadArtifactValidationError);
   });
 
-  it.each(['content', 'mimeType', 'stakeholderId'])('rejects a missing %s, never inventing one', (field) => {
+  it.each(['content', 'mimeType', 'stakeholderId', 'workspaceId'])('rejects a missing %s, never inventing one', (field) => {
     const body: Record<string, unknown> = { ...validBody };
     Reflect.deleteProperty(body, field);
     expect(() => parseUploadArtifactInput(body)).toThrow(new RegExp(field));
@@ -64,6 +65,7 @@ describe('uploadArtifact', () => {
     content: Buffer.from('hello world').toString('base64'),
     mimeType: 'text/plain',
     stakeholderId: 'stakeholder-1',
+    workspaceId: 'workspace-1',
   };
 
   afterEach(() => {
@@ -87,10 +89,11 @@ describe('uploadArtifact', () => {
 
     const result = await uploadArtifact(input, 'http://harness.test');
 
+    const { workspaceId, ...expectedBody } = input;
     expect(fetchMock).toHaveBeenCalledWith('http://harness.test/artifacts', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(input),
+      headers: { 'content-type': 'application/json', 'x-workspace-id': workspaceId },
+      body: JSON.stringify(expectedBody),
     });
     expect(result).toEqual(expected);
     expect(result.id).toBe('artifact-1');

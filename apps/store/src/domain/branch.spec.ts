@@ -4,6 +4,7 @@ import { DivergencePoint } from './divergence-point.js';
 
 function validProps(overrides: Partial<BranchProps> = {}): BranchProps {
   return {
+    workspaceId: '00000000-0000-0000-0000-00000000d0fa',
     name: 'feature/branch-authoring',
     discipline: 'product',
     createdByStakeholderId: '00000000-0000-0000-0000-000000000001',
@@ -67,6 +68,10 @@ describe('Branch', () => {
 
   it.each(['', '   '])('rejects blank createdByStakeholderId %j', (createdByStakeholderId) => {
     expect(() => new Branch(validProps({ createdByStakeholderId }))).toThrow(TypeError);
+  });
+
+  it.each(['', '   '])('rejects blank workspaceId %j', (workspaceId) => {
+    expect(() => new Branch(validProps({ workspaceId }))).toThrow(TypeError);
   });
 
   it.each(['submitted', 'verified', 'merged'])(

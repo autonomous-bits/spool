@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -17,8 +18,10 @@ import {
 import { Branch } from '../domain/branch.js';
 import type { HumanActorContext } from '../domain/types/actor/actor-context.js';
 import { isDiscipline } from '../domain/types/vocabulary/discipline.js';
+import { assertWorkspaceScope, WorkspaceScopeViolationError } from '../domain/workspace-scope.js';
 import { BranchRepository } from '../persistence/branch.repository.js';
 import { StakeholderRepository } from '../persistence/stakeholder.repository.js';
+import { WorkspaceRepository } from '../persistence/workspace.repository.js';
 import { toBranchResponse, type BranchResponse } from './branch-response.dto.js';
 import type { CreateBranchRequest } from './create-branch-request.dto.js';
 
@@ -43,18 +46,65 @@ function toLifecycleConflict(error: BranchLifecycleError): ConflictException {
 /**
  * Application service for branch creation, submission, and retrieval (Meridian IDEA-52/IDEA-34),
  * sitting between the HTTP controller and the persistence/domain layers.
+ *
+ * G11 SG4 (Meridian IDEA-98/IDEA-100, two-tier auth): `create` and `findById` sit on the
+ * delegated, tokenless tier (X-Workspace-Id validated against a workspace_memberships row for the
+ * caller-declared stakeholderId). `submit`/`verify`/`reject`/`merge` already require a human
+ * session token, so they additionally validate X-Workspace-Id against the token's workspaceId
+ * claim (the token tier).
  */
 @Injectable()
 export class BranchesService {
   constructor(
     private readonly branchRepository: BranchRepository,
     private readonly stakeholderRepository: StakeholderRepository,
+    private readonly workspaceRepository: WorkspaceRepository,
   ) {}
 
-  async create(request: CreateBranchRequest): Promise<BranchResponse> {
+  private async assertDelegatedScope(
+    headerWorkspaceId: string | null | undefined,
+    stakeholderId: string,
+  ): Promise<string> {
+    const isMember =
+      headerWorkspaceId === null || headerWorkspaceId === undefined || headerWorkspaceId.trim().length === 0
+        ? false
+        : await this.workspaceRepository.isMember(headerWorkspaceId, stakeholderId);
+
+    try {
+      assertWorkspaceScope(headerWorkspaceId, { tier: 'delegated', isMember });
+    } catch (error) {
+      if (error instanceof WorkspaceScopeViolationError) {
+        throw new ForbiddenException(error.message);
+      }
+      throw error;
+    }
+
+    return headerWorkspaceId;
+  }
+
+  private assertTokenScope(headerWorkspaceId: string | null | undefined, claims: SessionTokenClaims): string {
+    try {
+      assertWorkspaceScope(headerWorkspaceId, { tier: 'token', workspaceIdClaim: claims.workspaceId });
+    } catch (error) {
+      if (error instanceof WorkspaceScopeViolationError) {
+        throw new ForbiddenException(error.message);
+      }
+      throw error;
+    }
+
+    return headerWorkspaceId;
+  }
+
+  async create(
+    request: CreateBranchRequest,
+    headerWorkspaceId: string | null | undefined,
+  ): Promise<BranchResponse> {
+    const workspaceId = await this.assertDelegatedScope(headerWorkspaceId, request.stakeholderId);
+
     let branch: Branch;
     try {
       branch = new Branch({
+        workspaceId,
         name: request.name,
         discipline: request.discipline,
         createdByStakeholderId: request.stakeholderId,
@@ -79,7 +129,13 @@ export class BranchesService {
     }
   }
 
-  async submit(branchId: string, claims: SessionTokenClaims): Promise<BranchResponse> {
+  async submit(
+    branchId: string,
+    headerWorkspaceId: string | null | undefined,
+    claims: SessionTokenClaims,
+  ): Promise<BranchResponse> {
+    const workspaceId = this.assertTokenScope(headerWorkspaceId, claims);
+
     const stakeholder = await this.stakeholderRepository.findById(claims.stakeholderId);
     if (stakeholder === undefined || !isDiscipline(stakeholder.discipline)) {
       throw new BadRequestException(
@@ -93,7 +149,7 @@ export class BranchesService {
       discipline: stakeholder.discipline,
     } satisfies HumanActorContext;
 
-    const branch = await this.branchRepository.findById(branchId);
+    const branch = await this.branchRepository.findById(branchId, workspaceId);
     if (branch === undefined) {
       throw new NotFoundException(`Branch ${branchId} not found`);
     }
@@ -109,7 +165,7 @@ export class BranchesService {
       throw error;
     }
 
-    const submitted = await this.branchRepository.submit(branchId);
+    const submitted = await this.branchRepository.submit(branchId, workspaceId);
     if (submitted === undefined) {
       throw new ConflictException(NON_DRAFT_BRANCH_MESSAGE);
     }
@@ -117,8 +173,13 @@ export class BranchesService {
     return toBranchResponse(submitted);
   }
 
-  async verify(branchId: string, claims: SessionTokenClaims): Promise<BranchResponse> {
-    const actor = await this.resolveActorForVerification(branchId, claims);
+  async verify(
+    branchId: string,
+    headerWorkspaceId: string | null | undefined,
+    claims: SessionTokenClaims,
+  ): Promise<BranchResponse> {
+    const workspaceId = this.assertTokenScope(headerWorkspaceId, claims);
+    const actor = await this.resolveActorForVerification(branchId, workspaceId, claims);
 
     try {
       assertIsHumanActor(actor);
@@ -130,7 +191,7 @@ export class BranchesService {
       throw error;
     }
 
-    const verified = await this.branchRepository.verify(branchId);
+    const verified = await this.branchRepository.verify(branchId, workspaceId);
     if (verified === undefined) {
       throw new ConflictException(
         'Invalid branch lifecycle operation: expected submitted branch, received a different status',
@@ -140,8 +201,13 @@ export class BranchesService {
     return toBranchResponse(verified);
   }
 
-  async reject(branchId: string, claims: SessionTokenClaims): Promise<BranchResponse> {
-    const actor = await this.resolveActorForVerification(branchId, claims);
+  async reject(
+    branchId: string,
+    headerWorkspaceId: string | null | undefined,
+    claims: SessionTokenClaims,
+  ): Promise<BranchResponse> {
+    const workspaceId = this.assertTokenScope(headerWorkspaceId, claims);
+    const actor = await this.resolveActorForVerification(branchId, workspaceId, claims);
 
     try {
       assertIsHumanActor(actor);
@@ -153,7 +219,7 @@ export class BranchesService {
       throw error;
     }
 
-    const rejected = await this.branchRepository.reject(branchId);
+    const rejected = await this.branchRepository.reject(branchId, workspaceId);
     if (rejected === undefined) {
       throw new ConflictException(
         'Invalid branch lifecycle operation: expected submitted or verified branch, received a different status',
@@ -170,8 +236,13 @@ export class BranchesService {
    * resolved "merging authority" interpretation of IDEA-11: any human stakeholder may merge,
    * regardless of discipline).
    */
-  async merge(branchId: string, claims: SessionTokenClaims): Promise<BranchResponse> {
-    const actor = await this.resolveActorForVerification(branchId, claims);
+  async merge(
+    branchId: string,
+    headerWorkspaceId: string | null | undefined,
+    claims: SessionTokenClaims,
+  ): Promise<BranchResponse> {
+    const workspaceId = this.assertTokenScope(headerWorkspaceId, claims);
+    const actor = await this.resolveActorForVerification(branchId, workspaceId, claims);
 
     try {
       assertIsHumanActor(actor);
@@ -183,7 +254,7 @@ export class BranchesService {
       throw error;
     }
 
-    const result = await this.branchRepository.merge(branchId, claims.stakeholderId);
+    const result = await this.branchRepository.merge(branchId, workspaceId, claims.stakeholderId);
     if (result === undefined) {
       throw new ConflictException(
         'Invalid branch lifecycle operation: expected verified branch, received a different status',
@@ -204,9 +275,10 @@ export class BranchesService {
    */
   private async resolveActorForVerification(
     branchId: string,
+    workspaceId: string,
     claims: SessionTokenClaims,
   ): Promise<HumanActorContext & { branch: Branch }> {
-    const branch = await this.branchRepository.findById(branchId);
+    const branch = await this.branchRepository.findById(branchId, workspaceId);
     if (branch === undefined) {
       throw new NotFoundException(`Branch ${branchId} not found`);
     }
@@ -227,8 +299,14 @@ export class BranchesService {
     return { ...actor, branch };
   }
 
-  async findById(id: string): Promise<BranchResponse> {
-    const branch = await this.branchRepository.findById(id);
+  async findById(
+    id: string,
+    headerWorkspaceId: string | null | undefined,
+    stakeholderId: string,
+  ): Promise<BranchResponse> {
+    const workspaceId = await this.assertDelegatedScope(headerWorkspaceId, stakeholderId);
+
+    const branch = await this.branchRepository.findById(id, workspaceId);
     if (branch === undefined) {
       throw new NotFoundException(`Branch ${id} not found`);
     }

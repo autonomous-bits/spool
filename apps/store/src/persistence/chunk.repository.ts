@@ -6,6 +6,7 @@ import { PG_POOL } from './pg-pool.token.js';
 
 interface ChunkRow extends QueryResultRow {
   id: string;
+  workspace_id: string;
   label: string;
   content: string;
   discipline: string;
@@ -23,6 +24,7 @@ interface ChunkRow extends QueryResultRow {
 function toChunk(row: ChunkRow): Chunk {
   return new Chunk({
     id: row.id,
+    workspaceId: row.workspace_id,
     label: row.label,
     content: row.content,
     discipline: row.discipline as Chunk['discipline'],
@@ -47,14 +49,15 @@ function createNonDraftBranchConflict(branchId: string): ConflictException {
 async function insertChunk(queryable: Queryable, chunk: Chunk): Promise<Chunk> {
   const result: QueryResult<ChunkRow> = await queryable.query<ChunkRow>(
     `INSERT INTO chunks (
-       id, label, content, discipline, chunk_type, context_kind, status,
+       id, workspace_id, label, content, discipline, chunk_type, context_kind, status,
        branch_id, origin_branch_id,
        created_by_stakeholder_id, updated_by_stakeholder_id,
        created_at, updated_at
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
      RETURNING *`,
     [
       chunk.id,
+      chunk.workspaceId,
       chunk.label,
       chunk.content,
       chunk.discipline,
@@ -138,13 +141,14 @@ export class ChunkRepository {
   }
 
   /**
-   * Looks up a chunk by id. Returns `undefined` as an explicit not-found result rather than
-   * throwing, so callers can distinguish "not found" from an actual persistence error.
+   * Looks up a chunk by id, scoped to a workspace (Meridian IDEA-98/IDEA-100, G11 SG4). A
+   * cross-workspace id is indistinguishable from "does not exist" (returns `undefined`, not a
+   * scope violation) so a lookup can never leak whether an id exists in another workspace.
    */
-  async findById(id: string): Promise<Chunk | undefined> {
+  async findById(id: string, workspaceId: string): Promise<Chunk | undefined> {
     const result: QueryResult<ChunkRow> = await this.pool.query<ChunkRow>(
-      'SELECT * FROM chunks WHERE id = $1',
-      [id],
+      'SELECT * FROM chunks WHERE id = $1 AND workspace_id = $2',
+      [id, workspaceId],
     );
 
     const row = result.rows[0];
@@ -157,18 +161,36 @@ export class ChunkRepository {
    * validation (Meridian IDEA-36/IDEA-37); it is not a generic branch-overlay/UNION read, which
    * remains out of scope until a future goal. Returns `undefined` as an explicit not-found result
    * rather than throwing.
+   *
+   * `workspaceId` is optional (G11 SG4/SG5): every caller (`ChunksService`, `EdgesService`,
+   * `ArtifactsService`) now passes it, adding an `AND workspace_id = $n` filter so labels only
+   * collide within the same workspace. It stays optional at the type level only to avoid
+   * breaking any as-yet-unwritten caller; there is no remaining first-party caller that omits it.
    */
-  async findByLabel(label: string, branchId: string | undefined): Promise<Chunk | undefined> {
-    const result: QueryResult<ChunkRow> =
-      branchId === undefined
-        ? await this.pool.query<ChunkRow>(
-            'SELECT * FROM chunks WHERE label = $1 AND branch_id IS NULL',
-            [label],
-          )
-        : await this.pool.query<ChunkRow>(
-            'SELECT * FROM chunks WHERE label = $1 AND branch_id = $2',
-            [label, branchId],
-          );
+  async findByLabel(
+    label: string,
+    branchId: string | undefined,
+    workspaceId?: string,
+  ): Promise<Chunk | undefined> {
+    const conditions = ['label = $1'];
+    const params: unknown[] = [label];
+
+    if (branchId === undefined) {
+      conditions.push('branch_id IS NULL');
+    } else {
+      params.push(branchId);
+      conditions.push(`branch_id = $${params.length}`);
+    }
+
+    if (workspaceId !== undefined) {
+      params.push(workspaceId);
+      conditions.push(`workspace_id = $${params.length}`);
+    }
+
+    const result: QueryResult<ChunkRow> = await this.pool.query<ChunkRow>(
+      `SELECT * FROM chunks WHERE ${conditions.join(' AND ')}`,
+      params,
+    );
 
     const row = result.rows[0];
     return row === undefined ? undefined : toChunk(row);

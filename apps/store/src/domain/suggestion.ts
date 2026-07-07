@@ -19,6 +19,7 @@ export type SuggestionVariant =
 
 export interface SuggestionProps {
   id?: string;
+  workspaceId: string;
   variant: SuggestionVariant;
   discipline: Discipline;
   status?: SuggestionStatus;
@@ -68,6 +69,7 @@ function validateVariant(variant: SuggestionVariant): SuggestionVariant {
  */
 export class Suggestion {
   readonly id: string;
+  readonly workspaceId: string;
   readonly variant: SuggestionVariant;
   readonly discipline: Discipline;
   readonly status: SuggestionStatus;
@@ -79,6 +81,7 @@ export class Suggestion {
   readonly updatedAt: Date;
 
   constructor(props: SuggestionProps) {
+    this.workspaceId = requireNonBlank(props.workspaceId, 'workspaceId');
     this.variant = validateVariant(props.variant);
     this.discipline = parseDiscipline(props.discipline);
 

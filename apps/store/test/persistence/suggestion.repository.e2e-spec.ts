@@ -1,14 +1,19 @@
 import type { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Suggestion } from '../../src/domain/suggestion.js';
+import { Workspace } from '../../src/domain/workspace.js';
 import { SuggestionRepository } from '../../src/persistence/suggestion.repository.js';
 import { BOOTSTRAP_STAKEHOLDER_ID } from '../../src/persistence/bootstrap-stakeholder.js';
+import { WorkspaceRepository } from '../../src/persistence/workspace.repository.js';
 import { setUpTestDatabase, type TestDatabase } from '../support/test-database.js';
+
+const WORKSPACE_ID = '00000000-0000-0000-0000-00000000d0fa';
 
 function buildChunkSuggestion(
   overrides: Partial<ConstructorParameters<typeof Suggestion>[0]> = {},
 ): Suggestion {
   return new Suggestion({
+    workspaceId: WORKSPACE_ID,
     variant: {
       kind: 'chunk',
       label: `suggestion-${Math.random().toString(36).slice(2, 10)}`,
@@ -25,6 +30,7 @@ function buildEdgeSuggestion(
   overrides: Partial<ConstructorParameters<typeof Suggestion>[0]> = {},
 ): Suggestion {
   return new Suggestion({
+    workspaceId: WORKSPACE_ID,
     variant: {
       kind: 'edge',
       fromChunkLabel: `from-${Math.random().toString(36).slice(2, 10)}`,
@@ -110,7 +116,7 @@ describe('SuggestionRepository (containerized Postgres)', () => {
     const suggestion = buildChunkSuggestion({ discipline: 'security' });
 
     const created = await suggestionRepository.create(suggestion);
-    const found = await suggestionRepository.findById(created.id);
+    const found = await suggestionRepository.findById(created.id, WORKSPACE_ID);
 
     expect(found).toBeDefined();
     expect(found).toEqual(created);
@@ -120,14 +126,29 @@ describe('SuggestionRepository (containerized Postgres)', () => {
     const suggestion = buildEdgeSuggestion({ discipline: 'design' });
 
     const created = await suggestionRepository.create(suggestion);
-    const found = await suggestionRepository.findById(created.id);
+    const found = await suggestionRepository.findById(created.id, WORKSPACE_ID);
 
     expect(found).toBeDefined();
     expect(found).toEqual(created);
   });
 
   it('findById returns an explicit not-found result (undefined) for an unknown id', async () => {
-    const found = await suggestionRepository.findById('00000000-0000-0000-0000-00000000dead');
+    const found = await suggestionRepository.findById('00000000-0000-0000-0000-00000000dead', WORKSPACE_ID);
+
+    expect(found).toBeUndefined();
+  });
+
+  it('findById returns undefined for an id that exists but in a different workspace', async () => {
+    const workspaceRepository = new WorkspaceRepository(pool);
+    const otherWorkspace = await workspaceRepository.createWithFirstMember(
+      new Workspace({
+        name: `suggestion-workspace-${Date.now()}`,
+        createdByStakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
+      }),
+    );
+    const created = await suggestionRepository.create(buildChunkSuggestion());
+
+    const found = await suggestionRepository.findById(created.id, otherWorkspace.id);
 
     expect(found).toBeUndefined();
   });
@@ -154,6 +175,7 @@ describe('SuggestionRepository (containerized Postgres)', () => {
       suggestion.id,
       branchName,
       BOOTSTRAP_STAKEHOLDER_ID,
+      WORKSPACE_ID,
     );
 
     expect(result.kind).toBe('accepted');
@@ -192,6 +214,7 @@ describe('SuggestionRepository (containerized Postgres)', () => {
       '00000000-0000-0000-0000-00000000dead',
       branchName,
       BOOTSTRAP_STAKEHOLDER_ID,
+      WORKSPACE_ID,
     );
 
     expect(result.kind).toBe('not_found');
@@ -201,13 +224,19 @@ describe('SuggestionRepository (containerized Postgres)', () => {
 
   it('accept returns not_pending for an already-accepted suggestion and creates no second branch', async () => {
     const suggestion = await suggestionRepository.create(buildChunkSuggestion());
-    await suggestionRepository.accept(suggestion.id, uniqueBranchName(), BOOTSTRAP_STAKEHOLDER_ID);
+    await suggestionRepository.accept(
+      suggestion.id,
+      uniqueBranchName(),
+      BOOTSTRAP_STAKEHOLDER_ID,
+      WORKSPACE_ID,
+    );
 
     const secondBranchName = uniqueBranchName();
     const result = await suggestionRepository.accept(
       suggestion.id,
       secondBranchName,
       BOOTSTRAP_STAKEHOLDER_ID,
+      WORKSPACE_ID,
     );
 
     expect(result.kind).toBe('not_pending');
@@ -227,7 +256,12 @@ describe('SuggestionRepository (containerized Postgres)', () => {
     const suggestion = await suggestionRepository.create(buildChunkSuggestion());
 
     await expect(
-      suggestionRepository.accept(suggestion.id, existingBranchName, BOOTSTRAP_STAKEHOLDER_ID),
+      suggestionRepository.accept(
+      suggestion.id,
+      existingBranchName,
+      BOOTSTRAP_STAKEHOLDER_ID,
+      WORKSPACE_ID,
+    ),
     ).rejects.toThrow();
 
     const suggestionRow = await pool.query<{ status: string; decided_at: Date | null }>(
@@ -249,7 +283,11 @@ describe('SuggestionRepository (containerized Postgres)', () => {
       buildChunkSuggestion({ discipline: 'security' }),
     );
 
-    const result = await suggestionRepository.reject(suggestion.id, BOOTSTRAP_STAKEHOLDER_ID);
+    const result = await suggestionRepository.reject(
+      suggestion.id,
+      BOOTSTRAP_STAKEHOLDER_ID,
+      WORKSPACE_ID,
+    );
 
     expect(result.kind).toBe('rejected');
 
@@ -277,6 +315,7 @@ describe('SuggestionRepository (containerized Postgres)', () => {
     const result = await suggestionRepository.reject(
       '00000000-0000-0000-0000-00000000dead',
       BOOTSTRAP_STAKEHOLDER_ID,
+      WORKSPACE_ID,
     );
 
     expect(result.kind).toBe('not_found');
@@ -284,9 +323,17 @@ describe('SuggestionRepository (containerized Postgres)', () => {
 
   it('reject returns not_pending for an already-rejected suggestion', async () => {
     const suggestion = await suggestionRepository.create(buildChunkSuggestion());
-    await suggestionRepository.reject(suggestion.id, BOOTSTRAP_STAKEHOLDER_ID);
+    await suggestionRepository.reject(
+      suggestion.id,
+      BOOTSTRAP_STAKEHOLDER_ID,
+      WORKSPACE_ID,
+    );
 
-    const result = await suggestionRepository.reject(suggestion.id, BOOTSTRAP_STAKEHOLDER_ID);
+    const result = await suggestionRepository.reject(
+      suggestion.id,
+      BOOTSTRAP_STAKEHOLDER_ID,
+      WORKSPACE_ID,
+    );
 
     expect(result.kind).toBe('not_pending');
   });
@@ -294,13 +341,17 @@ describe('SuggestionRepository (containerized Postgres)', () => {
   it('findAll returns suggestions ordered oldest-first, optionally filtered by status', async () => {
     const first = await suggestionRepository.create(buildChunkSuggestion());
     const second = await suggestionRepository.create(buildChunkSuggestion());
-    await suggestionRepository.reject(second.id, BOOTSTRAP_STAKEHOLDER_ID);
+    await suggestionRepository.reject(
+      second.id,
+      BOOTSTRAP_STAKEHOLDER_ID,
+      WORKSPACE_ID,
+    );
 
-    const pendingOnly = await suggestionRepository.findAll('pending');
+    const pendingOnly = await suggestionRepository.findAll('pending', WORKSPACE_ID);
     expect(pendingOnly.some((suggestion) => suggestion.id === first.id)).toBe(true);
     expect(pendingOnly.some((suggestion) => suggestion.id === second.id)).toBe(false);
 
-    const all = await suggestionRepository.findAll();
+    const all = await suggestionRepository.findAll(undefined, WORKSPACE_ID);
     const firstIndex = all.findIndex((suggestion) => suggestion.id === first.id);
     const secondIndex = all.findIndex((suggestion) => suggestion.id === second.id);
     expect(firstIndex).toBeGreaterThanOrEqual(0);

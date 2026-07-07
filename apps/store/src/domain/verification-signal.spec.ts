@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { VerificationSignal, type VerificationSignalProps } from './verification-signal.js';
 
 const BRANCH_ID = '00000000-0000-0000-0000-000000000001';
+const WORKSPACE_ID = '00000000-0000-0000-0000-00000000d0fa';
 
 function props(overrides: Partial<VerificationSignalProps> = {}): VerificationSignalProps {
   return {
+    workspaceId: WORKSPACE_ID,
     branchId: BRANCH_ID,
     verifierName: 'ci-evaluator',
     status: 'pass',
@@ -37,6 +39,10 @@ describe('VerificationSignal', () => {
 
   it.each(['', '   '])('rejects a blank verifierName %j', (verifierName) => {
     expect(() => new VerificationSignal(props({ verifierName }))).toThrow(TypeError);
+  });
+
+  it.each(['', '   '])('rejects a blank workspaceId %j', (workspaceId) => {
+    expect(() => new VerificationSignal(props({ workspaceId }))).toThrow(TypeError);
   });
 
   it('rejects an invalid status', () => {

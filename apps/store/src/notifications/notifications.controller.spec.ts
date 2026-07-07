@@ -6,13 +6,16 @@ import { NotificationsController } from './notifications.controller.js';
 import { NotificationsService } from './notifications.service.js';
 import type { NotificationResponse } from './notification-response.dto.js';
 
+const WORKSPACE_ID = '00000000-0000-0000-0000-00000000d0fa';
+
 const claims = {
   stakeholderId: 'stakeholder-1',
   discipline: 'product',
   authTime: 1_752_000_000,
+  workspaceId: WORKSPACE_ID,
 } satisfies SessionTokenClaims;
 
-const AUTH_HEADER = 'Bearer test-signed-token';
+const AUTH_HEADER = 'Bearer signed-token';
 
 describe('NotificationsController', () => {
   let controller: NotificationsController;
@@ -58,32 +61,34 @@ describe('NotificationsController', () => {
     vi.mocked(sessionTokenService.verify).mockReturnValue(claims);
     vi.mocked(service.findAll).mockResolvedValue([notificationResponse]);
 
-    const result = await controller.findAll(AUTH_HEADER, undefined);
+    const result = await controller.findAll(AUTH_HEADER, WORKSPACE_ID, undefined);
 
     expect(result).toEqual([notificationResponse]);
-    expect(sessionTokenService.verify).toHaveBeenCalledWith('test-signed-token');
-    expect(service.findAll).toHaveBeenCalledWith(claims, undefined);
+    expect(sessionTokenService.verify).toHaveBeenCalledWith('signed-token');
+    expect(service.findAll).toHaveBeenCalledWith(claims, WORKSPACE_ID, undefined);
   });
 
   it('forwards the status query param to NotificationsService', async () => {
     vi.mocked(sessionTokenService.verify).mockReturnValue(claims);
     vi.mocked(service.findAll).mockResolvedValue([]);
 
-    await controller.findAll(AUTH_HEADER, 'unread');
+    await controller.findAll(AUTH_HEADER, WORKSPACE_ID, 'unread');
 
-    expect(service.findAll).toHaveBeenCalledWith(claims, 'unread');
+    expect(service.findAll).toHaveBeenCalledWith(claims, WORKSPACE_ID, 'unread');
   });
 
   it('rejects findAll with a missing Authorization header', async () => {
-    await expect(controller.findAll(undefined, undefined)).rejects.toThrow(UnauthorizedException);
+    await expect(controller.findAll(undefined, WORKSPACE_ID, undefined)).rejects.toThrow(
+      UnauthorizedException,
+    );
     expect(sessionTokenService.verify).not.toHaveBeenCalled();
     expect(service.findAll).not.toHaveBeenCalled();
   });
 
   it('rejects findAll with a malformed Authorization header', async () => {
-    await expect(controller.findAll('Token not-a-bearer-token', undefined)).rejects.toThrow(
-      UnauthorizedException,
-    );
+    await expect(
+      controller.findAll('Token not-a-bearer-token', WORKSPACE_ID, undefined),
+    ).rejects.toThrow(UnauthorizedException);
     expect(sessionTokenService.verify).not.toHaveBeenCalled();
     expect(service.findAll).not.toHaveBeenCalled();
   });
@@ -93,17 +98,17 @@ describe('NotificationsController', () => {
     vi.mocked(sessionTokenService.verify).mockReturnValue(claims);
     vi.mocked(service.markAsRead).mockResolvedValue(readResponse);
 
-    const result = await controller.markAsRead('notification-1', AUTH_HEADER);
+    const result = await controller.markAsRead('notification-1', AUTH_HEADER, WORKSPACE_ID);
 
     expect(result).toEqual(readResponse);
-    expect(sessionTokenService.verify).toHaveBeenCalledWith('test-signed-token');
-    expect(service.markAsRead).toHaveBeenCalledWith('notification-1', claims);
+    expect(sessionTokenService.verify).toHaveBeenCalledWith('signed-token');
+    expect(service.markAsRead).toHaveBeenCalledWith('notification-1', claims, WORKSPACE_ID);
   });
 
   it('rejects markAsRead with a missing Authorization header', async () => {
-    await expect(controller.markAsRead('notification-1', undefined)).rejects.toThrow(
-      UnauthorizedException,
-    );
+    await expect(
+      controller.markAsRead('notification-1', undefined, WORKSPACE_ID),
+    ).rejects.toThrow(UnauthorizedException);
     expect(sessionTokenService.verify).not.toHaveBeenCalled();
     expect(service.markAsRead).not.toHaveBeenCalled();
   });
