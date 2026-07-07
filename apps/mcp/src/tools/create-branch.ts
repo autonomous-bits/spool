@@ -3,6 +3,11 @@
  * a draft branch on behalf of a human stakeholder by delegating to the store's `POST /branches`
  * endpoint. The tool never invents a stakeholder identity — it always forwards the
  * caller-supplied `stakeholderId` and lets the store enforce that it already exists.
+ *
+ * G11 SG6 (Meridian IDEA-92/IDEA-98/IDEA-100): `POST /branches` sits on the delegated, tokenless
+ * auth tier, so this tool requires a `workspaceId` input and forwards it as the store's
+ * `X-Workspace-Id` header (not a body field) — the store validates it against a
+ * `workspace_memberships` row for the caller-supplied `stakeholderId`.
  */
 
 /** Untrusted-input shape mirroring the store's `CreateBranchRequest` (apps/store/src/branches). */
@@ -10,6 +15,7 @@ export interface CreateBranchInput {
   name: string;
   discipline: string;
   stakeholderId: string;
+  workspaceId: string;
 }
 
 /** Branch as returned by the store's `POST /branches` on success. */
@@ -60,6 +66,7 @@ export function parseCreateBranchInput(body: unknown): CreateBranchInput {
     name: requireStringField(record, 'name'),
     discipline: requireStringField(record, 'discipline'),
     stakeholderId: requireStringField(record, 'stakeholderId'),
+    workspaceId: requireStringField(record, 'workspaceId'),
   } satisfies CreateBranchInput;
 }
 
@@ -85,10 +92,11 @@ export async function createBranch(
   input: CreateBranchInput,
   harnessUrl: string,
 ): Promise<CreateBranchResult> {
+  const { workspaceId, ...body } = input;
   const response = await fetch(`${harnessUrl}/branches`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(input),
+    headers: { 'content-type': 'application/json', 'x-workspace-id': workspaceId },
+    body: JSON.stringify(body),
   });
 
   const payload: unknown = await response.json().catch(() => undefined);

@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { Artifact, type ArtifactProps } from './artifact.js';
 
+const WORKSPACE_ID = '00000000-0000-0000-0000-00000000d0fa';
+
 function validProps(overrides: Partial<ArtifactProps> = {}): ArtifactProps {
   return {
+    workspaceId: WORKSPACE_ID,
     uri: 'local://artifacts/00000000-0000-0000-0000-0000000000a1.bin',
     mimeType: 'text/plain',
     createdByStakeholderId: '00000000-0000-0000-0000-000000000001',
@@ -27,6 +30,10 @@ describe('Artifact', () => {
 
   it.each(['', '   '])('rejects blank mimeType %j', (mimeType) => {
     expect(() => new Artifact(validProps({ mimeType }))).toThrow(TypeError);
+  });
+
+  it.each(['', '   '])('rejects blank workspaceId %j', (workspaceId) => {
+    expect(() => new Artifact(validProps({ workspaceId }))).toThrow(TypeError);
   });
 
   it('requires a non-blank createdByStakeholderId', () => {

@@ -11,8 +11,11 @@ import { EdgeRepository } from '../../src/persistence/edge.repository.js';
 import { BOOTSTRAP_STAKEHOLDER_ID } from '../../src/persistence/bootstrap-stakeholder.js';
 import { setUpTestDatabase, type TestDatabase } from '../support/test-database.js';
 
+const WORKSPACE_ID = '00000000-0000-0000-0000-00000000d0fa';
+
 function buildEdge(overrides: Partial<ConstructorParameters<typeof Edge>[0]> = {}): Edge {
   return new Edge({
+    workspaceId: WORKSPACE_ID,
     fromChunkLabel: `from-${Math.random().toString(36).slice(2, 10)}`,
     toChunkLabel: `to-${Math.random().toString(36).slice(2, 10)}`,
     type: 'depends-on',
@@ -24,6 +27,7 @@ function buildEdge(overrides: Partial<ConstructorParameters<typeof Edge>[0]> = {
 
 function buildChunk(overrides: Partial<ConstructorParameters<typeof Chunk>[0]> = {}): Chunk {
   return new Chunk({
+    workspaceId: WORKSPACE_ID,
     label: `chunk-${Math.random().toString(36).slice(2, 10)}`,
     content: 'Some atomic idea content.',
     discipline: 'engineering',
@@ -36,6 +40,7 @@ function buildChunk(overrides: Partial<ConstructorParameters<typeof Chunk>[0]> =
 
 function buildBranch(overrides: Partial<ConstructorParameters<typeof Branch>[0]> = {}): Branch {
   return new Branch({
+    workspaceId: WORKSPACE_ID,
     name: `branch-${Math.random().toString(36).slice(2, 10)}`,
     discipline: 'engineering',
     createdByStakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
@@ -87,14 +92,14 @@ describe('EdgeRepository (containerized Postgres)', () => {
     });
 
     const created = await edgeRepository.create(edge);
-    const found = await edgeRepository.findById(created.id);
+    const found = await edgeRepository.findById(created.id, WORKSPACE_ID);
 
     expect(found).toBeDefined();
     expect(found).toEqual(created);
   });
 
   it('findById returns an explicit not-found result (undefined) for an unknown id', async () => {
-    const found = await edgeRepository.findById('00000000-0000-0000-0000-00000000dead');
+    const found = await edgeRepository.findById('00000000-0000-0000-0000-00000000dead', WORKSPACE_ID);
 
     expect(found).toBeUndefined();
   });
@@ -154,7 +159,7 @@ describe('EdgeRepository (containerized Postgres)', () => {
         originBranchId: branch.id,
       }),
     );
-    await branchRepository.submit(branch.id);
+    await branchRepository.submit(branch.id, WORKSPACE_ID);
 
     await expect(
       edgeRepository.create(
@@ -200,7 +205,7 @@ describe('EdgeRepository (containerized Postgres)', () => {
 
       const createPromise = edgeRepository.create(edge);
       await delay(25);
-      const submitPromise = branchRepository.submit(branch.id);
+      const submitPromise = branchRepository.submit(branch.id, WORKSPACE_ID);
 
       await delay(50);
       await lockClient.query('COMMIT');
@@ -210,7 +215,7 @@ describe('EdgeRepository (containerized Postgres)', () => {
       expect(createResult.status).toBe('fulfilled');
       expect(submitResult).toEqual({ status: 'fulfilled', value: undefined });
 
-      const branchAfterRace = await branchRepository.findById(branch.id);
+      const branchAfterRace = await branchRepository.findById(branch.id, WORKSPACE_ID);
       expect(branchAfterRace).toBeDefined();
 
       const edgeRow = await pool.query<{ exists: boolean }>(
@@ -231,7 +236,7 @@ describe('EdgeRepository (containerized Postgres)', () => {
     it('finds a branchless chunk by label when branchId is omitted', async () => {
       const chunk = await chunkRepository.create(buildChunk());
 
-      const found = await chunkRepository.findByLabel(chunk.label, undefined);
+      const found = await chunkRepository.findByLabel(chunk.label, undefined, WORKSPACE_ID);
 
       expect(found).toEqual(chunk);
     });
@@ -242,7 +247,7 @@ describe('EdgeRepository (containerized Postgres)', () => {
         buildChunk({ branchId: branch.id, originBranchId: branch.id }),
       );
 
-      const found = await chunkRepository.findByLabel(chunk.label, branch.id);
+      const found = await chunkRepository.findByLabel(chunk.label, branch.id, WORKSPACE_ID);
 
       expect(found).toEqual(chunk);
     });
@@ -251,13 +256,13 @@ describe('EdgeRepository (containerized Postgres)', () => {
       const branch = await branchRepository.create(buildBranch());
       const chunk = await chunkRepository.create(buildChunk());
 
-      const found = await chunkRepository.findByLabel(chunk.label, branch.id);
+      const found = await chunkRepository.findByLabel(chunk.label, branch.id, WORKSPACE_ID);
 
       expect(found).toBeUndefined();
     });
 
     it('returns undefined when the label does not exist at all', async () => {
-      const found = await chunkRepository.findByLabel('does-not-exist-label', undefined);
+      const found = await chunkRepository.findByLabel('does-not-exist-label', undefined, WORKSPACE_ID);
 
       expect(found).toBeUndefined();
     });

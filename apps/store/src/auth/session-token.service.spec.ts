@@ -21,28 +21,34 @@ function buildConfig(overrides: Partial<AuthConfig> = {}): AuthConfig {
 describe('SessionTokenService', () => {
   it('mints a token whose verify() returns the signed claims', () => {
     const service = new SessionTokenService(buildConfig());
-    const token = service.sign({ stakeholderId: 'stakeholder-1', discipline: 'engineering', authTime: 100 });
+    const token = service.sign({ stakeholderId: 'stakeholder-1', discipline: 'engineering', authTime: 100, workspaceId: 'workspace-1' });
 
     const claims = service.verify(token);
 
-    expect(claims).toEqual({ stakeholderId: 'stakeholder-1', discipline: 'engineering', authTime: 100 });
+    expect(claims).toEqual({
+      stakeholderId: 'stakeholder-1',
+      discipline: 'engineering',
+      authTime: 100,
+      workspaceId: 'workspace-1',
+    });
   });
 
   it('mints a verifiable token for a null-discipline stakeholder', () => {
     const service = new SessionTokenService(buildConfig());
-    const token = service.sign({ stakeholderId: 'stakeholder-1', discipline: null, authTime: 100 });
+    const token = service.sign({ stakeholderId: 'stakeholder-1', discipline: null, authTime: 100, workspaceId: null });
 
     expect(service.verify(token)).toEqual({
       stakeholderId: 'stakeholder-1',
       discipline: null,
       authTime: 100,
+      workspaceId: null,
     });
   });
 
   it('throws InvalidSessionTokenError for a token signed with a different secret', () => {
     const service = new SessionTokenService(buildConfig());
     const otherService = new SessionTokenService(buildConfig({ sessionTokenSecret: 'other-secret' }));
-    const token = otherService.sign({ stakeholderId: 'stakeholder-1', discipline: null, authTime: 100 });
+    const token = otherService.sign({ stakeholderId: 'stakeholder-1', discipline: null, authTime: 100, workspaceId: null });
 
     expect(() => service.verify(token)).toThrow(InvalidSessionTokenError);
   });
@@ -52,7 +58,7 @@ describe('SessionTokenService', () => {
     try {
       vi.setSystemTime(0);
       const service = new SessionTokenService(buildConfig({ sessionTokenMaxAgeSeconds: 60 }));
-      const token = service.sign({ stakeholderId: 'stakeholder-1', discipline: null, authTime: 0 });
+      const token = service.sign({ stakeholderId: 'stakeholder-1', discipline: null, authTime: 0, workspaceId: null });
 
       vi.setSystemTime(61_000);
 

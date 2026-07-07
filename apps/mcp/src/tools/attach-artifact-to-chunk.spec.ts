@@ -12,6 +12,7 @@ describe('parseAttachArtifactToChunkInput', () => {
     chunkLabel: 'IDEA-1',
     artifactId: 'artifact-1',
     stakeholderId: 'stakeholder-1',
+    workspaceId: 'workspace-1',
   };
 
   it('accepts a well-formed body without branchId', () => {
@@ -28,7 +29,7 @@ describe('parseAttachArtifactToChunkInput', () => {
     expect(() => parseAttachArtifactToChunkInput(null)).toThrow(AttachArtifactToChunkValidationError);
   });
 
-  it.each(['chunkLabel', 'artifactId', 'stakeholderId'])(
+  it.each(['chunkLabel', 'artifactId', 'stakeholderId', 'workspaceId'])(
     'rejects a missing %s, never inventing one',
     (field) => {
       const body: Record<string, unknown> = { ...validBody };
@@ -53,6 +54,7 @@ describe('attachArtifactToChunk', () => {
     chunkLabel: 'IDEA-1',
     artifactId: 'artifact-1',
     stakeholderId: 'stakeholder-1',
+    workspaceId: 'workspace-1',
   };
 
   afterEach(() => {
@@ -83,7 +85,7 @@ describe('attachArtifactToChunk', () => {
 
     expect(fetchMock).toHaveBeenCalledWith('http://harness.test/chunks/IDEA-1/artifacts', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', 'x-workspace-id': input.workspaceId },
       body: JSON.stringify({ artifactId: input.artifactId, stakeholderId: input.stakeholderId }),
     });
     expect(result).toEqual(expected);
@@ -115,7 +117,7 @@ describe('attachArtifactToChunk', () => {
 
     expect(fetchMock).toHaveBeenCalledWith('http://harness.test/chunks/IDEA%2F1/artifacts', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', 'x-workspace-id': withBranch.workspaceId },
       body: JSON.stringify({
         artifactId: withBranch.artifactId,
         stakeholderId: withBranch.stakeholderId,

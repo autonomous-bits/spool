@@ -8,6 +8,7 @@ import { parseEdgeType } from './types/vocabulary/edge-type.js';
 
 export interface EdgeProps {
   id?: string;
+  workspaceId: string;
   fromChunkLabel: string;
   toChunkLabel: string;
   type: EdgeType;
@@ -39,6 +40,7 @@ function requireNonBlank(value: string, fieldName: string): string {
  */
 export class Edge {
   readonly id: string;
+  readonly workspaceId: string;
   readonly fromChunkLabel: string;
   readonly toChunkLabel: string;
   readonly type: EdgeType;
@@ -53,6 +55,7 @@ export class Edge {
   readonly updatedAt: Date;
 
   constructor(props: EdgeProps) {
+    this.workspaceId = requireNonBlank(props.workspaceId, 'workspaceId');
     this.fromChunkLabel = requireNonBlank(props.fromChunkLabel, 'fromChunkLabel');
     this.toChunkLabel = requireNonBlank(props.toChunkLabel, 'toChunkLabel');
 

@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>G11 — Workspace Isolation &amp; Request Scoping</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  body { font-family: -apple-system, Segoe UI, sans-serif; max-width: 980px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
+  h1 { font-size: 1.4rem; }
+  h2 { font-size: 1.1rem; margin-top: 2rem; border-bottom: 1px solid #ddd; padding-bottom: .25rem; }
+  table { border-collapse: collapse; width: 100%; margin: .5rem 0; font-size: .9rem; }
+  th, td { border: 1px solid #ccc; padding: .4rem .6rem; text-align: left; vertical-align: top; }
+  th { background: #f2f2f2; }
+  .badge { display: inline-block; padding: .1rem .5rem; border-radius: .8rem; font-size: .75rem; font-weight: 600; color: #fff; }
+  .badge-open { background: #888; }
+  .badge-in-progress { background: #d38b00; }
+  .badge-done { background: #1e8e3e; }
+  .badge-blocked { background: #c62828; }
+  details { border: 1px solid #ccc; border-radius: 6px; margin: .5rem 0; padding: .4rem .8rem; }
+  summary { cursor: pointer; font-weight: 600; }
+  .mermaid { background: #fafafa; padding: 1rem; border: 1px solid #eee; border-radius: 6px; }
+  code { background: #f2f2f2; padding: 0 .3rem; border-radius: 3px; }
+  .note { background: #fff8e1; border-left: 4px solid #f9a825; padding: .5rem .8rem; margin: .5rem 0; font-size: .9rem; }
+</style>
+<script>
+  function toggleAll() {
+    document.querySelectorAll('details').forEach(d => d.open = !d.open);
+  }
+  window.addEventListener('DOMContentLoaded', () => {
+    const data = JSON.parse(document.getElementById('goal-data').textContent);
+    data.subGoals.forEach(sg => {
+      const el = document.querySelector(`#sg-${sg.id} .status-badge`);
+      if (el) {
+        el.textContent = sg.status;
+        el.className = `badge status-badge badge-${sg.status}`;
+      }
+    });
+  });
+</script>
+</head>
+<body>
+
+<h1>G11 — Workspace Isolation &amp; Request Scoping
+  <span class="badge badge-done" id="goal-status-badge">done</span>
+</h1>
+<p><strong>Size:</strong> 5/5 — new <code>workspace_id</code> column + backfill + re-keyed unique indexes across eight existing tables, a new session-token claim plus a whole extra OAuth bootstrap path, a two-tier domain-enforcement amendment, and wiring through every existing controller/repository/MCP tool. No new domain concept is invented (Workspace/Membership already exist from G10), but the blast radius across every existing layer is total.</p>
+
+<div class="note">
+<strong>Scope framing:</strong> this goal completes the isolation/enforcement work G10 explicitly deferred (see <code>apps/store/src/persistence/migrations/0012_add_workspaces_tables.sql</code> comment: "Meridian IDEA-90 ... is promoted but explicitly out of scope for this goal"). It does not add any new product concept — <code>Workspace</code>/<code>WorkspaceMembership</code>, <code>POST /workspaces</code>, and <code>POST /workspaces/:id/members</code> already exist and are reused unmodified except for the new header check added here.
+</div>
+
+<h2>Meridian Source</h2>
+<table>
+<tr><th>Chunk</th><th>Status</th><th>Layer</th><th>Note</th></tr>
+<tr><td>IDEA-90</td><td>promoted</td><td>Persistence/Domain</td><td><code>workspace_id</code> column + composite per-workspace unique/lookup indexes on chunks, edges, branches, artifacts, chunk_artifacts, suggestions, verification_signals, feedback_notifications. Labels become unique per-workspace, not global.</td></tr>
+<tr><td>IDEA-91</td><td>promoted</td><td>Persistence</td><td>Backfill: all pre-existing rows in the eight tables are assigned to one implicit default workspace during migration; that workspace has no special runtime behavior.</td></tr>
+<tr><td>IDEA-92</td><td>promoted</td><td>Auth/API/MCP</td><td>Every store API request and MCP tool call must carry <code>X-Workspace-Id</code>. Session token gains a <code>workspaceId</code> claim fixed at OAuth login; login/callback takes a <code>workspaceId</code> param; store validates a <code>workspace_memberships</code> row exists before minting a normal token.</td></tr>
+<tr><td>IDEA-93</td><td>promoted</td><td>Persistence (artifacts)</td><td>Artifact blob storage keys are prefixed by <code>workspace_id</code> (<code>{workspaceId}/{artifactId}/{filename}</code>) within the existing single <code>ArtifactBlobStore</code>; no per-workspace bucket/store instance.</td></tr>
+<tr><td>IDEA-98</td><td>promoted</td><td>Domain</td><td>Amends IDEA-53: every chunk/branch/edge/artifact read/write must be scoped to the <code>X-Workspace-Id</code>-named workspace; reject on header/claim mismatch or missing membership.</td></tr>
+<tr><td>IDEA-99</td><td>draft (gap-report)</td><td>Auth (context only)</td><td>Flags two gaps in IDEA-92/98: (1) bootstrap — how does a zero-membership stakeholder authenticate to call <code>POST /workspaces</code> at all; (2) mixed auth model — today's delegated/tokenless routes (chunks/edges/artifacts/suggestions-create/verification-signals) have no session token to bind a claim to. Cite only as background; binding rules are IDEA-100/101 below.</td></tr>
+<tr><td>IDEA-100</td><td>promoted</td><td>Auth/API</td><td>Resolves IDEA-99 gap 2: delegated/tokenless routes keep requiring no token; their workspace membership is validated by checking <code>X-Workspace-Id</code> against a <code>workspace_memberships</code> row for the caller-supplied <code>stakeholderId</code> directly. Token-gated routes additionally validate <code>X-Workspace-Id</code> against the token's <code>workspaceId</code> claim.</td></tr>
+<tr><td>IDEA-101</td><td>promoted</td><td>Auth/API</td><td>Resolves IDEA-99 gap 1: OAuth login with no <code>workspaceId</code> param is allowed iff the stakeholder has zero memberships, producing a workspace-less bootstrap token usable only for <code>POST /workspaces</code> (403 elsewhere); rejected with 400 if they already have &ge;1 membership and omit <code>workspaceId</code>.</td></tr>
+<tr><td>IDEA-94, IDEA-95, IDEA-96</td><td>promoted</td><td>API/Domain/Persistence (reused, unmodified)</td><td>Workspace registry/membership primitives built in G10; reused as-is here except the new header check added to <code>POST /workspaces/:id/members</code>.</td></tr>
+<tr><td>IDEA-53</td><td>promoted (amended)</td><td>Domain</td><td>Domain Invariant Protection (implemented as <code>domain/branch-lifecycle.ts</code> assertions, not a separate gateway service, per resolved IDEA-70). IDEA-98 amends this same enforcement point.</td></tr>
+</table>
+
+<h2>Vertical Slice Diagram</h2>
+<p>Every existing write/read path gains a workspace-scope check; the OAuth flow gains a second (bootstrap) branch; artifact blob keys gain a workspace prefix.</p>
+<div class="mermaid">
+flowchart TD
+  subgraph AUTH["Auth (extended)"]
+    L["GET /auth/github/login?workspaceId?"]
+    CB["GET /auth/github/callback"]
+    TOK["SessionTokenClaims + workspaceId?"]
+  end
+  subgraph DOMAIN["Domain (amended)"]
+    ENF["assertWorkspaceScope(two-tier: token claim vs. delegated membership row)"]
+  end
+  subgraph API["API surface (existing controllers, header-gated)"]
+    CH["chunks / edges / branches"]
+    AR["artifacts (+ workspace-prefixed blob keys)"]
+    SU["suggestions / verification-signals / notifications"]
+    WS["workspaces/:id/members"]
+  end
+  subgraph MCP["MCP tools (7, all pass workspaceId)"]
+    MT["capture-chunk, create-edge, create-branch,<br/>submit-suggestion, submit-verification-signal,<br/>attach-artifact-to-chunk, upload-artifact"]
+  end
+  subgraph PERSIST["Persistence (8 tables + default-workspace backfill)"]
+    T[("chunks, edges, branches, artifacts,<br/>chunk_artifacts, suggestions,<br/>verification_signals, feedback_notifications")]
+    BS[("ArtifactBlobStore: {workspaceId}/{artifactId}/{filename}")]
+  end
+  L --> CB --> TOK
+  TOK -->|bootstrap token: zero memberships| WS
+  TOK -->|workspace-bound token| CH
+  TOK --> SU
+  CH --> ENF
+  AR --> ENF
+  SU --> ENF
+  WS --> ENF
+  ENF -->|reads/writes X-Workspace-Id-scoped| T
+  AR --> BS
+  MT --> CH
+  MT --> AR
+  MT --> SU
+</div>
+
+<h2>Dependency Diagram</h2>
+<div class="mermaid">
+flowchart TD
+  SG1["SG1: Persistence<br/>workspace_id + backfill + indexes (8 tables)"]
+  SG2["SG2: Auth<br/>token claim + OAuth bootstrap flow"]
+  SG3["SG3: Domain<br/>two-tier scope assertion"]
+  SG4["SG4: API core-graph<br/>chunks/edges/branches/workspaces"]
+  SG5["SG5: API secondary + artifact blob prefixing<br/>artifacts/suggestions/verification-signals/notifications"]
+  SG6["SG6: MCP<br/>7 tools pass workspaceId"]
+  SG7["SG7: Docker end-to-end (final, mandatory)"]
+  SG1 --> SG3
+  SG2 --> SG3
+  SG3 --> SG4
+  SG4 --> SG5
+  SG5 --> SG6
+  SG6 --> SG7
+</div>
+<p><em>SG1 and SG2 are the only parallelizable pair — no shared contract between the schema migration and the auth/token change. Everything from SG3 onward is strictly sequential: SG5 depends on SG4 (artifact/suggestion/signal code paths look up chunks/branches by label and reuse SG4's workspace-scoped repository helpers).</em></p>
+
+<h2>Sub-goal Detail</h2>
+
+<details id="sg-SG1">
+<summary>SG1 — Persistence: workspace_id + backfill + indexes <span class="badge status-badge badge-done">done</span></summary>
+<p><strong>Layer:</strong> Persistence &nbsp;|&nbsp; <strong>Depends on:</strong> none</p>
+<p><strong>Objective:</strong> Migration adding a nullable-then-backfilled-then-NOT-NULL <code>workspace_id UUID REFERENCES workspaces(id)</code> column to <code>chunks</code>, <code>edges</code>, <code>branches</code>, <code>artifacts</code>, <code>chunk_artifacts</code>, <code>suggestions</code>, <code>verification_signals</code>, <code>feedback_notifications</code>, per IDEA-90. Create one implicit default workspace (per IDEA-91) and backfill every pre-existing row in those tables to it before adding the NOT NULL constraint. Re-key existing uniqueness/lookup indexes (e.g. chunk label uniqueness) to be composite on <code>(workspace_id, ...)</code> instead of global.</p>
+<p><strong>Acceptance criteria:</strong></p>
+<ul>
+<li>New migration file (next sequential number after 0012) adds <code>workspace_id</code> to all eight named tables.</li>
+<li>A single default workspace row is created (or reused if one already exists) and every pre-existing row in the eight tables is backfilled to it in the same migration, before any NOT NULL constraint is applied — matching IDEA-91's "existing stakeholders/branches continue to function unchanged" requirement.</li>
+<li>Chunk label uniqueness (and any other global-uniqueness index across the eight tables) is dropped and replaced with a composite index/constraint including <code>workspace_id</code>, so two workspaces may each contain a chunk labeled identically without collision.</li>
+<li>Existing repository queries in <code>apps/store/src/persistence/*.repository.ts</code> are NOT yet changed to filter by workspace_id in this sub-goal (that is SG4/SG5) — SG1 is schema-only, but must not break any existing repository test (i.e. the backfilled default workspace keeps current tests passing unmodified).</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm --filter store build</code> and <code>pnpm test:store</code> (existing repository/migration tests still green against the new schema).</p>
+</details>
+
+<details id="sg-SG2">
+<summary>SG2 — Auth: token claim + OAuth bootstrap flow <span class="badge status-badge badge-done">done</span></summary>
+<p><strong>Layer:</strong> Auth &nbsp;|&nbsp; <strong>Depends on:</strong> none</p>
+<p><strong>Objective:</strong> Extend <code>SessionTokenClaims</code> with an optional <code>workspaceId: string | null</code> claim (per IDEA-92). Extend <code>GET /auth/github/login</code> to accept an optional <code>workspaceId</code> query param, and <code>GET /auth/github/callback</code>/<code>AuthService.handleCallback</code> to: (a) if <code>workspaceId</code> given, validate via <code>WorkspaceRepository.isMember</code> and mint a workspace-bound token, rejecting with 403/appropriate error if not a member; (b) if omitted and the stakeholder has zero memberships, mint a workspace-less bootstrap token (per IDEA-101); (c) if omitted and the stakeholder has &ge;1 membership, reject with 400.</p>
+<p><strong>Acceptance criteria:</strong></p>
+<ul>
+<li><code>SessionTokenClaims.workspaceId</code> is <code>string | null</code>; a null/absent claim is the workspace-less bootstrap variant.</li>
+<li><code>GET /auth/github/login?workspaceId=...</code> carries the param through the OAuth <code>state</code> round-trip to the callback (mirroring how <code>OAuthStateService</code> already round-trips state).</li>
+<li>Callback mints a workspace-bound token only after confirming membership via <code>WorkspaceRepository.isMember</code>; mints a workspace-less token only when the stakeholder has zero <code>workspace_memberships</code> rows; returns 400 for a member with no <code>workspaceId</code> param, per IDEA-101.</li>
+<li><code>tools/dev-session-token/get-dev-session-token.mjs</code> is updated to accept a <code>WORKSPACE_ID</code> env var / CLI flag, so SG7's Docker e2e can obtain both bootstrap and workspace-bound tokens through the real login/callback flow.</li>
+<li>Unit tests cover: bound-token mint on valid membership, bootstrap-token mint on zero memberships, 403/400 rejection paths.</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:store</code> (targeted: <code>auth.service.spec.ts</code>, <code>session-token.service.spec.ts</code>, <code>auth.controller.spec.ts</code>)</p>
+</details>
+
+<details id="sg-SG3">
+<summary>SG3 — Domain: two-tier workspace-scope assertion <span class="badge status-badge badge-done">done</span></summary>
+<p><strong>Layer:</strong> Domain &nbsp;|&nbsp; <strong>Depends on:</strong> SG1, SG2</p>
+<p><strong>Objective:</strong> Add a reusable assertion (e.g. <code>assertWorkspaceScope</code>, alongside the existing <code>branch-lifecycle.ts</code> assertions per IDEA-70's precedent that enforcement lives in domain/persistence, not a gateway) implementing IDEA-98's amendment via IDEA-100's two-tier rule: for session-token-gated routes, assert the request's <code>X-Workspace-Id</code> header equals the verified token's <code>workspaceId</code> claim; for delegated/tokenless routes, assert <code>X-Workspace-Id</code> matches a <code>workspace_memberships</code> row for the caller-supplied <code>stakeholderId</code> (via SG1's schema + existing <code>WorkspaceRepository.isMember</code>).</p>
+<p><strong>Acceptance criteria:</strong></p>
+<ul>
+<li>One exported assertion function taking either a verified token's <code>workspaceId</code> claim or a caller-supplied <code>stakeholderId</code>, plus the request's <code>X-Workspace-Id</code> header value, and throwing a distinct domain error (e.g. <code>WorkspaceScopeViolationError</code>) on mismatch or missing membership.</li>
+<li>Missing <code>X-Workspace-Id</code> header is itself a rejection (per IDEA-92 "every ... request must include" the header) — not treated as "no scoping requested".</li>
+<li>Unit tests cover: token-claim match/mismatch, delegated-membership match/no-membership, missing header.</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:store</code> (targeted: new domain spec file, e.g. <code>workspace-scope.spec.ts</code>)</p>
+</details>
+
+<details id="sg-SG4">
+<summary>SG4 — API core-graph: chunks/edges/branches/workspaces <span class="badge status-badge badge-done">done</span></summary>
+<p><strong>Layer:</strong> API &nbsp;|&nbsp; <strong>Depends on:</strong> SG3</p>
+<p><strong>Objective:</strong> Wire SG3's assertion into <code>ChunksController</code>/service/repository, <code>EdgesController</code>/service/repository, <code>BranchesController</code>/service/repository (create/submit/verify/reject/merge/get), and <code>WorkspacesController</code>'s <code>POST /workspaces/:id/members</code> (which now also requires <code>X-Workspace-Id</code> to equal <code>:id</code>, per IDEA-92's blanket "every request" rule). <code>POST /workspaces</code> itself is the sole exception — it targets no existing workspace and accepts a bootstrap token with no <code>workspaceId</code> claim, so it does not require the header. All repository queries for these four modules add a <code>workspace_id</code> filter/column.</p>
+<p><strong>Acceptance criteria:</strong></p>
+<ul>
+<li>Chunk/edge/branch capture, read, and lifecycle-transition endpoints all require and validate <code>X-Workspace-Id</code> via SG3's assertion; requests missing it, mismatched, or from a non-member are rejected (401/403 per existing error-mapping conventions).</li>
+<li>Chunk labels are unique per workspace end-to-end: creating "IDEA-1"-labelled chunks (or this repo's chunk-label equivalent) in two different workspaces both succeed.</li>
+<li><code>POST /workspaces/:id/members</code> requires <code>X-Workspace-Id</code> to equal the path's <code>:id</code>; <code>POST /workspaces</code> requires no header and accepts a bootstrap token.</li>
+<li>All chunk/edge/branch repository reads exclude rows from other workspaces (no cross-workspace label resolution, per IDEA-90).</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:store</code> (targeted: chunks/edges/branches/workspaces controller + repository specs)</p>
+</details>
+
+<details id="sg-SG5">
+<summary>SG5 — API secondary + artifact blob-key prefixing <span class="badge status-badge badge-done">done</span></summary>
+<p><strong>Layer:</strong> API/Persistence &nbsp;|&nbsp; <strong>Depends on:</strong> SG4</p>
+<p><strong>Objective:</strong> Apply the same SG3 assertion + <code>workspace_id</code> filtering to <code>ArtifactsController</code> (create, chunk-artifact attach/list, download-token issuance), <code>SuggestionsController</code>, <code>VerificationSignalsController</code>, and <code>NotificationsController</code>. Additionally implement IDEA-93: prefix every <code>ArtifactBlobStore</code> key with <code>{workspaceId}/</code> (e.g. <code>{workspaceId}/{artifactId}/{filename}</code>) in the existing local-file blob store, no new store instance.</p>
+<p><strong>Acceptance criteria:</strong></p>
+<ul>
+<li><code>POST /artifacts</code>, <code>POST /chunks/:label/artifacts</code>, <code>GET /chunks/:label/artifacts</code>, and <code>GET /artifacts/:id/download-token</code> all require and validate <code>X-Workspace-Id</code> per SG3 (delegated-tokenless tier, per IDEA-100), and reference chunks by label scoped to that same workspace (reusing SG4's workspace-scoped chunk lookup).</li>
+<li><code>GET /artifacts/content/:token</code> is explicitly exempt from the <code>X-Workspace-Id</code> header check: the signed download token is already cryptographically bound to one specific artifact (and thus one workspace) at issuance time, so no additional caller-supplied header is meaningful at redemption time. Record this as a deliberate, documented exemption, not a silent gap.</li>
+<li>Artifact blob storage keys are prefixed by <code>workspaceId</code> per IDEA-93; existing (pre-migration) artifacts are re-keyed or the store resolves their key via the default workspace from SG1's backfill (document whichever approach is chosen).</li>
+<li><code>SuggestionsController</code> (create/accept/reject/list/get), <code>VerificationSignalsController</code> (create/list), and <code>NotificationsController</code> (list/mark-read) all require and validate <code>X-Workspace-Id</code> — token-gated tier for suggestions accept/reject and notifications (existing human-session-token routes), delegated tier for suggestion create and verification-signal create.</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:store</code> (targeted: artifacts/suggestions/verification-signals/notifications controller + repository specs, plus blob-store key-prefix spec)</p>
+</details>
+
+<details id="sg-SG6">
+<summary>SG6 — MCP: pass workspaceId through all 7 tools <span class="badge status-badge badge-done">done</span></summary>
+<p><strong>Layer:</strong> MCP &nbsp;|&nbsp; <strong>Depends on:</strong> SG5</p>
+<p><strong>Objective:</strong> Extend all 7 existing MCP tools (<code>capture-chunk</code>, <code>create-branch</code>, <code>create-edge</code>, <code>submit-suggestion</code>, <code>submit-verification-signal</code>, <code>attach-artifact-to-chunk</code>, <code>upload-artifact</code>) to accept a <code>workspaceId</code> input and set the <code>X-Workspace-Id</code> header on the corresponding store HTTP call, per IDEA-92's "every ... MCP tool call must include" requirement.</p>
+<p><strong>Acceptance criteria:</strong></p>
+<ul>
+<li>Each of the 7 tools' input schema gains a required <code>workspaceId</code> field.</li>
+<li>Each tool sets <code>X-Workspace-Id: <workspaceId></code> on its outbound store request.</li>
+<li>A store rejection (missing/mismatched workspace scope) surfaces as a clear MCP tool error, not a generic failure.</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:mcp</code></p>
+</details>
+
+<details id="sg-SG7">
+<summary>SG7 — Docker end-to-end (final, mandatory) <span class="badge status-badge badge-done">done</span></summary>
+<p><strong>Layer:</strong> Docker e2e &nbsp;|&nbsp; <strong>Depends on:</strong> SG6</p>
+<p><strong>Objective:</strong> Bring the system up with <code>docker compose up --build spoolstore</code> (per <code>apps/store/AGENTS.md</code>) and exercise the full workspace-isolation flow over real HTTP against the running containerized store, using session tokens obtained ONLY via <code>pnpm dev:session-token</code> (SG2's updated script) driving the real <code>GET /auth/github/login</code> &rarr; <code>GET /auth/github/callback</code> flow against the <code>github-oauth-stub</code> service already wired into <code>compose.yaml</code>. Never substitute a hand-crafted or manually-signed token, or a client-supplied <code>workspaceId</code>/claim field, for any scenario below — the real login/callback flow via the tool is the only valid way to obtain each token.</p>
+<p><strong>Acceptance criteria (all against the running container):</strong></p>
+<ul>
+<li>A stakeholder with zero workspace memberships obtains a workspace-less bootstrap token via <code>pnpm dev:session-token</code>; it succeeds against <code>POST /workspaces</code> and is rejected (403) against every other session-token-gated route.</li>
+<li>After creating a workspace, re-running <code>pnpm dev:session-token</code> with that <code>workspaceId</code> yields a workspace-bound token.</li>
+<li>A chunk capture request (delegated/tokenless route) with <code>X-Workspace-Id</code> matching the caller-supplied stakeholder's membership succeeds; the same request with a non-member/mismatched <code>X-Workspace-Id</code> is rejected.</li>
+<li>Two chunks with the same label, created in two different workspaces, both succeed (per IDEA-90's per-workspace label uniqueness) and each workspace's read only sees its own chunk.</li>
+<li>A token-gated route (e.g. branch submit) with a workspace-bound token whose <code>X-Workspace-Id</code> header does not match the token's <code>workspaceId</code> claim is rejected.</li>
+<li>An artifact uploaded in one workspace is stored under a <code>{workspaceId}/...</code>-prefixed key and is retrievable via its own download-token flow.</li>
+</ul>
+<p><strong>Verification:</strong> Manual/scripted HTTP exercise against <code>docker compose up --build spoolstore</code>, using <code>pnpm dev:session-token</code> for every token — not unit/in-process tests alone.</p>
+</details>
+
+<h2>Open Questions</h2>
+<ul>
+<li>None blocking. One documented interpretive decision (not a Meridian gap): <code>GET /artifacts/content/:token</code> is exempted from the <code>X-Workspace-Id</code> header check in SG5, since the signed download token is already bound to a specific artifact/workspace at issuance — flagged in SG5's acceptance criteria so it is not silently decided by the executing agent without record.</li>
+</ul>
+
+<h2>Definition of Done</h2>
+<ul>
+<li>SG1–SG6 all pass their targeted verification commands.</li>
+<li>SG7's Docker end-to-end exercise passes against the real containerized store over real HTTP, covering every scenario listed in SG7's acceptance criteria, with every token obtained via <code>pnpm dev:session-token</code>.</li>
+<li><code>pnpm build</code>, <code>pnpm typecheck</code>, and <code>pnpm test</code> all pass at the repo root.</li>
+<li><code>docs/goals/README.md</code> updated with G11's row and status.</li>
+</ul>
+
+<script type="application/json" id="goal-data">
+{
+  "goalId": "G11",
+  "slug": "workspace-isolation-request-scoping",
+  "title": "Workspace Isolation & Request Scoping",
+  "status": "done",
+  "size": 5,
+  "sizeJustification": "New workspace_id column + backfill + re-keyed unique indexes across 8 existing tables, a new session-token claim plus a second OAuth bootstrap path, a two-tier domain-enforcement amendment, and wiring through every existing controller/repository/MCP tool.",
+  "meridianChunks": [
+    {"id": "IDEA-90", "status": "promoted", "layer": "persistence/domain", "role": "implemented"},
+    {"id": "IDEA-91", "status": "promoted", "layer": "persistence", "role": "implemented"},
+    {"id": "IDEA-92", "status": "promoted", "layer": "auth/api/mcp", "role": "implemented"},
+    {"id": "IDEA-93", "status": "promoted", "layer": "persistence", "role": "implemented"},
+    {"id": "IDEA-98", "status": "promoted", "layer": "domain", "role": "implemented"},
+    {"id": "IDEA-99", "status": "draft", "layer": "auth", "role": "context-resolved-by-100-101"},
+    {"id": "IDEA-100", "status": "promoted", "layer": "auth/api", "role": "implemented"},
+    {"id": "IDEA-101", "status": "promoted", "layer": "auth/api", "role": "implemented"},
+    {"id": "IDEA-94", "status": "promoted", "layer": "api", "role": "reused-unmodified-plus-header-check"},
+    {"id": "IDEA-95", "status": "promoted", "layer": "domain", "role": "reused-unmodified"},
+    {"id": "IDEA-96", "status": "promoted", "layer": "persistence", "role": "reused-unmodified"},
+    {"id": "IDEA-53", "status": "promoted", "layer": "domain", "role": "amended"}
+  ],
+  "subGoals": [
+    {
+      "id": "SG1",
+      "layer": "persistence",
+      "dependsOn": [],
+      "objective": "Add workspace_id + default-workspace backfill + composite unique indexes to chunks, edges, branches, artifacts, chunk_artifacts, suggestions, verification_signals, feedback_notifications.",
+      "acceptanceCriteria": [
+        "workspace_id column added to all 8 named tables via a new sequential migration",
+        "Default workspace created and all pre-existing rows backfilled to it before NOT NULL constraint applied",
+        "Global uniqueness (e.g. chunk label) replaced with composite (workspace_id, ...) indexes",
+        "No repository query filtering changes yet (schema-only); existing tests remain green"
+      ],
+      "verification": "pnpm --filter store build; pnpm test:store",
+      "status": "done"
+    },
+    {
+      "id": "SG2",
+      "layer": "auth",
+      "dependsOn": [],
+      "objective": "Add workspaceId claim to session tokens and a workspace-less bootstrap OAuth path.",
+      "acceptanceCriteria": [
+        "SessionTokenClaims.workspaceId: string | null",
+        "GET /auth/github/login accepts optional workspaceId query param round-tripped through state",
+        "Callback mints workspace-bound token only after WorkspaceRepository.isMember confirms membership",
+        "Callback mints workspace-less bootstrap token only when stakeholder has zero memberships; 400 if they have memberships and omit workspaceId",
+        "tools/dev-session-token/get-dev-session-token.mjs updated to accept WORKSPACE_ID"
+      ],
+      "verification": "pnpm test:store (auth.service.spec.ts, session-token.service.spec.ts, auth.controller.spec.ts)",
+      "status": "done"
+    },
+    {
+      "id": "SG3",
+      "layer": "domain",
+      "dependsOn": ["SG1", "SG2"],
+      "objective": "Reusable two-tier workspace-scope assertion implementing IDEA-98/IDEA-100.",
+      "acceptanceCriteria": [
+        "Single assertion function handles both token-claim comparison and delegated caller-stakeholderId membership check",
+        "Missing X-Workspace-Id header is itself a rejection",
+        "Distinct WorkspaceScopeViolationError (or equivalent) thrown on mismatch/no-membership"
+      ],
+      "verification": "pnpm test:store (new domain spec)",
+      "status": "done"
+    },
+    {
+      "id": "SG4",
+      "layer": "api",
+      "dependsOn": ["SG3"],
+      "objective": "Wire workspace scoping into chunks, edges, branches controllers/services/repositories, and the workspaces/:id/members header check.",
+      "acceptanceCriteria": [
+        "All chunk/edge/branch endpoints require and validate X-Workspace-Id via SG3",
+        "Chunk labels unique per workspace end-to-end (two workspaces can each have the same label)",
+        "POST /workspaces/:id/members requires X-Workspace-Id == :id; POST /workspaces requires no header",
+        "Repository reads exclude cross-workspace rows"
+      ],
+      "verification": "pnpm test:store (chunks/edges/branches/workspaces specs)",
+      "status": "done"
+    },
+    {
+      "id": "SG5",
+      "layer": "api/persistence",
+      "dependsOn": ["SG4"],
+      "objective": "Wire workspace scoping into artifacts, suggestions, verification-signals, notifications; prefix artifact blob keys with workspaceId per IDEA-93.",
+      "acceptanceCriteria": [
+        "Artifact create/attach/list/download-token-issuance require and validate X-Workspace-Id (delegated tier)",
+        "GET /artifacts/content/:token explicitly exempted from header check (documented rationale: token already artifact/workspace-bound)",
+        "ArtifactBlobStore keys prefixed {workspaceId}/{artifactId}/{filename}; pre-migration artifacts resolve via SG1's default workspace",
+        "Suggestions/verification-signals/notifications endpoints require and validate X-Workspace-Id at the correct tier (token-gated vs delegated)"
+      ],
+      "verification": "pnpm test:store (artifacts/suggestions/verification-signals/notifications specs, blob-store key-prefix spec)",
+      "status": "done"
+    },
+    {
+      "id": "SG6",
+      "layer": "mcp",
+      "dependsOn": ["SG5"],
+      "objective": "Pass workspaceId through all 7 MCP tools as X-Workspace-Id on store calls.",
+      "acceptanceCriteria": [
+        "All 7 tools (capture-chunk, create-branch, create-edge, submit-suggestion, submit-verification-signal, attach-artifact-to-chunk, upload-artifact) accept workspaceId input",
+        "Each sets X-Workspace-Id on its outbound store request",
+        "Store workspace-scope rejections surface as clear MCP tool errors"
+      ],
+      "verification": "pnpm test:mcp",
+      "status": "done"
+    },
+    {
+      "id": "SG7",
+      "layer": "docker-e2e",
+      "dependsOn": ["SG6"],
+      "objective": "Containerized end-to-end verification of the full workspace-isolation flow using real session tokens minted via pnpm dev:session-token.",
+      "acceptanceCriteria": [
+        "Bootstrap token (zero memberships) succeeds only against POST /workspaces, 403 elsewhere",
+        "Re-auth with workspaceId yields workspace-bound token",
+        "Delegated chunk capture succeeds with matching X-Workspace-Id/membership, rejected on mismatch",
+        "Same-label chunks in two workspaces both succeed and remain isolated on read",
+        "Token-gated route rejects X-Workspace-Id/token-claim mismatch",
+        "Uploaded artifact stored under {workspaceId}/... key and retrievable via its download-token flow"
+      ],
+      "verification": "Manual/scripted HTTP against docker compose up --build spoolstore, tokens via pnpm dev:session-token",
+      "status": "done"
+    }
+  ]
+}
+</script>
+
+</body>
+</html>

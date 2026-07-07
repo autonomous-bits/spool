@@ -94,6 +94,23 @@ describe('WorkspaceRepository (containerized Postgres)', () => {
     );
   });
 
+  it('hasAnyMembership reflects zero-vs-nonzero total memberships across all workspaces', async () => {
+    const freshStakeholderId = randomUUID();
+    await pool.query(
+      `INSERT INTO stakeholders (id, name, email, role, discipline, github_login)
+       VALUES ($1, 'Fresh Stakeholder', $2, 'stakeholder', 'engineering', $3)`,
+      [freshStakeholderId, `fresh-${freshStakeholderId}@spool.local`, `fresh-${freshStakeholderId}`],
+    );
+
+    await expect(workspaceRepository.hasAnyMembership(freshStakeholderId)).resolves.toBe(false);
+
+    await workspaceRepository.createWithFirstMember(
+      buildWorkspace({ createdByStakeholderId: freshStakeholderId }),
+    );
+
+    await expect(workspaceRepository.hasAnyMembership(freshStakeholderId)).resolves.toBe(true);
+  });
+
   it('addMember adds a new member when the caller is an existing member', async () => {
     const workspace = await workspaceRepository.createWithFirstMember(buildWorkspace());
 

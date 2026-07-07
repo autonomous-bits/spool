@@ -4,6 +4,7 @@ import { parseVerificationSignalStatus } from './types/vocabulary/verification-s
 
 export interface VerificationSignalProps {
   id?: string;
+  workspaceId: string;
   branchId: string;
   verifierName: string;
   status: VerificationSignalStatus;
@@ -28,6 +29,7 @@ function requireNonBlank(value: string, fieldName: string): string {
  */
 export class VerificationSignal {
   readonly id: string;
+  readonly workspaceId: string;
   readonly branchId: string;
   readonly verifierName: string;
   readonly status: VerificationSignalStatus;
@@ -39,6 +41,7 @@ export class VerificationSignal {
       throw new TypeError('VerificationSignal requires a non-blank branchId');
     }
 
+    this.workspaceId = requireNonBlank(props.workspaceId, 'workspaceId');
     this.verifierName = requireNonBlank(props.verifierName, 'verifierName');
     this.status = parseVerificationSignalStatus(props.status);
     this.id = props.id ?? randomUUID();

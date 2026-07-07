@@ -12,6 +12,11 @@
  * (`MAX_BODY_BYTES` in server.ts) already prevents unbounded buffering of the whole tool-call
  * request, but a clear, tool-scoped rejection of an oversized artifact -- rather than a generic
  * "body too large" -- gives the calling agent an unambiguous, non-crashing error to react to.
+ *
+ * G11 SG6 (Meridian IDEA-92/IDEA-98/IDEA-100): `POST /artifacts` sits on the delegated,
+ * tokenless auth tier, so this tool requires a `workspaceId` input and forwards it as the
+ * store's `X-Workspace-Id` header (not a body field) — the store validates it against a
+ * `workspace_memberships` row for the caller-supplied `stakeholderId`.
  */
 
 /** Untrusted-input shape mirroring the store's `CreateArtifactRequest` (apps/store/src/artifacts). */
@@ -19,6 +24,7 @@ export interface UploadArtifactInput {
   content: string;
   mimeType: string;
   stakeholderId: string;
+  workspaceId: string;
 }
 
 /** Artifact metadata as returned by the store's `POST /artifacts` on success. */
@@ -81,6 +87,7 @@ export function parseUploadArtifactInput(body: unknown): UploadArtifactInput {
   const content = requireStringField(record, 'content');
   const mimeType = requireStringField(record, 'mimeType');
   const stakeholderId = requireStringField(record, 'stakeholderId');
+  const workspaceId = requireStringField(record, 'workspaceId');
 
   if (!BASE64_PATTERN.test(content) || content.length % 4 !== 0) {
     throw new UploadArtifactValidationError('content must be base64-encoded', 400);
@@ -93,7 +100,7 @@ export function parseUploadArtifactInput(body: unknown): UploadArtifactInput {
     );
   }
 
-  return { content, mimeType, stakeholderId } satisfies UploadArtifactInput;
+  return { content, mimeType, stakeholderId, workspaceId } satisfies UploadArtifactInput;
 }
 
 function extractErrorMessage(body: unknown, fallback: string): string {
@@ -117,10 +124,11 @@ export async function uploadArtifact(
   input: UploadArtifactInput,
   harnessUrl: string,
 ): Promise<UploadArtifactResult> {
+  const { workspaceId, ...body } = input;
   const response = await fetch(`${harnessUrl}/artifacts`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(input),
+    headers: { 'content-type': 'application/json', 'x-workspace-id': workspaceId },
+    body: JSON.stringify(body),
   });
 
   const payload: unknown = await response.json().catch(() => undefined);

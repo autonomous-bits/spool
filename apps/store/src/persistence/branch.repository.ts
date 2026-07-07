@@ -6,6 +6,7 @@ import { PG_POOL } from './pg-pool.token.js';
 
 export interface BranchRow extends QueryResultRow {
   id: string;
+  workspace_id: string;
   name: string;
   discipline: string;
   status: string;
@@ -59,6 +60,7 @@ function chunkArtifactIdentityKey(row: ChunkArtifactIdentityRow): string {
 export function toBranch(row: BranchRow): Branch {
   return new Branch({
     id: row.id,
+    workspaceId: row.workspace_id,
     name: row.name,
     discipline: row.discipline as Branch['discipline'],
     status: row.status as Branch['status'],
@@ -97,17 +99,18 @@ export class BranchRepository {
          SELECT clock_timestamp() AS persisted_at
        )
        INSERT INTO branches (
-         id, name, discipline, status, diverged_at,
+         id, workspace_id, name, discipline, status, diverged_at,
          created_by_stakeholder_id, created_at, updated_at
        )
        SELECT
-         $1, $2, $3, $4, $5, $6,
+         $1, $2, $3, $4, $5, $6, $7,
          persisted_timestamps.persisted_at,
          persisted_timestamps.persisted_at
        FROM persisted_timestamps
        RETURNING *`,
       [
         branch.id,
+        branch.workspaceId,
         branch.name,
         branch.discipline,
         branch.status,
@@ -125,20 +128,21 @@ export class BranchRepository {
   }
 
   /**
-   * Looks up a branch by id. Returns `undefined` as an explicit not-found result rather than
-   * throwing, so callers can distinguish "not found" from an actual persistence error.
+   * Looks up a branch by id, scoped to a workspace (Meridian IDEA-98/IDEA-100, G11 SG4). A
+   * cross-workspace id is indistinguishable from "does not exist" (returns `undefined`, not a
+   * scope violation) so a lookup can never leak whether an id exists in another workspace.
    */
-  async findById(id: string): Promise<Branch | undefined> {
+  async findById(id: string, workspaceId: string): Promise<Branch | undefined> {
     const result: QueryResult<BranchRow> = await this.pool.query<BranchRow>(
-      'SELECT * FROM branches WHERE id = $1',
-      [id],
+      'SELECT * FROM branches WHERE id = $1 AND workspace_id = $2',
+      [id, workspaceId],
     );
 
     const row = result.rows[0];
     return row === undefined ? undefined : toBranch(row);
   }
 
-  async submit(branchId: string): Promise<Branch | undefined> {
+  async submit(branchId: string, workspaceId: string): Promise<Branch | undefined> {
     const client = await this.pool.connect();
     let transactionOpen = false;
 
@@ -154,8 +158,8 @@ export class BranchRepository {
       }
 
       const branchResult: QueryResult<BranchRow> = await client.query<BranchRow>(
-        'SELECT * FROM branches WHERE id = $1 FOR UPDATE',
-        [branchId],
+        'SELECT * FROM branches WHERE id = $1 AND workspace_id = $2 FOR UPDATE',
+        [branchId, workspaceId],
       );
       const branchRow = branchResult.rows[0];
       if (
@@ -168,8 +172,8 @@ export class BranchRepository {
       }
 
       const result: QueryResult<BranchRow> = await client.query<BranchRow>(
-        "UPDATE branches SET status='submitted', submitted_at=now(), updated_at=now() WHERE id=$1 RETURNING *",
-        [branchId],
+        "UPDATE branches SET status='submitted', submitted_at=now(), updated_at=now() WHERE id=$1 AND workspace_id=$2 RETURNING *",
+        [branchId, workspaceId],
       );
 
       const row = result.rows[0];
@@ -190,7 +194,7 @@ export class BranchRepository {
     }
   }
 
-  async verify(branchId: string): Promise<Branch | undefined> {
+  async verify(branchId: string, workspaceId: string): Promise<Branch | undefined> {
     const client = await this.pool.connect();
     let transactionOpen = false;
 
@@ -206,8 +210,8 @@ export class BranchRepository {
       }
 
       const branchResult: QueryResult<BranchRow> = await client.query<BranchRow>(
-        'SELECT * FROM branches WHERE id = $1 FOR UPDATE',
-        [branchId],
+        'SELECT * FROM branches WHERE id = $1 AND workspace_id = $2 FOR UPDATE',
+        [branchId, workspaceId],
       );
       const branchRow = branchResult.rows[0];
       if (
@@ -220,8 +224,8 @@ export class BranchRepository {
       }
 
       const result: QueryResult<BranchRow> = await client.query<BranchRow>(
-        "UPDATE branches SET status='verified', verified_at=now(), updated_at=now() WHERE id=$1 RETURNING *",
-        [branchId],
+        "UPDATE branches SET status='verified', verified_at=now(), updated_at=now() WHERE id=$1 AND workspace_id=$2 RETURNING *",
+        [branchId, workspaceId],
       );
 
       const row = result.rows[0];
@@ -242,7 +246,7 @@ export class BranchRepository {
     }
   }
 
-  async reject(branchId: string): Promise<Branch | undefined> {
+  async reject(branchId: string, workspaceId: string): Promise<Branch | undefined> {
     const client = await this.pool.connect();
     let transactionOpen = false;
 
@@ -258,8 +262,8 @@ export class BranchRepository {
       }
 
       const branchResult: QueryResult<BranchRow> = await client.query<BranchRow>(
-        'SELECT * FROM branches WHERE id = $1 FOR UPDATE',
-        [branchId],
+        'SELECT * FROM branches WHERE id = $1 AND workspace_id = $2 FOR UPDATE',
+        [branchId, workspaceId],
       );
       const branchRow = branchResult.rows[0];
       if (
@@ -273,8 +277,8 @@ export class BranchRepository {
       }
 
       const result: QueryResult<BranchRow> = await client.query<BranchRow>(
-        "UPDATE branches SET status='draft', verified_at=NULL, submitted_at=NULL, updated_at=now() WHERE id=$1 RETURNING *",
-        [branchId],
+        "UPDATE branches SET status='draft', verified_at=NULL, submitted_at=NULL, updated_at=now() WHERE id=$1 AND workspace_id=$2 RETURNING *",
+        [branchId, workspaceId],
       );
 
       const row = result.rows[0];
@@ -317,7 +321,11 @@ export class BranchRepository {
    * or not in 'verified' status, so callers can distinguish "not mergeable" from a genuine
    * identity conflict.
    */
-  async merge(branchId: string, mergedByStakeholderId: string): Promise<BranchMergeResult | undefined> {
+  async merge(
+    branchId: string,
+    workspaceId: string,
+    mergedByStakeholderId: string,
+  ): Promise<BranchMergeResult | undefined> {
     const client = await this.pool.connect();
     let transactionOpen = false;
 
@@ -326,8 +334,8 @@ export class BranchRepository {
       transactionOpen = true;
 
       const branchResult: QueryResult<BranchRow> = await client.query<BranchRow>(
-        'SELECT * FROM branches WHERE id = $1 FOR UPDATE',
-        [branchId],
+        'SELECT * FROM branches WHERE id = $1 AND workspace_id = $2 FOR UPDATE',
+        [branchId, workspaceId],
       );
       const branchRow = branchResult.rows[0];
       if (branchRow?.status !== 'verified') {
@@ -336,16 +344,21 @@ export class BranchRepository {
         return undefined;
       }
 
+      // G11 SG4: every collision check and mutation below is additionally scoped to
+      // `workspace_id` (both the branch-scoped and mainline sides), so a merge can never
+      // collide with — or promote into — a row from a different workspace.
       const chunkLabelCollisions: QueryResult<LabelRow> = await client.query<LabelRow>(
         `SELECT branch_chunks.label
            FROM chunks branch_chunks
            JOIN chunks mainline_chunks
              ON mainline_chunks.label = branch_chunks.label
+            AND mainline_chunks.workspace_id = branch_chunks.workspace_id
             AND mainline_chunks.branch_id IS NULL
             AND mainline_chunks.status = 'promoted'
           WHERE branch_chunks.branch_id = $1
+            AND branch_chunks.workspace_id = $2
             AND branch_chunks.status = 'draft'`,
-        [branchId],
+        [branchId, workspaceId],
       );
       if (chunkLabelCollisions.rows.length > 0) {
         await client.query('ROLLBACK');
@@ -363,11 +376,13 @@ export class BranchRepository {
              ON mainline_edges.from_chunk_label = branch_edges.from_chunk_label
             AND mainline_edges.to_chunk_label = branch_edges.to_chunk_label
             AND mainline_edges.type = branch_edges.type
+            AND mainline_edges.workspace_id = branch_edges.workspace_id
             AND mainline_edges.branch_id IS NULL
             AND mainline_edges.status = 'active'
           WHERE branch_edges.branch_id = $1
+            AND branch_edges.workspace_id = $2
             AND branch_edges.status = 'active'`,
-        [branchId],
+        [branchId, workspaceId],
       );
       if (edgeIdentityCollisions.rows.length > 0) {
         await client.query('ROLLBACK');
@@ -388,6 +403,7 @@ export class BranchRepository {
              SELECT DISTINCT ON (chunk_label, artifact_id) chunk_label, artifact_id, status
                FROM chunk_artifacts
               WHERE branch_id = $1
+                AND workspace_id = $2
               ORDER BY chunk_label, artifact_id, created_at DESC, id DESC
            )
            SELECT authoritative_branch_rows.chunk_label, authoritative_branch_rows.artifact_id
@@ -395,10 +411,11 @@ export class BranchRepository {
              JOIN chunk_artifacts mainline_chunk_artifacts
                ON mainline_chunk_artifacts.chunk_label = authoritative_branch_rows.chunk_label
               AND mainline_chunk_artifacts.artifact_id = authoritative_branch_rows.artifact_id
+              AND mainline_chunk_artifacts.workspace_id = $2
               AND mainline_chunk_artifacts.branch_id IS NULL
               AND mainline_chunk_artifacts.status = 'active'
             WHERE authoritative_branch_rows.status = 'active'`,
-          [branchId],
+          [branchId, workspaceId],
         );
       if (chunkArtifactCollisions.rows.length > 0) {
         await client.query('ROLLBACK');
@@ -410,12 +427,12 @@ export class BranchRepository {
       }
 
       await client.query(
-        "UPDATE chunks SET branch_id = NULL, status = 'promoted', updated_at = now() WHERE branch_id = $1 AND status = 'draft'",
-        [branchId],
+        "UPDATE chunks SET branch_id = NULL, status = 'promoted', updated_at = now() WHERE branch_id = $1 AND workspace_id = $2 AND status = 'draft'",
+        [branchId, workspaceId],
       );
       await client.query(
-        'UPDATE edges SET branch_id = NULL, updated_at = now() WHERE branch_id = $1 AND status = $2',
-        [branchId, 'active'],
+        'UPDATE edges SET branch_id = NULL, updated_at = now() WHERE branch_id = $1 AND workspace_id = $2 AND status = $3',
+        [branchId, workspaceId, 'active'],
       );
       // Promote only the authoritative (most-recently-created) branch-scoped chunk_artifacts row
       // per (chunk_label, artifact_id) pair — active rows are safe here since the collision check
@@ -427,20 +444,21 @@ export class BranchRepository {
            SELECT DISTINCT ON (chunk_label, artifact_id) id
              FROM chunk_artifacts
             WHERE branch_id = $1
+              AND workspace_id = $2
             ORDER BY chunk_label, artifact_id, created_at DESC, id DESC
          )
          UPDATE chunk_artifacts
             SET branch_id = NULL, updated_at = now()
           WHERE id IN (SELECT id FROM authoritative_branch_rows)`,
-        [branchId],
+        [branchId, workspaceId],
       );
 
       const mergedResult: QueryResult<BranchRow> = await client.query<BranchRow>(
         `UPDATE branches
-            SET status = 'merged', merged_at = now(), merged_by_stakeholder_id = $2, updated_at = now()
-          WHERE id = $1
+            SET status = 'merged', merged_at = now(), merged_by_stakeholder_id = $3, updated_at = now()
+          WHERE id = $1 AND workspace_id = $2
           RETURNING *`,
-        [branchId, mergedByStakeholderId],
+        [branchId, workspaceId, mergedByStakeholderId],
       );
 
       const mergedRow = mergedResult.rows[0];

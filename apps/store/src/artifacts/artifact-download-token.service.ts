@@ -10,9 +10,10 @@ export class InvalidArtifactDownloadTokenError extends Error {
   }
 }
 
-/** Claims carried by a signed artifact-download token: just the artifact it authorizes. */
+/** Claims carried by a signed artifact-download token: the artifact and workspace it authorizes. */
 export interface ArtifactDownloadTokenClaims {
   artifactId: string;
+  workspaceId: string;
 }
 
 export interface IssuedArtifactDownloadToken {
@@ -23,7 +24,7 @@ export interface IssuedArtifactDownloadToken {
 function isValidClaims(
   claims: Record<string, unknown>,
 ): claims is ArtifactDownloadTokenClaims & Record<string, unknown> {
-  return typeof claims.artifactId === 'string';
+  return typeof claims.artifactId === 'string' && typeof claims.workspaceId === 'string';
 }
 
 /**
@@ -32,7 +33,9 @@ function isValidClaims(
  * storage). Reuses the dependency-free HMAC codec in `../auth/hmac-token.js` — the same pattern
  * `SessionTokenService`/`OAuthStateService` use — but with its own secret and claim shape,
  * because this token authorizes downloading one specific blob rather than asserting stakeholder
- * identity.
+ * identity. Carries `workspaceId` (G11 SG5) so `GET /artifacts/content/:token` can redeem the
+ * token without re-checking the `X-Workspace-Id` header: the token was minted from an
+ * already-scoped lookup at issuance time.
  */
 @Injectable()
 export class ArtifactDownloadTokenService {
@@ -40,8 +43,12 @@ export class ArtifactDownloadTokenService {
     @Inject(ARTIFACT_DOWNLOAD_CONFIG) private readonly config: ArtifactDownloadConfig,
   ) {}
 
-  issue(artifactId: string): IssuedArtifactDownloadToken {
-    const token = signHmacToken({ artifactId }, this.config.secret, this.config.maxAgeSeconds);
+  issue(artifactId: string, workspaceId: string): IssuedArtifactDownloadToken {
+    const token = signHmacToken(
+      { artifactId, workspaceId },
+      this.config.secret,
+      this.config.maxAgeSeconds,
+    );
     const expiresAt = new Date(Date.now() + this.config.maxAgeSeconds * 1000);
     return { token, expiresAt };
   }
@@ -65,6 +72,6 @@ export class ArtifactDownloadTokenService {
       throw new InvalidArtifactDownloadTokenError('claims shape is invalid');
     }
 
-    return { artifactId: claims.artifactId };
+    return { artifactId: claims.artifactId, workspaceId: claims.workspaceId };
   }
 }

@@ -15,12 +15,14 @@ import { WorkspacesService } from './workspaces.service.js';
 const WORKSPACE_ID = '00000000-0000-0000-0000-0000000000aa';
 const CALLER_ID = '00000000-0000-0000-0000-000000000001';
 const TARGET_ID = '00000000-0000-0000-0000-000000000002';
+const OTHER_WORKSPACE_ID = '00000000-0000-0000-0000-0000000000bb';
 
 function validClaims(overrides: Partial<SessionTokenClaims> = {}): SessionTokenClaims {
   return {
     stakeholderId: CALLER_ID,
     discipline: 'product',
     authTime: 1_752_000_000,
+    workspaceId: WORKSPACE_ID,
     ...overrides,
   };
 }
@@ -103,11 +105,42 @@ describe('WorkspacesService', () => {
   });
 
   describe('addMember', () => {
+    it('returns 403 when the X-Workspace-Id header is missing', async () => {
+      await expect(
+        service.addMember(WORKSPACE_ID, TARGET_ID, undefined, validClaims()),
+      ).rejects.toThrow(ForbiddenException);
+      expect(workspaceRepository.addMember).not.toHaveBeenCalled();
+    });
+
+    it('returns 403 when the token workspace claim does not match the header workspace id', async () => {
+      await expect(
+        service.addMember(
+          WORKSPACE_ID,
+          TARGET_ID,
+          WORKSPACE_ID,
+          validClaims({ workspaceId: OTHER_WORKSPACE_ID }),
+        ),
+      ).rejects.toThrow(ForbiddenException);
+      expect(workspaceRepository.addMember).not.toHaveBeenCalled();
+    });
+
+    it('returns 403 when the header workspace id does not match the route workspace id', async () => {
+      await expect(
+        service.addMember(
+          WORKSPACE_ID,
+          TARGET_ID,
+          OTHER_WORKSPACE_ID,
+          validClaims({ workspaceId: OTHER_WORKSPACE_ID }),
+        ),
+      ).rejects.toThrow(ForbiddenException);
+      expect(workspaceRepository.addMember).not.toHaveBeenCalled();
+    });
+
     it('returns 404 when the target stakeholder does not exist', async () => {
       vi.mocked(stakeholderRepository.findById).mockResolvedValue(undefined);
 
       await expect(
-        service.addMember(WORKSPACE_ID, TARGET_ID, validClaims()),
+        service.addMember(WORKSPACE_ID, TARGET_ID, WORKSPACE_ID, validClaims()),
       ).rejects.toThrow(NotFoundException);
       expect(workspaceRepository.addMember).not.toHaveBeenCalled();
     });
@@ -120,7 +153,7 @@ describe('WorkspacesService', () => {
       vi.mocked(workspaceRepository.addMember).mockResolvedValue({ kind: 'workspace_not_found' });
 
       await expect(
-        service.addMember(WORKSPACE_ID, TARGET_ID, validClaims()),
+        service.addMember(WORKSPACE_ID, TARGET_ID, WORKSPACE_ID, validClaims()),
       ).rejects.toThrow(NotFoundException);
     });
 
@@ -132,7 +165,7 @@ describe('WorkspacesService', () => {
       vi.mocked(workspaceRepository.addMember).mockResolvedValue({ kind: 'caller_not_member' });
 
       await expect(
-        service.addMember(WORKSPACE_ID, TARGET_ID, validClaims()),
+        service.addMember(WORKSPACE_ID, TARGET_ID, WORKSPACE_ID, validClaims()),
       ).rejects.toThrow(ForbiddenException);
     });
 
@@ -146,7 +179,7 @@ describe('WorkspacesService', () => {
       );
 
       await expect(
-        service.addMember(WORKSPACE_ID, TARGET_ID, validClaims()),
+        service.addMember(WORKSPACE_ID, TARGET_ID, WORKSPACE_ID, validClaims()),
       ).rejects.toThrow(ConflictException);
     });
 
@@ -165,7 +198,7 @@ describe('WorkspacesService', () => {
         membership: membership as never,
       });
 
-      const result = await service.addMember(WORKSPACE_ID, TARGET_ID, validClaims());
+      const result = await service.addMember(WORKSPACE_ID, TARGET_ID, WORKSPACE_ID, validClaims());
 
       expect(result).toMatchObject({ workspaceId: WORKSPACE_ID, stakeholderId: TARGET_ID });
       expect(workspaceRepository.addMember).toHaveBeenCalledWith(

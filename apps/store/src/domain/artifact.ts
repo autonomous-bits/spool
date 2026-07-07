@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 export interface ArtifactProps {
   id?: string;
+  workspaceId: string;
   uri: string;
   mimeType: string;
   createdByStakeholderId: string;
@@ -27,12 +28,14 @@ function requireNonBlank(value: string, fieldName: string): string {
  */
 export class Artifact {
   readonly id: string;
+  readonly workspaceId: string;
   readonly uri: string;
   readonly mimeType: string;
   readonly createdByStakeholderId: string;
   readonly createdAt: Date;
 
   constructor(props: ArtifactProps) {
+    this.workspaceId = requireNonBlank(props.workspaceId, 'workspaceId');
     this.uri = requireNonBlank(props.uri, 'uri');
     this.mimeType = requireNonBlank(props.mimeType, 'mimeType');
 

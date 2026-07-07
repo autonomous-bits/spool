@@ -17,6 +17,7 @@ import type {
 
 function validBranchProps(overrides: Partial<BranchProps> = {}): BranchProps {
   return {
+    workspaceId: '00000000-0000-0000-0000-00000000d0fa',
     name: 'feature/branch-submission',
     discipline: 'product',
     createdByStakeholderId: '00000000-0000-0000-0000-000000000001',

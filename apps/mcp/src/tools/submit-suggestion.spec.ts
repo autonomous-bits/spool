@@ -13,6 +13,7 @@ describe('parseSubmitSuggestionInput', () => {
   const chunkBody = {
     discipline: 'product',
     stakeholderId: STAKEHOLDER_ID,
+    workspaceId: 'workspace-1',
     label: 'IDEA-1',
     content: 'Some proposed content.',
   };
@@ -20,6 +21,7 @@ describe('parseSubmitSuggestionInput', () => {
   const edgeBody = {
     discipline: 'product',
     stakeholderId: STAKEHOLDER_ID,
+    workspaceId: 'workspace-1',
     fromChunkLabel: 'IDEA-1',
     toChunkLabel: 'IDEA-2',
     relationshipType: 'refines',
@@ -38,7 +40,7 @@ describe('parseSubmitSuggestionInput', () => {
     expect(() => parseSubmitSuggestionInput(null)).toThrow(SubmitSuggestionValidationError);
   });
 
-  it.each(['discipline', 'stakeholderId'])('rejects a missing %s, never inventing one', (field) => {
+  it.each(['discipline', 'stakeholderId', 'workspaceId'])('rejects a missing %s, never inventing one', (field) => {
     const body: Record<string, unknown> = { ...chunkBody };
     Reflect.deleteProperty(body, field);
     expect(() => parseSubmitSuggestionInput(body)).toThrow(new RegExp(field));
@@ -50,7 +52,7 @@ describe('parseSubmitSuggestionInput', () => {
   });
 
   it('rejects a body providing neither chunk nor edge fields', () => {
-    const body = { discipline: 'product', stakeholderId: STAKEHOLDER_ID };
+    const body = { discipline: 'product', stakeholderId: STAKEHOLDER_ID, workspaceId: 'workspace-1' };
     expect(() => parseSubmitSuggestionInput(body)).toThrow(SubmitSuggestionValidationError);
   });
 
@@ -64,6 +66,7 @@ describe('parseSubmitSuggestionInput', () => {
     const body = {
       discipline: 'product',
       stakeholderId: STAKEHOLDER_ID,
+      workspaceId: 'workspace-1',
       fromChunkLabel: 'IDEA-1',
     };
     expect(() => parseSubmitSuggestionInput(body)).toThrow(SubmitSuggestionValidationError);
@@ -79,6 +82,7 @@ describe('submitSuggestion', () => {
   const input: SubmitSuggestionInput = {
     discipline: 'product',
     stakeholderId: STAKEHOLDER_ID,
+    workspaceId: 'workspace-1',
     label: 'IDEA-1',
     content: 'Some proposed content.',
   };
@@ -113,10 +117,11 @@ describe('submitSuggestion', () => {
 
     const result = await submitSuggestion(input, 'http://harness.test');
 
+    const { workspaceId, ...expectedBody } = input;
     expect(fetchMock).toHaveBeenCalledWith('http://harness.test/suggestions', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(input),
+      headers: { 'content-type': 'application/json', 'x-workspace-id': workspaceId },
+      body: JSON.stringify(expectedBody),
     });
     expect(result).toEqual(expected);
     expect(result.id).toBe('suggestion-1');

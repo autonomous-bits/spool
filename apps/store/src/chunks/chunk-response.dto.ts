@@ -11,6 +11,7 @@ import type { Discipline } from '../domain/types/vocabulary/discipline.js';
  */
 export interface ChunkResponse {
   id: string;
+  workspaceId: string;
   label: string;
   content: string;
   discipline: Discipline;
@@ -28,6 +29,7 @@ export interface ChunkResponse {
 export function toChunkResponse(chunk: Chunk): ChunkResponse {
   return {
     id: chunk.id,
+    workspaceId: chunk.workspaceId,
     label: chunk.label,
     content: chunk.content,
     discipline: chunk.discipline,

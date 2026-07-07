@@ -13,6 +13,7 @@ describe('parseCreateBranchInput', () => {
       name: 'feature/foo',
       discipline: 'product',
       stakeholderId: 'stakeholder-1',
+      workspaceId: 'workspace-1',
     };
 
     expect(parseCreateBranchInput(body)).toEqual(body);
@@ -27,6 +28,7 @@ describe('parseCreateBranchInput', () => {
     const body = {
       discipline: 'product',
       stakeholderId: 'stakeholder-1',
+      workspaceId: 'workspace-1',
     };
 
     expect(() => parseCreateBranchInput(body)).toThrow(/name/);
@@ -37,6 +39,7 @@ describe('parseCreateBranchInput', () => {
       name: '   ',
       discipline: 'product',
       stakeholderId: 'stakeholder-1',
+      workspaceId: 'workspace-1',
     };
 
     expect(() => parseCreateBranchInput(body)).toThrow(/name/);
@@ -46,9 +49,20 @@ describe('parseCreateBranchInput', () => {
     const body = {
       name: 'feature/foo',
       discipline: 'product',
+      workspaceId: 'workspace-1',
     };
 
     expect(() => parseCreateBranchInput(body)).toThrow(/stakeholderId/);
+  });
+
+  it('rejects a missing workspaceId, never inventing one', () => {
+    const body = {
+      name: 'feature/foo',
+      discipline: 'product',
+      stakeholderId: 'stakeholder-1',
+    };
+
+    expect(() => parseCreateBranchInput(body)).toThrow(/workspaceId/);
   });
 });
 
@@ -57,6 +71,7 @@ describe('createBranch', () => {
     name: 'feature/foo',
     discipline: 'product',
     stakeholderId: 'stakeholder-1',
+    workspaceId: 'workspace-1',
   };
 
   afterEach(() => {
@@ -83,10 +98,11 @@ describe('createBranch', () => {
 
     const result = await createBranch(input, 'http://harness.test');
 
+    const { workspaceId, ...expectedBody } = input;
     expect(fetchMock).toHaveBeenCalledWith('http://harness.test/branches', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(input),
+      headers: { 'content-type': 'application/json', 'x-workspace-id': workspaceId },
+      body: JSON.stringify(expectedBody),
     });
     expect(result).toEqual(expected);
     expect(result.id).toBe('branch-1');

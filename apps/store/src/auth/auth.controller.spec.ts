@@ -30,10 +30,19 @@ describe('AuthController', () => {
 
     const result = controller.login();
 
+    expect(service.buildLoginRedirectUrl).toHaveBeenCalledWith(undefined);
     expect(result).toEqual({
       url: 'https://github.com/login/oauth/authorize?state=abc',
       statusCode: 302,
     });
+  });
+
+  it('login passes an explicit workspaceId query param through to AuthService', () => {
+    vi.mocked(service.buildLoginRedirectUrl).mockReturnValue('https://github.com/login/oauth/authorize?state=abc');
+
+    controller.login('workspace-1');
+
+    expect(service.buildLoginRedirectUrl).toHaveBeenCalledWith('workspace-1');
   });
 
   it('callback delegates to AuthService and wraps the token in a response body', async () => {

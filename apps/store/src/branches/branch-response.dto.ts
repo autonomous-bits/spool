@@ -14,6 +14,7 @@ import type { Discipline } from '../domain/types/vocabulary/discipline.js';
  */
 export interface BranchResponse {
   id: string;
+  workspaceId: string;
   name: string;
   discipline: Discipline;
   status: BranchStatus;
@@ -30,6 +31,7 @@ export interface BranchResponse {
 export function toBranchResponse(branch: Branch): BranchResponse {
   return {
     id: branch.id,
+    workspaceId: branch.workspaceId,
     name: branch.name,
     discipline: branch.discipline,
     status: branch.status,

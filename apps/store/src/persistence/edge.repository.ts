@@ -5,6 +5,7 @@ import { PG_POOL } from './pg-pool.token.js';
 
 interface EdgeRow extends QueryResultRow {
   id: string;
+  workspace_id: string;
   from_chunk_label: string;
   to_chunk_label: string;
   type: string;
@@ -22,6 +23,7 @@ interface EdgeRow extends QueryResultRow {
 function toEdge(row: EdgeRow): Edge {
   return new Edge({
     id: row.id,
+    workspaceId: row.workspace_id,
     fromChunkLabel: row.from_chunk_label,
     toChunkLabel: row.to_chunk_label,
     type: row.type as Edge['type'],
@@ -46,14 +48,15 @@ function createNonDraftBranchConflict(branchId: string): ConflictException {
 async function insertEdge(queryable: Queryable, edge: Edge): Promise<Edge> {
   const result: QueryResult<EdgeRow> = await queryable.query<EdgeRow>(
     `INSERT INTO edges (
-       id, from_chunk_label, to_chunk_label, type, status, discipline,
+       id, workspace_id, from_chunk_label, to_chunk_label, type, status, discipline,
        branch_id, origin_branch_id, superseded_by_edge_id,
        created_by_stakeholder_id, updated_by_stakeholder_id,
        created_at, updated_at
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
      RETURNING *`,
     [
       edge.id,
+      edge.workspaceId,
       edge.fromChunkLabel,
       edge.toChunkLabel,
       edge.type,
@@ -138,13 +141,14 @@ export class EdgeRepository {
   }
 
   /**
-   * Looks up an edge by id. Returns `undefined` as an explicit not-found result rather than
-   * throwing, so callers can distinguish "not found" from an actual persistence error.
+   * Looks up an edge by id, scoped to a workspace (Meridian IDEA-98/IDEA-100, G11 SG4). A
+   * cross-workspace id is indistinguishable from "does not exist" (returns `undefined`, not a
+   * scope violation) so a lookup can never leak whether an id exists in another workspace.
    */
-  async findById(id: string): Promise<Edge | undefined> {
+  async findById(id: string, workspaceId: string): Promise<Edge | undefined> {
     const result: QueryResult<EdgeRow> = await this.pool.query<EdgeRow>(
-      'SELECT * FROM edges WHERE id = $1',
-      [id],
+      'SELECT * FROM edges WHERE id = $1 AND workspace_id = $2',
+      [id, workspaceId],
     );
 
     const row = result.rows[0];

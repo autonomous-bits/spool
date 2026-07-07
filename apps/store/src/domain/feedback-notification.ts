@@ -3,6 +3,7 @@ import { parseNotificationStatus } from './types/vocabulary/notification-status.
 
 export interface FeedbackNotificationProps {
   id: string;
+  workspaceId: string;
   branchId: string;
   stakeholderId: string;
   signalId: string;
@@ -20,6 +21,7 @@ export interface FeedbackNotificationProps {
  */
 export class FeedbackNotification {
   readonly id: string;
+  readonly workspaceId: string;
   readonly branchId: string;
   readonly stakeholderId: string;
   readonly signalId: string;
@@ -29,6 +31,7 @@ export class FeedbackNotification {
 
   constructor(props: FeedbackNotificationProps) {
     this.id = props.id;
+    this.workspaceId = props.workspaceId;
     this.branchId = props.branchId;
     this.stakeholderId = props.stakeholderId;
     this.signalId = props.signalId;

@@ -7,10 +7,13 @@ import { SuggestionsController } from './suggestions.controller.js';
 import { SuggestionsService } from './suggestions.service.js';
 import type { SuggestionResponse } from './suggestion-response.dto.js';
 
+const WORKSPACE_ID = '00000000-0000-0000-0000-00000000d0fa';
+
 const claims = {
   stakeholderId: 'stakeholder-1',
   discipline: 'product',
   authTime: 1_752_000_000,
+  workspaceId: WORKSPACE_ID,
 } satisfies SessionTokenClaims;
 
 describe('SuggestionsController', () => {
@@ -65,14 +68,25 @@ describe('SuggestionsController', () => {
     } satisfies SuggestionResponse;
     vi.mocked(service.create).mockResolvedValue(expected);
 
-    const result = await controller.create({
-      label: 'ATOMIC-1',
-      content: 'content',
-      discipline: 'product',
-      stakeholderId: 'stakeholder-1',
-    });
+    const result = await controller.create(
+      {
+        label: 'ATOMIC-1',
+        content: 'content',
+        discipline: 'product',
+        stakeholderId: 'stakeholder-1',
+      },
+      WORKSPACE_ID,
+    );
 
     expect(result).toEqual(expected);
+    expect(service.create).toHaveBeenCalledWith(
+      {
+        variant: { kind: 'chunk', label: 'ATOMIC-1', content: 'content' },
+        discipline: 'product',
+        stakeholderId: 'stakeholder-1',
+      },
+      WORKSPACE_ID,
+    );
   });
 
   it('verifies the bearer token, parses the body, and delegates acceptance to SuggestionsService', async () => {
@@ -97,6 +111,7 @@ describe('SuggestionsController', () => {
       'suggestion-1',
       { name: 'accepted-branch' },
       'Bearer signed-token',
+      WORKSPACE_ID,
     );
 
     expect(result).toEqual(expected);
@@ -105,12 +120,13 @@ describe('SuggestionsController', () => {
       'suggestion-1',
       { name: 'accepted-branch' },
       claims,
+      WORKSPACE_ID,
     );
   });
 
   it('rejects accept with a missing Authorization header', async () => {
     await expect(
-      controller.accept('suggestion-1', { name: 'accepted-branch' }, undefined),
+      controller.accept('suggestion-1', { name: 'accepted-branch' }, undefined, WORKSPACE_ID),
     ).rejects.toThrow(UnauthorizedException);
     expect(sessionTokenService.verify).not.toHaveBeenCalled();
     expect(service.accept).not.toHaveBeenCalled();
@@ -118,7 +134,12 @@ describe('SuggestionsController', () => {
 
   it('rejects accept with a malformed Authorization header', async () => {
     await expect(
-      controller.accept('suggestion-1', { name: 'accepted-branch' }, 'Token signed-token'),
+      controller.accept(
+        'suggestion-1',
+        { name: 'accepted-branch' },
+        'Token signed-token',
+        WORKSPACE_ID,
+      ),
     ).rejects.toThrow(UnauthorizedException);
     expect(sessionTokenService.verify).not.toHaveBeenCalled();
     expect(service.accept).not.toHaveBeenCalled();
@@ -145,15 +166,15 @@ describe('SuggestionsController', () => {
     vi.mocked(sessionTokenService.verify).mockReturnValue(claims);
     vi.mocked(service.reject).mockResolvedValue(suggestionResponse);
 
-    const result = await controller.reject('suggestion-1', 'Bearer signed-token');
+    const result = await controller.reject('suggestion-1', 'Bearer signed-token', WORKSPACE_ID);
 
     expect(result).toEqual(suggestionResponse);
     expect(sessionTokenService.verify).toHaveBeenCalledWith('signed-token');
-    expect(service.reject).toHaveBeenCalledWith('suggestion-1', claims);
+    expect(service.reject).toHaveBeenCalledWith('suggestion-1', claims, WORKSPACE_ID);
   });
 
   it('rejects reject with a missing Authorization header', async () => {
-    await expect(controller.reject('suggestion-1', undefined)).rejects.toThrow(
+    await expect(controller.reject('suggestion-1', undefined, WORKSPACE_ID)).rejects.toThrow(
       UnauthorizedException,
     );
     expect(service.reject).not.toHaveBeenCalled();
@@ -162,27 +183,41 @@ describe('SuggestionsController', () => {
   it('delegates GET /suggestions/:id to SuggestionsService', async () => {
     vi.mocked(service.findById).mockResolvedValue(suggestionResponse);
 
-    const result = await controller.findOne('suggestion-1');
+    const result = await controller.findOne('suggestion-1', 'stakeholder-1', WORKSPACE_ID);
 
     expect(result).toEqual(suggestionResponse);
-    expect(service.findById).toHaveBeenCalledWith('suggestion-1');
+    expect(service.findById).toHaveBeenCalledWith('suggestion-1', 'stakeholder-1', WORKSPACE_ID);
+  });
+
+  it('throws BadRequestException from GET /suggestions/:id when stakeholderId query param is missing', async () => {
+    await expect(controller.findOne('suggestion-1', undefined, WORKSPACE_ID)).rejects.toThrow(
+      'stakeholderId',
+    );
+    expect(service.findById).not.toHaveBeenCalled();
   });
 
   it('delegates GET /suggestions with an optional status filter to SuggestionsService', async () => {
     vi.mocked(service.findAll).mockResolvedValue([suggestionResponse]);
 
-    const result = await controller.findAll('pending');
+    const result = await controller.findAll('pending', 'stakeholder-1', WORKSPACE_ID);
 
     expect(result).toEqual([suggestionResponse]);
-    expect(service.findAll).toHaveBeenCalledWith('pending');
+    expect(service.findAll).toHaveBeenCalledWith('pending', 'stakeholder-1', WORKSPACE_ID);
   });
 
   it('delegates GET /suggestions with no status filter to SuggestionsService', async () => {
     vi.mocked(service.findAll).mockResolvedValue([suggestionResponse]);
 
-    const result = await controller.findAll(undefined);
+    const result = await controller.findAll(undefined, 'stakeholder-1', WORKSPACE_ID);
 
     expect(result).toEqual([suggestionResponse]);
-    expect(service.findAll).toHaveBeenCalledWith(undefined);
+    expect(service.findAll).toHaveBeenCalledWith(undefined, 'stakeholder-1', WORKSPACE_ID);
+  });
+
+  it('throws BadRequestException from GET /suggestions when stakeholderId query param is missing', async () => {
+    await expect(controller.findAll(undefined, undefined, WORKSPACE_ID)).rejects.toThrow(
+      'stakeholderId',
+    );
+    expect(service.findAll).not.toHaveBeenCalled();
   });
 });

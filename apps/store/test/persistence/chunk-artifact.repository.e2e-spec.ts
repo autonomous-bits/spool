@@ -13,8 +13,11 @@ import { BOOTSTRAP_STAKEHOLDER_ID } from '../../src/persistence/bootstrap-stakeh
 import { LocalFileBlobStore } from '../../src/persistence/local-file-blob-store.js';
 import { setUpTestDatabase, type TestDatabase } from '../support/test-database.js';
 
+const WORKSPACE_ID = '00000000-0000-0000-0000-00000000d0fa';
+
 function buildBranch(overrides: Partial<ConstructorParameters<typeof Branch>[0]> = {}): Branch {
   return new Branch({
+    workspaceId: WORKSPACE_ID,
     name: `branch-${Math.random().toString(36).slice(2, 10)}`,
     discipline: 'engineering',
     createdByStakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
@@ -27,6 +30,7 @@ function buildAssociation(
     Pick<ConstructorParameters<typeof ChunkArtifactAssociation>[0], 'chunkLabel' | 'artifactId'>,
 ): ChunkArtifactAssociation {
   return new ChunkArtifactAssociation({
+    workspaceId: WORKSPACE_ID,
     createdByStakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
     ...overrides,
   });
@@ -58,16 +62,19 @@ describe('ChunkArtifactRepository (containerized Postgres)', () => {
     basePath = await mkdtemp(join(tmpdir(), 'spool-chunk-artifacts-test-'));
     artifactRepository = new ArtifactRepository(pool, new LocalFileBlobStore({ basePath }));
     artifactA = await artifactRepository.create({
+      workspaceId: WORKSPACE_ID,
       content: Buffer.from('artifact A'),
       mimeType: 'text/plain',
       createdByStakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
     });
     artifactB = await artifactRepository.create({
+      workspaceId: WORKSPACE_ID,
       content: Buffer.from('artifact B'),
       mimeType: 'text/plain',
       createdByStakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
     });
     artifactC = await artifactRepository.create({
+      workspaceId: WORKSPACE_ID,
       content: Buffer.from('artifact C'),
       mimeType: 'text/plain',
       createdByStakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
@@ -87,7 +94,7 @@ describe('ChunkArtifactRepository (containerized Postgres)', () => {
       buildAssociation({ chunkLabel, artifactId: artifactB.id }),
     );
 
-    const effective = await chunkArtifactRepository.findEffectiveForChunk(chunkLabel, undefined);
+    const effective = await chunkArtifactRepository.findEffectiveForChunk(chunkLabel, undefined, WORKSPACE_ID);
 
     expect(new Map(effective.map((entry) => [entry.artifactId, entry.branchId]))).toEqual(
       new Map([
@@ -116,7 +123,7 @@ describe('ChunkArtifactRepository (containerized Postgres)', () => {
       }),
     );
 
-    const effective = await chunkArtifactRepository.findEffectiveForChunk(chunkLabel, branch.id);
+    const effective = await chunkArtifactRepository.findEffectiveForChunk(chunkLabel, branch.id, WORKSPACE_ID);
 
     expect(new Map(effective.map((entry) => [entry.artifactId, entry.branchId]))).toEqual(
       new Map([[artifactB.id, null]]),
@@ -138,7 +145,7 @@ describe('ChunkArtifactRepository (containerized Postgres)', () => {
       }),
     );
 
-    const effective = await chunkArtifactRepository.findEffectiveForChunk(chunkLabel, branch.id);
+    const effective = await chunkArtifactRepository.findEffectiveForChunk(chunkLabel, branch.id, WORKSPACE_ID);
 
     expect(new Map(effective.map((entry) => [entry.artifactId, entry.branchId]))).toEqual(
       new Map([
@@ -164,7 +171,7 @@ describe('ChunkArtifactRepository (containerized Postgres)', () => {
       }),
     );
 
-    const effective = await chunkArtifactRepository.findEffectiveForChunk(chunkLabel, undefined);
+    const effective = await chunkArtifactRepository.findEffectiveForChunk(chunkLabel, undefined, WORKSPACE_ID);
 
     expect(effective).toEqual([]);
   });
@@ -214,7 +221,7 @@ describe('ChunkArtifactRepository (containerized Postgres)', () => {
       }),
     );
 
-    const effective = await chunkArtifactRepository.findEffectiveForChunk(chunkLabel, branch.id);
+    const effective = await chunkArtifactRepository.findEffectiveForChunk(chunkLabel, branch.id, WORKSPACE_ID);
 
     expect(effective).toEqual([
       { artifactId: artifactA.id, branchId: branch.id, status: 'active' },

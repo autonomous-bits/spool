@@ -36,6 +36,7 @@ pnpm dev:session-token -- --create-branch my-branch engineering
 | `STORE_URL` | `http://localhost:3000` | Base URL of the running store |
 | `OAUTH_CODE` | `dev-code` | Value sent as the callback's `code` param |
 | `STAKEHOLDER_ID` | `00000000-0000-0000-0000-000000000002` | stakeholderId used by `--create-branch` |
+| `WORKSPACE_ID` | (unset) | Optional `workspaceId` query param sent to `/auth/github/login` (Meridian IDEA-92/IDEA-101). Omit for a workspace-less bootstrap token (only valid for a stakeholder with zero memberships). |
 
 Not used by any automated test suite; `tools/` is shared scripts only and application code must
 not import from it (see `docs/constitution.md`).

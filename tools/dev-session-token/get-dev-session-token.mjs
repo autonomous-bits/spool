@@ -19,6 +19,9 @@
  *                        clients used in tests may require an exact match)
  *   STAKEHOLDER_ID       stakeholderId to use for --create-branch (default: the OAuth e2e
  *                        fixture stakeholder seeded by migration 0006, discipline "engineering")
+ *   WORKSPACE_ID         optional workspaceId query param sent to `/auth/github/login` (Meridian
+ *                        IDEA-92/IDEA-101, G11 SG2). Omit it to request a workspace-less
+ *                        bootstrap token (only valid for a stakeholder with zero memberships).
  */
 
 import { parseArgs } from 'node:util';
@@ -27,6 +30,7 @@ const STORE_URL = process.env.STORE_URL ?? 'http://localhost:3000';
 const OAUTH_CODE = process.env.OAUTH_CODE ?? 'dev-code';
 const STAKEHOLDER_ID =
   process.env.STAKEHOLDER_ID ?? '00000000-0000-0000-0000-000000000002';
+const WORKSPACE_ID = process.env.WORKSPACE_ID;
 
 /**
  * Decodes (without verifying) the store's HMAC-token envelope — `${base64url(JSON payload)}.
@@ -50,7 +54,11 @@ function decodeTokenEnvelope(token) {
 }
 
 async function fetchLoginState() {
-  const response = await fetch(`${STORE_URL}/auth/github/login`, { redirect: 'manual' });
+  const url = new URL(`${STORE_URL}/auth/github/login`);
+  if (WORKSPACE_ID !== undefined) {
+    url.searchParams.set('workspaceId', WORKSPACE_ID);
+  }
+  const response = await fetch(url, { redirect: 'manual' });
   const location = response.headers.get('location');
   if (location === null) {
     throw new Error(

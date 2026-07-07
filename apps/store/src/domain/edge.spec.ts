@@ -3,6 +3,7 @@ import { Edge, type EdgeProps } from './edge.js';
 
 function validProps(overrides: Partial<EdgeProps> = {}): EdgeProps {
   return {
+    workspaceId: '00000000-0000-0000-0000-00000000d0fa',
     fromChunkLabel: 'ATOMIC-1',
     toChunkLabel: 'ATOMIC-2',
     type: 'refines',
@@ -70,5 +71,9 @@ describe('Edge', () => {
   it('requires a non-blank createdByStakeholderId', () => {
     expect(() => new Edge(validProps({ createdByStakeholderId: '' }))).toThrow(TypeError);
     expect(() => new Edge(validProps({ createdByStakeholderId: '   ' }))).toThrow(TypeError);
+  });
+
+  it.each(['', '   '])('rejects blank workspaceId %j', (workspaceId) => {
+    expect(() => new Edge(validProps({ workspaceId }))).toThrow(TypeError);
   });
 });

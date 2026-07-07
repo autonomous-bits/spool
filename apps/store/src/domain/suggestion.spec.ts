@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { Suggestion, type SuggestionProps } from './suggestion.js';
 
 const STAKEHOLDER_ID = '00000000-0000-0000-0000-000000000001';
+const WORKSPACE_ID = '00000000-0000-0000-0000-00000000d0fa';
 
 function chunkProps(overrides: Partial<SuggestionProps> = {}): SuggestionProps {
   return {
+    workspaceId: WORKSPACE_ID,
     variant: { kind: 'chunk', label: 'ATOMIC-1', content: 'Some proposed content.' },
     discipline: 'product',
     submittedByStakeholderId: STAKEHOLDER_ID,
@@ -15,6 +17,7 @@ function chunkProps(overrides: Partial<SuggestionProps> = {}): SuggestionProps {
 
 function edgeProps(overrides: Partial<SuggestionProps> = {}): SuggestionProps {
   return {
+    workspaceId: WORKSPACE_ID,
     variant: {
       kind: 'edge',
       fromChunkLabel: 'ATOMIC-1',
@@ -159,5 +162,9 @@ describe('Suggestion', () => {
     expect(() => new Suggestion(chunkProps({ submittedByStakeholderId: '   ' }))).toThrow(
       TypeError,
     );
+  });
+
+  it.each(['', '   '])('rejects a blank workspaceId %j', (workspaceId) => {
+    expect(() => new Suggestion(chunkProps({ workspaceId }))).toThrow(TypeError);
   });
 });

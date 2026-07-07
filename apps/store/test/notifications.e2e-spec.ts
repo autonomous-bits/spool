@@ -8,6 +8,8 @@ import { AppModule } from '../src/app.module.js';
 import { SessionTokenService } from '../src/auth/session-token.service.js';
 import { setUpTestDatabase, type TestDatabase } from './support/test-database.js';
 
+const WORKSPACE_ID = '00000000-0000-0000-0000-00000000d0fa';
+
 function uniqueName(prefix: string): string {
   return `${prefix}-${randomUUID()}`;
 }
@@ -31,6 +33,10 @@ describe('Notifications HTTP API (containerized Postgres)', () => {
         `engineering-${engineeringStakeholderId}@spool.local`,
         `engineering-${engineeringStakeholderId}`,
       ],
+    );
+    await database.pool.query(
+      `INSERT INTO workspace_memberships (workspace_id, stakeholder_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+      [WORKSPACE_ID, engineeringStakeholderId],
     );
 
     const moduleRef: TestingModule = await Test.createTestingModule({
@@ -58,6 +64,7 @@ describe('Notifications HTTP API (containerized Postgres)', () => {
       stakeholderId,
       discipline,
       authTime: Math.floor(Date.now() / 1000),
+      workspaceId: WORKSPACE_ID,
     });
   }
 
@@ -68,17 +75,23 @@ describe('Notifications HTTP API (containerized Postgres)', () => {
        VALUES ($1, $2, $3, 'stakeholder', 'engineering', $4)`,
       [id, `Stakeholder ${id}`, `${id}@spool.local`, `login-${id}`],
     );
+    await database.pool.query(
+      `INSERT INTO workspace_memberships (workspace_id, stakeholder_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+      [WORKSPACE_ID, id],
+    );
     return id;
   }
 
   /**
    * Creates a submitted branch and one verification signal against it, which fans out an
-   * unread `feedback_notifications` row to every stakeholder in the system (G09 SG2), so each
-   * call adds one fresh notification per existing stakeholder.
+   * unread `feedback_notifications` row to every member of the branch's workspace (Meridian
+   * IDEA-67/IDEA-98/IDEA-103, G09 SG2), so each call adds one fresh notification per stakeholder
+   * that is a member of `WORKSPACE_ID`.
    */
   async function createSignal(): Promise<void> {
     const createResponse = await request(app.getHttpServer())
       .post('/branches')
+      .set('X-Workspace-Id', WORKSPACE_ID)
       .send({
         name: uniqueName('e2e-notification-branch'),
         discipline: 'engineering',
@@ -90,11 +103,13 @@ describe('Notifications HTTP API (containerized Postgres)', () => {
     const token = mintSessionToken(engineeringStakeholderId, 'engineering');
     const submitResponse = await request(app.getHttpServer())
       .post(`/branches/${branchId}/submit`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
       .set('Authorization', authHeader(token));
     expect(submitResponse.status).toBe(201);
 
     const signalResponse = await request(app.getHttpServer())
       .post(`/branches/${branchId}/verification-signals`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
       .send({ verifierName: 'ci-evaluator', status: 'pass' });
     expect(signalResponse.status).toBe(201);
   }
@@ -108,6 +123,7 @@ describe('Notifications HTTP API (containerized Postgres)', () => {
     const token = mintSessionToken(stakeholderId, 'engineering');
     const response = await request(app.getHttpServer())
       .get('/notifications')
+      .set('X-Workspace-Id', WORKSPACE_ID)
       .set('Authorization', authHeader(token));
 
     expect(response.status).toBe(200);
@@ -127,6 +143,7 @@ describe('Notifications HTTP API (containerized Postgres)', () => {
     const token = mintSessionToken(stakeholderId, 'engineering');
     const listResponse = await request(app.getHttpServer())
       .get('/notifications')
+      .set('X-Workspace-Id', WORKSPACE_ID)
       .set('Authorization', authHeader(token));
     const notificationId = (listResponse.body as { id: string }[])[0]?.id;
     if (notificationId === undefined) {
@@ -135,10 +152,12 @@ describe('Notifications HTTP API (containerized Postgres)', () => {
 
     await request(app.getHttpServer())
       .post(`/notifications/${notificationId}/read`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
       .set('Authorization', authHeader(token));
 
     const unreadResponse = await request(app.getHttpServer())
       .get('/notifications?status=unread')
+      .set('X-Workspace-Id', WORKSPACE_ID)
       .set('Authorization', authHeader(token));
 
     expect(unreadResponse.status).toBe(200);
@@ -154,6 +173,7 @@ describe('Notifications HTTP API (containerized Postgres)', () => {
     const token = mintSessionToken(stakeholderId, 'engineering');
     const listResponse = await request(app.getHttpServer())
       .get('/notifications')
+      .set('X-Workspace-Id', WORKSPACE_ID)
       .set('Authorization', authHeader(token));
     const notificationId = (listResponse.body as { id: string }[])[0]?.id;
     if (notificationId === undefined) {
@@ -162,6 +182,7 @@ describe('Notifications HTTP API (containerized Postgres)', () => {
 
     const readResponse = await request(app.getHttpServer())
       .post(`/notifications/${notificationId}/read`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
       .set('Authorization', authHeader(token));
 
     expect(readResponse.status).toBe(201);
@@ -176,6 +197,7 @@ describe('Notifications HTTP API (containerized Postgres)', () => {
     const token = mintSessionToken(stakeholderId, 'engineering');
     const listResponse = await request(app.getHttpServer())
       .get('/notifications')
+      .set('X-Workspace-Id', WORKSPACE_ID)
       .set('Authorization', authHeader(token));
     const notificationId = (listResponse.body as { id: string }[])[0]?.id;
     if (notificationId === undefined) {
@@ -185,20 +207,57 @@ describe('Notifications HTTP API (containerized Postgres)', () => {
     const otherToken = mintSessionToken(otherStakeholderId, 'engineering');
     const response = await request(app.getHttpServer())
       .post(`/notifications/${notificationId}/read`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
       .set('Authorization', authHeader(otherToken));
 
     expect(response.status).toBe(404);
   });
 
   it('GET /notifications without a valid session token returns 401', async () => {
-    const response = await request(app.getHttpServer()).get('/notifications');
+    const response = await request(app.getHttpServer())
+      .get('/notifications')
+      .set('X-Workspace-Id', WORKSPACE_ID);
     expect(response.status).toBe(401);
   });
 
+  it('GET /notifications with a valid session token but missing X-Workspace-Id header returns 403', async () => {
+    const stakeholderId = await seedStakeholder();
+    const token = mintSessionToken(stakeholderId, 'engineering');
+
+    const response = await request(app.getHttpServer())
+      .get('/notifications')
+      .set('Authorization', authHeader(token));
+
+    expect(response.status).toBe(403);
+  });
+
+  it('GET /notifications with a valid session token but mismatched X-Workspace-Id header returns 403', async () => {
+    const stakeholderId = await seedStakeholder();
+    const token = mintSessionToken(stakeholderId, 'engineering');
+
+    const response = await request(app.getHttpServer())
+      .get('/notifications')
+      .set('X-Workspace-Id', '00000000-0000-0000-0000-00000000beef')
+      .set('Authorization', authHeader(token));
+
+    expect(response.status).toBe(403);
+  });
+
   it('POST /notifications/:id/read without a valid session token returns 401', async () => {
-    const response = await request(app.getHttpServer()).post(
-      `/notifications/${randomUUID()}/read`,
-    );
+    const response = await request(app.getHttpServer())
+      .post(`/notifications/${randomUUID()}/read`)
+      .set('X-Workspace-Id', WORKSPACE_ID);
     expect(response.status).toBe(401);
+  });
+
+  it('POST /notifications/:id/read with a valid session token but missing X-Workspace-Id header returns 403', async () => {
+    const stakeholderId = await seedStakeholder();
+    const token = mintSessionToken(stakeholderId, 'engineering');
+
+    const response = await request(app.getHttpServer())
+      .post(`/notifications/${randomUUID()}/read`)
+      .set('Authorization', authHeader(token));
+
+    expect(response.status).toBe(403);
   });
 });

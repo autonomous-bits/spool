@@ -9,6 +9,8 @@ import { SessionTokenService } from '../src/auth/session-token.service.js';
 import { BOOTSTRAP_STAKEHOLDER_ID } from '../src/persistence/bootstrap-stakeholder.js';
 import { setUpTestDatabase, type TestDatabase } from './support/test-database.js';
 
+const WORKSPACE_ID = '00000000-0000-0000-0000-00000000d0fa';
+
 function uniqueName(prefix: string): string {
   return `${prefix}-${randomUUID()}`;
 }
@@ -46,6 +48,10 @@ describe('Branches HTTP API (containerized Postgres)', () => {
         `null-discipline-${nullDisciplineStakeholderId}`,
       ],
     );
+    await database.pool.query(
+      `INSERT INTO workspace_memberships (workspace_id, stakeholder_id) VALUES ($1, $2), ($1, $3), ($1, $4) ON CONFLICT DO NOTHING`,
+      [WORKSPACE_ID, engineeringStakeholderId, productStakeholderId, nullDisciplineStakeholderId],
+    );
 
     const moduleRef: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
@@ -66,12 +72,14 @@ describe('Branches HTTP API (containerized Postgres)', () => {
       stakeholderId,
       discipline,
       authTime: Math.floor(Date.now() / 1000),
+      workspaceId: WORKSPACE_ID,
     });
   }
 
   async function createBranch(discipline: 'engineering' | 'product', stakeholderId: string): Promise<string> {
     const createResponse = await request(app.getHttpServer())
       .post('/branches')
+      .set('X-Workspace-Id', WORKSPACE_ID)
       .send({
         name: uniqueName('e2e-branch'),
         discipline,
@@ -91,6 +99,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
 
     const submitResponse = await request(app.getHttpServer())
       .post(`/branches/${branchId}/submit`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
       .set('Authorization', `Bearer ${token}`);
 
     expect(submitResponse.status).toBe(201);
@@ -106,6 +115,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
 
     const verifyResponse = await request(app.getHttpServer())
       .post(`/branches/${branchId}/verify`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
       .set('Authorization', `Bearer ${verifyToken}`);
 
     expect(verifyResponse.status).toBe(201);
@@ -115,6 +125,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
   it('POST /branches creates a draft branch and GET /branches/:id retrieves it', async () => {
     const createResponse = await request(app.getHttpServer())
       .post('/branches')
+      .set('X-Workspace-Id', WORKSPACE_ID)
       .send({
         name: uniqueName('e2e-branch'),
         discipline: 'engineering',
@@ -127,9 +138,10 @@ describe('Branches HTTP API (containerized Postgres)', () => {
     expect(createResponse.body.submittedAt).toBeNull();
     expect(createResponse.body.createdByStakeholderId).toBe(BOOTSTRAP_STAKEHOLDER_ID);
 
-    const getResponse = await request(app.getHttpServer()).get(
-      `/branches/${createResponse.body.id as string}`,
-    );
+    const getResponse = await request(app.getHttpServer())
+      .get(`/branches/${createResponse.body.id as string}`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
+      .query({ stakeholderId: BOOTSTRAP_STAKEHOLDER_ID });
 
     expect(getResponse.status).toBe(200);
     expect(getResponse.body).toMatchObject({
@@ -146,6 +158,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
 
     const submitResponse = await request(app.getHttpServer())
       .post(`/branches/${branchId}/submit`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
       .set('Authorization', `Bearer ${token}`)
       .send({ actorKind: 'delegated', discipline: 'security' });
 
@@ -157,7 +170,10 @@ describe('Branches HTTP API (containerized Postgres)', () => {
     });
     expect(typeof submitResponse.body.submittedAt).toBe('string');
 
-    const getResponse = await request(app.getHttpServer()).get(`/branches/${branchId}`);
+    const getResponse = await request(app.getHttpServer())
+      .get(`/branches/${branchId}`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
+      .query({ stakeholderId: BOOTSTRAP_STAKEHOLDER_ID });
 
     expect(getResponse.status).toBe(200);
     expect(getResponse.body.status).toBe('submitted');
@@ -167,7 +183,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
   it('POST /branches/:id/submit returns 401 when Authorization is missing', async () => {
     const branchId = await createBranch('engineering', engineeringStakeholderId);
 
-    const response = await request(app.getHttpServer()).post(`/branches/${branchId}/submit`);
+    const response = await request(app.getHttpServer()).post(`/branches/${branchId}/submit`).set('X-Workspace-Id', WORKSPACE_ID);
 
     expect(response.status).toBe(401);
   });
@@ -177,6 +193,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
 
     const response = await request(app.getHttpServer())
       .post(`/branches/${branchId}/submit`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
       .set('Authorization', 'Token not-a-bearer-token');
 
     expect(response.status).toBe(401);
@@ -187,6 +204,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
 
     const response = await request(app.getHttpServer())
       .post(`/branches/${branchId}/submit`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
       .set('Authorization', 'Bearer definitely-not-a-valid-token');
 
     expect(response.status).toBe(401);
@@ -197,6 +215,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
 
     const response = await request(app.getHttpServer())
       .post('/branches/00000000-0000-0000-0000-00000000dead/submit')
+      .set('X-Workspace-Id', WORKSPACE_ID)
       .set('Authorization', `Bearer ${token}`);
 
     expect(response.status).toBe(404);
@@ -208,6 +227,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
 
     const response = await request(app.getHttpServer())
       .post(`/branches/${branchId}/submit`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
       .set('Authorization', `Bearer ${token}`);
 
     expect(response.status).toBe(400);
@@ -219,6 +239,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
 
     const response = await request(app.getHttpServer())
       .post(`/branches/${branchId}/submit`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
       .set('Authorization', `Bearer ${token}`);
 
     expect(response.status).toBe(400);
@@ -230,6 +251,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
 
     const response = await request(app.getHttpServer())
       .post(`/branches/${branchId}/submit`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
       .set('Authorization', `Bearer ${token}`);
 
     expect(response.status).toBe(409);
@@ -241,9 +263,11 @@ describe('Branches HTTP API (containerized Postgres)', () => {
 
     const firstResponse = await request(app.getHttpServer())
       .post(`/branches/${branchId}/submit`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
       .set('Authorization', `Bearer ${token}`);
     const repeatedResponse = await request(app.getHttpServer())
       .post(`/branches/${branchId}/submit`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
       .set('Authorization', `Bearer ${token}`);
 
     expect(firstResponse.status).toBe(201);
@@ -256,13 +280,17 @@ describe('Branches HTTP API (containerized Postgres)', () => {
 
     const verifyResponse = await request(app.getHttpServer())
       .post(`/branches/${branchId}/verify`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
       .set('Authorization', `Bearer ${token}`);
 
     expect(verifyResponse.status).toBe(201);
     expect(verifyResponse.body.status).toBe('verified');
     expect(typeof verifyResponse.body.verifiedAt).toBe('string');
 
-    const getResponse = await request(app.getHttpServer()).get(`/branches/${branchId}`);
+    const getResponse = await request(app.getHttpServer())
+      .get(`/branches/${branchId}`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
+      .query({ stakeholderId: BOOTSTRAP_STAKEHOLDER_ID });
     expect(getResponse.body.status).toBe('verified');
     expect(getResponse.body.verifiedAt).toBe(verifyResponse.body.verifiedAt);
   });
@@ -273,6 +301,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
 
     const verifyResponse = await request(app.getHttpServer())
       .post(`/branches/${branchId}/verify`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
       .set('Authorization', `Bearer ${token}`);
 
     expect(verifyResponse.status).toBe(201);
@@ -282,7 +311,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
   it('POST /branches/:id/verify returns 401 when Authorization is missing', async () => {
     const branchId = await createSubmittedBranch('engineering', engineeringStakeholderId);
 
-    const response = await request(app.getHttpServer()).post(`/branches/${branchId}/verify`);
+    const response = await request(app.getHttpServer()).post(`/branches/${branchId}/verify`).set('X-Workspace-Id', WORKSPACE_ID);
 
     expect(response.status).toBe(401);
   });
@@ -292,6 +321,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
 
     const response = await request(app.getHttpServer())
       .post('/branches/00000000-0000-0000-0000-00000000dead/verify')
+      .set('X-Workspace-Id', WORKSPACE_ID)
       .set('Authorization', `Bearer ${token}`);
 
     expect(response.status).toBe(404);
@@ -303,6 +333,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
 
     const response = await request(app.getHttpServer())
       .post(`/branches/${branchId}/verify`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
       .set('Authorization', `Bearer ${token}`);
 
     expect(response.status).toBe(400);
@@ -314,6 +345,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
 
     const response = await request(app.getHttpServer())
       .post(`/branches/${branchId}/verify`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
       .set('Authorization', `Bearer ${token}`);
 
     expect(response.status).toBe(409);
@@ -325,9 +357,11 @@ describe('Branches HTTP API (containerized Postgres)', () => {
 
     const firstResponse = await request(app.getHttpServer())
       .post(`/branches/${branchId}/verify`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
       .set('Authorization', `Bearer ${token}`);
     const repeatedResponse = await request(app.getHttpServer())
       .post(`/branches/${branchId}/verify`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
       .set('Authorization', `Bearer ${token}`);
 
     expect(firstResponse.status).toBe(201);
@@ -340,6 +374,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
 
     const rejectResponse = await request(app.getHttpServer())
       .post(`/branches/${branchId}/reject`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
       .set('Authorization', `Bearer ${token}`);
 
     expect(rejectResponse.status).toBe(201);
@@ -347,7 +382,10 @@ describe('Branches HTTP API (containerized Postgres)', () => {
     expect(rejectResponse.body.verifiedAt).toBeNull();
     expect(rejectResponse.body.submittedAt).toBeNull();
 
-    const getResponse = await request(app.getHttpServer()).get(`/branches/${branchId}`);
+    const getResponse = await request(app.getHttpServer())
+      .get(`/branches/${branchId}`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
+      .query({ stakeholderId: BOOTSTRAP_STAKEHOLDER_ID });
     expect(getResponse.body.status).toBe('draft');
     expect(getResponse.body.verifiedAt).toBeNull();
     expect(getResponse.body.submittedAt).toBeNull();
@@ -358,10 +396,12 @@ describe('Branches HTTP API (containerized Postgres)', () => {
     const verifyToken = mintSessionToken(productStakeholderId, 'product');
     await request(app.getHttpServer())
       .post(`/branches/${branchId}/verify`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
       .set('Authorization', `Bearer ${verifyToken}`);
 
     const rejectResponse = await request(app.getHttpServer())
       .post(`/branches/${branchId}/reject`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
       .set('Authorization', `Bearer ${verifyToken}`);
 
     expect(rejectResponse.status).toBe(201);
@@ -376,6 +416,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
 
     const response = await request(app.getHttpServer())
       .post(`/branches/${branchId}/reject`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
       .set('Authorization', `Bearer ${token}`);
 
     expect(response.status).toBe(409);
@@ -384,7 +425,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
   it('POST /branches/:id/reject returns 401 when Authorization is missing', async () => {
     const branchId = await createSubmittedBranch('engineering', engineeringStakeholderId);
 
-    const response = await request(app.getHttpServer()).post(`/branches/${branchId}/reject`);
+    const response = await request(app.getHttpServer()).post(`/branches/${branchId}/reject`).set('X-Workspace-Id', WORKSPACE_ID);
 
     expect(response.status).toBe(401);
   });
@@ -394,6 +435,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
 
     const response = await request(app.getHttpServer())
       .post('/branches/00000000-0000-0000-0000-00000000dead/reject')
+      .set('X-Workspace-Id', WORKSPACE_ID)
       .set('Authorization', `Bearer ${token}`);
 
     expect(response.status).toBe(404);
@@ -405,13 +447,17 @@ describe('Branches HTTP API (containerized Postgres)', () => {
 
     const mergeResponse = await request(app.getHttpServer())
       .post(`/branches/${branchId}/merge`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
       .set('Authorization', `Bearer ${token}`);
 
     expect(mergeResponse.status).toBe(201);
     expect(mergeResponse.body.status).toBe('merged');
     expect(typeof mergeResponse.body.mergedAt).toBe('string');
 
-    const getResponse = await request(app.getHttpServer()).get(`/branches/${branchId}`);
+    const getResponse = await request(app.getHttpServer())
+      .get(`/branches/${branchId}`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
+      .query({ stakeholderId: BOOTSTRAP_STAKEHOLDER_ID });
     expect(getResponse.body.status).toBe('merged');
     expect(getResponse.body.mergedAt).toBe(mergeResponse.body.mergedAt);
   });
@@ -422,6 +468,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
 
     const mergeResponse = await request(app.getHttpServer())
       .post(`/branches/${branchId}/merge`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
       .set('Authorization', `Bearer ${token}`);
 
     expect(mergeResponse.status).toBe(201);
@@ -434,6 +481,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
 
     const response = await request(app.getHttpServer())
       .post(`/branches/${branchId}/merge`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
       .set('Authorization', `Bearer ${token}`);
 
     expect(response.status).toBe(409);
@@ -442,7 +490,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
   it('POST /branches/:id/merge returns 401 when Authorization is missing', async () => {
     const branchId = await createVerifiedBranch('engineering', engineeringStakeholderId);
 
-    const response = await request(app.getHttpServer()).post(`/branches/${branchId}/merge`);
+    const response = await request(app.getHttpServer()).post(`/branches/${branchId}/merge`).set('X-Workspace-Id', WORKSPACE_ID);
 
     expect(response.status).toBe(401);
   });
@@ -452,6 +500,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
 
     const response = await request(app.getHttpServer())
       .post('/branches/00000000-0000-0000-0000-00000000dead/merge')
+      .set('X-Workspace-Id', WORKSPACE_ID)
       .set('Authorization', `Bearer ${token}`);
 
     expect(response.status).toBe(404);
@@ -460,6 +509,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
   it('POST /branches returns 400 for an invalid discipline', async () => {
     const response = await request(app.getHttpServer())
       .post('/branches')
+      .set('X-Workspace-Id', WORKSPACE_ID)
       .send({
         name: 'bad-vocab-branch',
         discipline: 'bogus',
@@ -478,22 +528,24 @@ describe('Branches HTTP API (containerized Postgres)', () => {
     expect(response.status).toBe(400);
   });
 
-  it('POST /branches returns 400 for an unknown stakeholderId', async () => {
+  it('POST /branches returns 403 for an unknown stakeholderId', async () => {
     const response = await request(app.getHttpServer())
       .post('/branches')
+      .set('X-Workspace-Id', WORKSPACE_ID)
       .send({
         name: uniqueName('e2e-unknown-stakeholder'),
         discipline: 'engineering',
         stakeholderId: '00000000-0000-0000-0000-0000000000ff',
       });
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(403);
   });
 
   it('GET /branches/:id returns 404 for an unknown id', async () => {
-    const response = await request(app.getHttpServer()).get(
-      '/branches/00000000-0000-0000-0000-00000000dead',
-    );
+    const response = await request(app.getHttpServer())
+      .get('/branches/00000000-0000-0000-0000-00000000dead')
+      .set('X-Workspace-Id', WORKSPACE_ID)
+      .query({ stakeholderId: BOOTSTRAP_STAKEHOLDER_ID });
 
     expect(response.status).toBe(404);
   });

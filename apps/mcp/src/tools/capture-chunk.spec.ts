@@ -16,6 +16,7 @@ describe('parseCaptureChunkInput', () => {
       chunkType: 'feature',
       contextKind: 'permanent',
       stakeholderId: 'stakeholder-1',
+      workspaceId: 'workspace-1',
     };
 
     expect(parseCaptureChunkInput(body)).toEqual(body);
@@ -33,6 +34,7 @@ describe('parseCaptureChunkInput', () => {
       chunkType: 'feature',
       contextKind: 'permanent',
       stakeholderId: 'stakeholder-1',
+      workspaceId: 'workspace-1',
     };
 
     expect(() => parseCaptureChunkInput(body)).toThrow(/label/);
@@ -46,9 +48,23 @@ describe('parseCaptureChunkInput', () => {
       chunkType: 'feature',
       contextKind: 'permanent',
       stakeholderId: 'stakeholder-1',
+      workspaceId: 'workspace-1',
     };
 
     expect(() => parseCaptureChunkInput(body)).toThrow(/label/);
+  });
+
+  it('rejects a missing workspaceId, never inventing one', () => {
+    const body = {
+      label: 'ATOMIC-1',
+      content: 'content',
+      discipline: 'product',
+      chunkType: 'feature',
+      contextKind: 'permanent',
+      stakeholderId: 'stakeholder-1',
+    };
+
+    expect(() => parseCaptureChunkInput(body)).toThrow(/workspaceId/);
   });
 
   it('accepts an optional branchId and forwards it as-is', () => {
@@ -59,6 +75,7 @@ describe('parseCaptureChunkInput', () => {
       chunkType: 'feature',
       contextKind: 'permanent',
       stakeholderId: 'stakeholder-1',
+      workspaceId: 'workspace-1',
       branchId: 'branch-1',
     };
 
@@ -73,6 +90,7 @@ describe('parseCaptureChunkInput', () => {
       chunkType: 'feature',
       contextKind: 'permanent',
       stakeholderId: 'stakeholder-1',
+      workspaceId: 'workspace-1',
     };
 
     expect(parseCaptureChunkInput(body)).not.toHaveProperty('branchId');
@@ -86,6 +104,7 @@ describe('parseCaptureChunkInput', () => {
       chunkType: 'feature',
       contextKind: 'permanent',
       stakeholderId: 'stakeholder-1',
+      workspaceId: 'workspace-1',
       branchId: '   ',
     };
 
@@ -101,6 +120,7 @@ describe('captureChunk', () => {
     chunkType: 'feature',
     contextKind: 'permanent',
     stakeholderId: 'stakeholder-1',
+    workspaceId: 'workspace-1',
   };
 
   afterEach(() => {
@@ -132,10 +152,11 @@ describe('captureChunk', () => {
 
     const result = await captureChunk(input, 'http://harness.test');
 
+    const { workspaceId, ...expectedBody } = input;
     expect(fetchMock).toHaveBeenCalledWith('http://harness.test/chunks', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(input),
+      headers: { 'content-type': 'application/json', 'x-workspace-id': workspaceId },
+      body: JSON.stringify(expectedBody),
     });
     expect(result).toEqual(expected);
     expect(result.id).toBe('chunk-1');
@@ -167,10 +188,11 @@ describe('captureChunk', () => {
 
     const result = await captureChunk(inputWithBranch, 'http://harness.test');
 
+    const { workspaceId, ...expectedBody } = inputWithBranch;
     expect(fetchMock).toHaveBeenCalledWith('http://harness.test/chunks', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(inputWithBranch),
+      headers: { 'content-type': 'application/json', 'x-workspace-id': workspaceId },
+      body: JSON.stringify(expectedBody),
     });
     expect(result.branchId).toBe('branch-1');
     expect(result.originBranchId).toBe('branch-1');

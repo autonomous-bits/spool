@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import type { AuthConfig } from './auth-config.js';
 import { InvalidOAuthStateError, OAuthStateService } from './oauth-state.service.js';
 
+
+
 function buildConfig(overrides: Partial<AuthConfig> = {}): AuthConfig {
   return {
     githubClientId: 'client-id',
@@ -19,10 +21,16 @@ function buildConfig(overrides: Partial<AuthConfig> = {}): AuthConfig {
 }
 
 describe('OAuthStateService', () => {
-  it('issues a state that verifies successfully', () => {
+  it('issues a state that verifies successfully with a null workspaceId when none was supplied', () => {
     const service = new OAuthStateService(buildConfig());
     const state = service.issue();
-    expect(() => { service.verify(state); }).not.toThrow();
+    expect(service.verify(state)).toEqual({ workspaceId: null });
+  });
+
+  it('round-trips a supplied workspaceId through issue/verify', () => {
+    const service = new OAuthStateService(buildConfig());
+    const state = service.issue('workspace-1');
+    expect(service.verify(state)).toEqual({ workspaceId: 'workspace-1' });
   });
 
   it('rejects a missing state', () => {

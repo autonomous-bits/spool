@@ -8,6 +8,7 @@ import { PG_POOL } from './pg-pool.token.js';
 
 interface ArtifactRow extends QueryResultRow {
   id: string;
+  workspace_id: string;
   uri: string;
   mime_type: string;
   created_by_stakeholder_id: string;
@@ -17,6 +18,7 @@ interface ArtifactRow extends QueryResultRow {
 function toArtifact(row: ArtifactRow): Artifact {
   return new Artifact({
     id: row.id,
+    workspaceId: row.workspace_id,
     uri: row.uri,
     mimeType: row.mime_type,
     createdByStakeholderId: row.created_by_stakeholder_id,
@@ -25,6 +27,7 @@ function toArtifact(row: ArtifactRow): Artifact {
 }
 
 export interface CreateArtifactInput {
+  workspaceId: string;
   content: Buffer;
   mimeType: string;
   createdByStakeholderId: string;
@@ -47,12 +50,13 @@ export class ArtifactRepository {
 
   async create(input: CreateArtifactInput): Promise<Artifact> {
     const id = randomUUID();
-    const uri = await this.blobStore.write(id, input.content);
+    const uri = await this.blobStore.write(id, input.content, input.workspaceId);
 
     let artifact: Artifact;
     try {
       artifact = new Artifact({
         id,
+        workspaceId: input.workspaceId,
         uri,
         mimeType: input.mimeType,
         createdByStakeholderId: input.createdByStakeholderId,
@@ -65,10 +69,17 @@ export class ArtifactRepository {
     try {
       const result: QueryResult<ArtifactRow> = await this.pool.query<ArtifactRow>(
         `INSERT INTO artifacts (
-           id, uri, mime_type, created_by_stakeholder_id, created_at
-         ) VALUES ($1, $2, $3, $4, $5)
+           id, workspace_id, uri, mime_type, created_by_stakeholder_id, created_at
+         ) VALUES ($1, $2, $3, $4, $5, $6)
          RETURNING *`,
-        [artifact.id, artifact.uri, artifact.mimeType, artifact.createdByStakeholderId, artifact.createdAt],
+        [
+          artifact.id,
+          artifact.workspaceId,
+          artifact.uri,
+          artifact.mimeType,
+          artifact.createdByStakeholderId,
+          artifact.createdAt,
+        ],
       );
 
       const row = result.rows[0];
@@ -84,13 +95,14 @@ export class ArtifactRepository {
   }
 
   /**
-   * Looks up an artifact by id. Returns `undefined` as an explicit not-found result rather than
-   * throwing, so callers can distinguish "not found" from an actual persistence error.
+   * Looks up an artifact by id, scoped to a workspace (Meridian IDEA-98/IDEA-100, G11 SG5). A
+   * cross-workspace id is indistinguishable from "does not exist" (returns `undefined`, not a
+   * scope violation), mirroring `ChunkRepository.findById`'s precedent.
    */
-  async findById(id: string): Promise<Artifact | undefined> {
+  async findById(id: string, workspaceId: string): Promise<Artifact | undefined> {
     const result: QueryResult<ArtifactRow> = await this.pool.query<ArtifactRow>(
-      'SELECT * FROM artifacts WHERE id = $1',
-      [id],
+      'SELECT * FROM artifacts WHERE id = $1 AND workspace_id = $2',
+      [id, workspaceId],
     );
 
     const row = result.rows[0];

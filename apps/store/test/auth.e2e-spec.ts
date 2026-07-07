@@ -7,10 +7,13 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import { GITHUB_OAUTH_CLIENT, type GithubOAuthClient } from '../src/auth/github-oauth-client.js';
 import { SessionTokenService } from '../src/auth/session-token.service.js';
+import { Workspace } from '../src/domain/workspace.js';
+import { WorkspaceRepository } from '../src/persistence/workspace.repository.js';
 import { setUpTestDatabase, type TestDatabase } from './support/test-database.js';
 
 const KNOWN_GITHUB_LOGIN = `known-octocat-${randomUUID()}`;
 const UNKNOWN_GITHUB_LOGIN = 'unmapped-octocat';
+const MEMBER_GITHUB_LOGIN = `member-octocat-${randomUUID()}`;
 
 /** Asserts a supertest response's `location` header is present and returns it as a string. */
 function requireLocationHeader(headers: Record<string, unknown>): string {
@@ -51,6 +54,8 @@ describe('GitHub OAuth login/callback HTTP API (containerized Postgres)', () => 
   let database: TestDatabase;
   let sessionTokenService: SessionTokenService;
   let stakeholderId: string;
+  let memberStakeholderId: string;
+  let memberWorkspaceId: string;
 
   beforeAll(async () => {
     database = await setUpTestDatabase();
@@ -61,6 +66,18 @@ describe('GitHub OAuth login/callback HTTP API (containerized Postgres)', () => 
        VALUES ($1, 'E2E Stakeholder', $2, 'stakeholder', 'engineering', $3)`,
       [stakeholderId, `e2e-auth-${stakeholderId}@spool.local`, KNOWN_GITHUB_LOGIN],
     );
+
+    memberStakeholderId = randomUUID();
+    await database.pool.query(
+      `INSERT INTO stakeholders (id, name, email, role, discipline, github_login)
+       VALUES ($1, 'E2E Member Stakeholder', $2, 'stakeholder', 'engineering', $3)`,
+      [memberStakeholderId, `e2e-auth-member-${memberStakeholderId}@spool.local`, MEMBER_GITHUB_LOGIN],
+    );
+    const workspaceRepository = new WorkspaceRepository(database.pool);
+    const memberWorkspace = await workspaceRepository.createWithFirstMember(
+      new Workspace({ name: `e2e-auth-workspace-${randomUUID()}`, createdByStakeholderId: memberStakeholderId }),
+    );
+    memberWorkspaceId = memberWorkspace.id;
 
     const moduleRef: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
@@ -152,5 +169,98 @@ describe('GitHub OAuth login/callback HTTP API (containerized Postgres)', () => 
       .query({ code: 'valid-code', state: 'not-a-real-state' });
 
     expect(response.status).toBe(400);
+  });
+
+  describe('G11 SG2: workspaceId-aware login/callback', () => {
+    class MemberLoginClient extends FakeGithubOAuthClient {
+      override fetchGithubUser(): Promise<{ login: string }> {
+        return Promise.resolve({ login: MEMBER_GITHUB_LOGIN });
+      }
+    }
+
+    async function buildMemberApp(): Promise<INestApplication<Server>> {
+      const moduleRef: TestingModule = await Test.createTestingModule({
+        imports: [AppModule],
+      })
+        .overrideProvider(GITHUB_OAUTH_CLIENT)
+        .useValue(new MemberLoginClient())
+        .compile();
+      const memberApp = moduleRef.createNestApplication();
+      await memberApp.init();
+      return memberApp;
+    }
+
+    it('mints a workspace-bound token when the stakeholder is a member of the requested workspaceId', async () => {
+      const memberApp = await buildMemberApp();
+      try {
+        const loginResponse = await request(memberApp.getHttpServer())
+          .get('/auth/github/login')
+          .query({ workspaceId: memberWorkspaceId });
+        const location = new URL(requireLocationHeader(loginResponse.headers));
+        const state = location.searchParams.get('state');
+
+        const callbackResponse = await request(memberApp.getHttpServer())
+          .get('/auth/github/callback')
+          .query({ code: 'valid-code', state });
+
+        expect(callbackResponse.status).toBe(200);
+        const claims = sessionTokenService.verify(callbackResponse.body.sessionToken as string);
+        expect(claims.stakeholderId).toBe(memberStakeholderId);
+        expect(claims.workspaceId).toBe(memberWorkspaceId);
+      } finally {
+        await memberApp.close();
+      }
+    });
+
+    it('returns 403 when the stakeholder is not a member of the requested workspaceId', async () => {
+      const memberApp = await buildMemberApp();
+      try {
+        const loginResponse = await request(memberApp.getHttpServer())
+          .get('/auth/github/login')
+          .query({ workspaceId: '00000000-0000-0000-0000-00000000dead' });
+        const location = new URL(requireLocationHeader(loginResponse.headers));
+        const state = location.searchParams.get('state');
+
+        const callbackResponse = await request(memberApp.getHttpServer())
+          .get('/auth/github/callback')
+          .query({ code: 'valid-code', state });
+
+        expect(callbackResponse.status).toBe(403);
+      } finally {
+        await memberApp.close();
+      }
+    });
+
+    it('returns 400 when workspaceId is omitted for a stakeholder who already has memberships', async () => {
+      const memberApp = await buildMemberApp();
+      try {
+        const loginResponse = await request(memberApp.getHttpServer()).get('/auth/github/login');
+        const location = new URL(requireLocationHeader(loginResponse.headers));
+        const state = location.searchParams.get('state');
+
+        const callbackResponse = await request(memberApp.getHttpServer())
+          .get('/auth/github/callback')
+          .query({ code: 'valid-code', state });
+
+        expect(callbackResponse.status).toBe(400);
+      } finally {
+        await memberApp.close();
+      }
+    });
+
+    it('mints a workspace-less bootstrap token when workspaceId is omitted for a stakeholder with zero memberships', async () => {
+      const loginResponse = await request(app.getHttpServer()).get('/auth/github/login');
+      const location = new URL(requireLocationHeader(loginResponse.headers));
+      const state = location.searchParams.get('state');
+
+      const callbackResponse = await request(app.getHttpServer())
+        .get('/auth/github/callback')
+        .query({ code: 'valid-code', state });
+
+      expect(callbackResponse.status).toBe(200);
+      const claims = sessionTokenService.verify(callbackResponse.body.sessionToken as string);
+      expect(claims.stakeholderId).toBe(stakeholderId);
+      expect(claims.workspaceId).toBeNull();
+    });
   });
 });

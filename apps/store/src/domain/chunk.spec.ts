@@ -3,6 +3,7 @@ import { Chunk, type ChunkProps } from './chunk.js';
 
 function validProps(overrides: Partial<ChunkProps> = {}): ChunkProps {
   return {
+    workspaceId: '00000000-0000-0000-0000-00000000d0fa',
     label: 'ATOMIC-1',
     content: 'A raw captured idea.',
     discipline: 'product',
@@ -53,6 +54,10 @@ describe('Chunk', () => {
   it('requires a non-blank createdByStakeholderId', () => {
     expect(() => new Chunk(validProps({ createdByStakeholderId: '' }))).toThrow(TypeError);
     expect(() => new Chunk(validProps({ createdByStakeholderId: '   ' }))).toThrow(TypeError);
+  });
+
+  it.each(['', '   '])('rejects blank workspaceId %j', (workspaceId) => {
+    expect(() => new Chunk(validProps({ workspaceId }))).toThrow(TypeError);
   });
 
   it('rejects an invalid discipline', () => {

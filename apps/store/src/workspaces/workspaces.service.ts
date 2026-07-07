@@ -8,6 +8,7 @@ import {
 import type { SessionTokenClaims } from '../auth/session-token.service.js';
 import { Workspace } from '../domain/workspace.js';
 import { WorkspaceMembershipAlreadyExistsError } from '../domain/workspace-membership.js';
+import { assertWorkspaceScope, WorkspaceScopeViolationError } from '../domain/workspace-scope.js';
 import { StakeholderRepository } from '../persistence/stakeholder.repository.js';
 import {
   WorkspaceRepository,
@@ -74,8 +75,27 @@ export class WorkspacesService {
   async addMember(
     workspaceId: string,
     targetStakeholderId: string,
+    headerWorkspaceId: string | null | undefined,
     claims: SessionTokenClaims,
   ): Promise<WorkspaceMembershipResponse> {
+    // G11 SG4 (Meridian IDEA-98/IDEA-100): this route is already token-gated, so X-Workspace-Id
+    // must both match the token's workspaceId claim (the token tier) AND name the same workspace
+    // as the :id route param — otherwise a caller with a token bound to workspace A could target
+    // /workspaces/B/members while merely asserting X-Workspace-Id: A.
+    try {
+      assertWorkspaceScope(headerWorkspaceId, { tier: 'token', workspaceIdClaim: claims.workspaceId });
+    } catch (error) {
+      if (error instanceof WorkspaceScopeViolationError) {
+        throw new ForbiddenException(error.message);
+      }
+      throw error;
+    }
+    if (headerWorkspaceId !== workspaceId) {
+      throw new ForbiddenException(
+        `X-Workspace-Id ${headerWorkspaceId} does not match the target workspace ${workspaceId}`,
+      );
+    }
+
     const targetStakeholder = await this.stakeholderRepository.findById(targetStakeholderId);
     if (targetStakeholder === undefined) {
       throw new NotFoundException(`Stakeholder ${targetStakeholderId} not found`);

@@ -7,6 +7,7 @@ import { DivergencePoint } from './divergence-point.js';
 
 export interface BranchProps {
   id?: string;
+  workspaceId: string;
   name: string;
   discipline: Discipline;
   status?: BranchStatus;
@@ -37,6 +38,7 @@ function requireNonBlank(value: string, fieldName: string): string {
  */
 export class Branch {
   readonly id: string;
+  readonly workspaceId: string;
   readonly name: string;
   readonly discipline: Discipline;
   readonly status: BranchStatus;
@@ -51,6 +53,7 @@ export class Branch {
   readonly updatedAt: Date;
 
   constructor(props: BranchProps) {
+    this.workspaceId = requireNonBlank(props.workspaceId, 'workspaceId');
     this.name = requireNonBlank(props.name, 'name');
     this.discipline = parseDiscipline(props.discipline);
 

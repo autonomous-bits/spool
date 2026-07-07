@@ -9,8 +9,11 @@ import { ChunkRepository } from '../../src/persistence/chunk.repository.js';
 import { BOOTSTRAP_STAKEHOLDER_ID } from '../../src/persistence/bootstrap-stakeholder.js';
 import { setUpTestDatabase, type TestDatabase } from '../support/test-database.js';
 
+const WORKSPACE_ID = '00000000-0000-0000-0000-00000000d0fa';
+
 function buildBranch(overrides: Partial<ConstructorParameters<typeof Branch>[0]> = {}): Branch {
   return new Branch({
+    workspaceId: WORKSPACE_ID,
     name: `branch-${Math.random().toString(36).slice(2, 10)}`,
     discipline: 'engineering',
     createdByStakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
@@ -20,6 +23,7 @@ function buildBranch(overrides: Partial<ConstructorParameters<typeof Branch>[0]>
 
 function buildChunk(overrides: Partial<ConstructorParameters<typeof Chunk>[0]> = {}): Chunk {
   return new Chunk({
+    workspaceId: WORKSPACE_ID,
     label: `chunk-${Math.random().toString(36).slice(2, 10)}`,
     content: 'Some atomic idea content.',
     discipline: 'engineering',
@@ -83,21 +87,21 @@ describe('ChunkRepository (containerized Postgres)', () => {
     });
 
     const created = await repository.create(chunk);
-    const found = await repository.findById(created.id);
+    const found = await repository.findById(created.id, WORKSPACE_ID);
 
     expect(found).toBeDefined();
     expect(found).toEqual(created);
   });
 
   it('findById returns an explicit not-found result (undefined) for an unknown id', async () => {
-    const found = await repository.findById('00000000-0000-0000-0000-00000000dead');
+    const found = await repository.findById('00000000-0000-0000-0000-00000000dead', WORKSPACE_ID);
 
     expect(found).toBeUndefined();
   });
 
   it('rejects a branch-scoped create when the branch has already been submitted', async () => {
     const branch = await branchRepository.create(buildBranch());
-    await branchRepository.submit(branch.id);
+    await branchRepository.submit(branch.id, WORKSPACE_ID);
 
     await expect(
       repository.create(buildChunk({ branchId: branch.id, originBranchId: branch.id })),
@@ -117,7 +121,7 @@ describe('ChunkRepository (containerized Postgres)', () => {
 
       const createPromise = repository.create(chunk);
       await delay(25);
-      const submitPromise = branchRepository.submit(branch.id);
+      const submitPromise = branchRepository.submit(branch.id, WORKSPACE_ID);
 
       await delay(50);
       await lockClient.query('COMMIT');
@@ -127,7 +131,7 @@ describe('ChunkRepository (containerized Postgres)', () => {
       expect(createResult.status).toBe('fulfilled');
       expect(submitResult).toEqual({ status: 'fulfilled', value: undefined });
 
-      const branchAfterRace = await branchRepository.findById(branch.id);
+      const branchAfterRace = await branchRepository.findById(branch.id, WORKSPACE_ID);
       expect(branchAfterRace).toBeDefined();
 
       const chunkRow = await pool.query<{ exists: boolean }>(

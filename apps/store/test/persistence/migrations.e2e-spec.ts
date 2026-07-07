@@ -49,6 +49,7 @@ describe('store migrations (containerized Postgres)', () => {
         'status',
         'updated_at',
         'updated_by_stakeholder_id',
+        'workspace_id',
       ].sort(),
     );
   });
@@ -98,7 +99,7 @@ describe('store migrations (containerized Postgres)', () => {
     const migrationRows = await pool.query<{ count: string }>(
       'SELECT COUNT(*)::text AS count FROM schema_migrations',
     );
-    expect(migrationRows.rows[0]?.count).toBe('12');
+    expect(migrationRows.rows[0]?.count).toBe('13');
   });
 
   it('creates the suggestions table with the expected columns', async () => {
@@ -123,6 +124,7 @@ describe('store migrations (containerized Postgres)', () => {
         'submitted_by_stakeholder_id',
         'to_chunk_label',
         'updated_at',
+        'workspace_id',
       ].sort(),
     );
   });
@@ -190,6 +192,7 @@ describe('store migrations (containerized Postgres)', () => {
         'submitted_at',
         'updated_at',
         'verified_at',
+        'workspace_id',
       ].sort(),
     );
   });
@@ -215,6 +218,7 @@ describe('store migrations (containerized Postgres)', () => {
         'type',
         'updated_at',
         'updated_by_stakeholder_id',
+        'workspace_id',
       ].sort(),
     );
   });
@@ -227,7 +231,7 @@ describe('store migrations (containerized Postgres)', () => {
 
     expect(byName.has('idx_edges_branch_lookup')).toBe(true);
     expect(byName.get('idx_edges_branch_lookup')).toContain(
-      '(branch_id, from_chunk_label, to_chunk_label)',
+      '(workspace_id, branch_id, from_chunk_label, to_chunk_label)',
     );
 
     expect(byName.has('idx_edges_mainline')).toBe(true);
@@ -249,7 +253,7 @@ describe('store migrations (containerized Postgres)', () => {
     const columns = result.rows.map((row) => row.column_name).sort();
 
     expect(columns).toEqual(
-      ['created_at', 'created_by_stakeholder_id', 'id', 'mime_type', 'uri'].sort(),
+      ['created_at', 'created_by_stakeholder_id', 'id', 'mime_type', 'uri', 'workspace_id'].sort(),
     );
   });
 
@@ -271,6 +275,7 @@ describe('store migrations (containerized Postgres)', () => {
         'status',
         'updated_at',
         'updated_by_stakeholder_id',
+        'workspace_id',
       ].sort(),
     );
   });
@@ -283,7 +288,7 @@ describe('store migrations (containerized Postgres)', () => {
 
     expect(byName.has('idx_chunk_artifacts_branch_lookup')).toBe(true);
     expect(byName.get('idx_chunk_artifacts_branch_lookup')).toContain(
-      '(branch_id, chunk_label, artifact_id)',
+      '(workspace_id, branch_id, chunk_label, artifact_id)',
     );
 
     expect(byName.has('idx_chunk_artifacts_mainline')).toBe(true);
@@ -300,7 +305,7 @@ describe('store migrations (containerized Postgres)', () => {
     const columns = result.rows.map((row) => row.column_name).sort();
 
     expect(columns).toEqual(
-      ['id', 'branch_id', 'verifier_name', 'status', 'reason', 'created_at'].sort(),
+      ['id', 'branch_id', 'verifier_name', 'status', 'reason', 'created_at', 'workspace_id'].sort(),
     );
   });
 
@@ -318,7 +323,7 @@ describe('store migrations (containerized Postgres)', () => {
     const columns = result.rows.map((row) => row.column_name).sort();
 
     expect(columns).toEqual(
-      ['id', 'branch_id', 'stakeholder_id', 'signal_id', 'status', 'created_at', 'updated_at'].sort(),
+      ['id', 'branch_id', 'stakeholder_id', 'signal_id', 'status', 'created_at', 'updated_at', 'workspace_id'].sort(),
     );
   });
 
@@ -330,7 +335,7 @@ describe('store migrations (containerized Postgres)', () => {
 
     expect(byName.has('idx_feedback_notifications_stakeholder')).toBe(true);
     expect(byName.get('idx_feedback_notifications_stakeholder')).toContain(
-      '(stakeholder_id, status)',
+      '(workspace_id, stakeholder_id, status)',
     );
   });
 });
