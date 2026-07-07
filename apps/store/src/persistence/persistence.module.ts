@@ -13,6 +13,7 @@ import { LOCAL_FILE_BLOB_STORE_CONFIG } from './local-file-blob-store-config.tok
 import { StakeholderRepository } from './stakeholder.repository.js';
 import { SuggestionRepository } from './suggestion.repository.js';
 import { VerificationSignalRepository } from './verification-signal.repository.js';
+import { WorkspaceRepository } from './workspace.repository.js';
 import { loadDatabaseConfig } from './database-config.js';
 import { PG_POOL } from './pg-pool.token.js';
 
@@ -55,6 +56,7 @@ class PgPoolProvider implements OnApplicationShutdown {
     ChunkArtifactRepository,
     VerificationSignalRepository,
     FeedbackNotificationRepository,
+    WorkspaceRepository,
   ],
   exports: [
     PG_POOL,
@@ -68,6 +70,7 @@ class PgPoolProvider implements OnApplicationShutdown {
     ChunkArtifactRepository,
     VerificationSignalRepository,
     FeedbackNotificationRepository,
+    WorkspaceRepository,
   ],
 })
 // eslint-disable-next-line @typescript-eslint/no-extraneous-class -- NestJS module classes are intentionally empty; behavior comes entirely from the @Module decorator.
