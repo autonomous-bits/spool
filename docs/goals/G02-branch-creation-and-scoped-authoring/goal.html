@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>G02 — Branch Creation &amp; Branch-Scoped Chunk Authoring</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  body { font-family: -apple-system, Segoe UI, sans-serif; max-width: 960px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
+  h1 { font-size: 1.4rem; }
+  h2 { font-size: 1.1rem; margin-top: 2rem; border-bottom: 1px solid #ddd; padding-bottom: 0.25rem; }
+  table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; font-size: 0.9rem; }
+  th, td { border: 1px solid #ccc; padding: 4px 8px; text-align: left; vertical-align: top; }
+  th { background: #f0f0f0; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 0.75rem; font-weight: 600; color: #fff; }
+  .badge-open { background: #6c757d; }
+  .badge-in-progress { background: #f0ad4e; }
+  .badge-done { background: #28a745; }
+  .badge-blocked { background: #d9534f; }
+  details { border: 1px solid #ddd; border-radius: 6px; padding: 0.5rem 0.75rem; margin: 0.5rem 0; }
+  summary { cursor: pointer; font-weight: 600; }
+  code { background: #f5f5f5; padding: 1px 4px; border-radius: 3px; }
+  .mermaid { background: #fafafa; padding: 0.5rem; border-radius: 6px; }
+</style>
+</head>
+<body>
+
+<h1>G02 — Branch Creation &amp; Branch-Scoped Chunk Authoring</h1>
+<p>
+  Status: <span id="goal-status-badge" class="badge badge-done">done</span> &middot;
+  Size: <strong>4/5</strong> — touches every layer (API, domain, persistence, MCP), introduces one new domain
+  concept (<code>Branch</code>) and a schema migration that removes a temporary constraint, but defers the
+  submission/verification/merge state machine to future goals.
+</p>
+
+<h2>Meridian Source</h2>
+<table>
+<thead><tr><th>Chunk</th><th>Status</th><th>Layer</th><th>Note</th></tr></thead>
+<tbody>
+<tr><td>IDEA-24</td><td>promoted</td><td>functional</td><td>Branch creation: discipline + name, empty divergence from mainline.</td></tr>
+<tr><td>IDEA-17</td><td>promoted</td><td>functional</td><td>Branches owned by one discipline; boundary persists through merge.</td></tr>
+<tr><td>IDEA-40</td><td>promoted</td><td>domain (ADR)</td><td>Every draft branch has one discipline; delegated agents may author, not merge/submit/verify.</td></tr>
+<tr><td>IDEA-41</td><td>promoted</td><td>domain (ADR)</td><td><code>diverged_at</code> timestamp defines the divergence point.</td></tr>
+<tr><td>IDEA-74</td><td>promoted</td><td>domain (ADR)</td><td><code>DivergencePoint</code> value type (directional — file it names does not exist yet in repo).</td></tr>
+<tr><td>IDEA-53</td><td>promoted</td><td>domain (ADR)</td><td>Branch write-lock / single-discipline-bound invariants belong to a reusable invariant-protection layer.</td></tr>
+<tr><td>IDEA-9</td><td>promoted</td><td>MCP</td><td>Delegated agents may author within draft branches on a stakeholder's behalf.</td></tr>
+<tr><td>IDEA-52 / IDEA-34</td><td>promoted</td><td>API</td><td>All external/MCP traffic goes through the NestJS gateway; exact REST shape is repo-derived, as it was for G01.</td></tr>
+<tr><td>IDEA-31</td><td>promoted (amended by IDEA-77, IDEA-78)</td><td>persistence (ADR)</td><td>Authoritative Postgres schema, including the <code>branches</code> table shape used verbatim below.</td></tr>
+<tr><td>IDEA-32 / IDEA-33</td><td>promoted</td><td>persistence (ADR)</td><td>Branch delta rows and dynamic active-graph-state resolution (full UNION query resolution is out of scope for this goal; only branch metadata read is in scope).</td></tr>
+</tbody>
+</table>
+<p><em>Open, unresolved Meridian escalations (IDEA-70: gateway-vs-domain enforcement placement; IDEA-71: merge-atomicity association scope) exist but do not implicate any chunk this goal relies on — see Open Questions.</em></p>
+
+<h2>Vertical slice diagram</h2>
+<p>One capability, four layers: create a branch, then author a chunk scoped to it, then read both back.</p>
+<div class="mermaid">
+flowchart LR
+  subgraph MCP["MCP exposure"]
+    T1["create-branch tool"]
+    T2["capture-chunk tool (+branchId)"]
+  end
+  subgraph API["API surface"]
+    C1["POST /branches"]
+    C2["GET /branches/:id"]
+    C3["POST /chunks (+branchId)"]
+    C4["GET /chunks/:id (+branchId)"]
+  end
+  subgraph DOMAIN["Domain"]
+    D1["Branch entity"]
+    D2["DivergencePoint"]
+    D3["Chunk entity (branch-aware)"]
+  end
+  subgraph PERSIST["Persistence"]
+    P1[("branches table")]
+    P2[("chunks table\n(FK to branches)")]
+  end
+  T1 --> C1
+  T2 --> C3
+  C1 --> D1 --> P1
+  D1 --> D2
+  C2 --> P1
+  C3 --> D3 --> P2
+  C4 --> P2
+  D3 -. "branch_id FK" .-> P1
+</div>
+
+<h2>Dependency diagram</h2>
+<div class="mermaid">
+flowchart TD
+  SG0["SG0: branches schema migration"] --> SG2["SG2: Branches API"]
+  SG1["SG1: Branch domain entity"] --> SG2
+  SG2 --> SG3["SG3: branch-scoped chunk capture"]
+  SG3 --> SG4["SG4: MCP exposure"]
+  SG4 --> SG5["SG5: Docker end-to-end"]
+</div>
+
+<h2>Sub-goal detail</h2>
+
+<details id="d-SG0">
+<summary>SG0 — persistence/infra: branches schema migration <span class="badge badge-done">done</span></summary>
+<p><strong>Depends on:</strong> none</p>
+<p><strong>Objective:</strong> Add the authoritative <code>branches</code> table and wire <code>chunks</code> to it for real.</p>
+<ul>
+<li>Migration creates <code>branches(id, name, discipline, status, submitted_at, diverged_at, created_at, updated_at, merged_at, origin_suggestion_id, created_by_stakeholder_id, merged_by_stakeholder_id)</code> exactly per IDEA-31's authoritative schema (<code>status IN ('draft','submitted','verified','merged')</code>; <code>diverged_at</code> defaults to <code>NOW()</code>; <code>created_by_stakeholder_id</code> is <code>NOT NULL REFERENCES stakeholders(id)</code>; <code>merged_by_stakeholder_id</code> nullable FK to stakeholders).</li>
+<li><code>origin_suggestion_id</code> is declared as a plain nullable UUID with <strong>no FK</strong> (the <code>suggestions</code> table does not exist in this repo yet), mirroring the exact scope-deviation precedent documented in migration 0001 for <code>chunks.branch_id</code> in G01. This deviation must be documented in the new migration's header comment.</li>
+<li><code>CREATE UNIQUE INDEX idx_active_branch_name ON branches (name) WHERE status != 'merged'</code> is created per the authoritative schema.</li>
+<li>The existing <code>chk_chunks_branchless_only_g01</code> CHECK constraint on <code>chunks</code> is dropped.</li>
+<li><code>chunks.branch_id</code> gets a real <code>REFERENCES branches(id) ON DELETE CASCADE</code> FK; <code>chunks.origin_branch_id</code> gets a real <code>REFERENCES branches(id)</code> FK (no cascade), both per the authoritative schema.</li>
+<li>All existing G01 migrations/tests that assert branchless-only behavior continue to pass unmodified for the branchless path (IDEA-78 is not being revoked).</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:store</code> (migration + repository e2e tests against containerized Postgres per the constitution).</p>
+</details>
+
+<details id="d-SG1">
+<summary>SG1 — domain: Branch entity <span class="badge badge-done">done</span></summary>
+<p><strong>Depends on:</strong> none</p>
+<p><strong>Objective:</strong> Model <code>Branch</code> and its divergence point as a validated domain entity, reusing the existing <code>Discipline</code> vocab.</p>
+<ul>
+<li><code>BranchStatus</code> type models all four values (<code>draft | submitted | verified | merged</code>), matching the full CHECK constraint, even though this goal's write path only ever produces <code>draft</code> (mirrors <code>ChunkStatus</code>'s precedent from G01).</li>
+<li><code>Branch</code> entity requires non-blank <code>name</code>, a valid <code>Discipline</code>, and a non-blank <code>createdByStakeholderId</code>; rejects blank/invalid input by throwing, mirroring <code>Chunk</code>'s constructor-validation style.</li>
+<li><code>DivergencePoint</code> value type (opaque validated ISO-8601 timestamp) per IDEA-74/IDEA-41, defaulting to "now" at construction.</li>
+<li>Unit tests cover: valid construction, blank name rejection, invalid discipline rejection, blank stakeholder rejection.</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:store</code> (unit tests for the new domain module).</p>
+</details>
+
+<details id="d-SG2">
+<summary>SG2 — API: Branches controller/service <span class="badge badge-done">done</span></summary>
+<p><strong>Depends on:</strong> SG0, SG1</p>
+<p><strong>Objective:</strong> Expose <code>POST /branches</code> and <code>GET /branches/:id</code>, per IDEA-24/IDEA-52/IDEA-34.</p>
+<ul>
+<li><code>POST /branches</code> accepts <code>{ name, discipline, stakeholderId }</code> (creator attribution required, matching the <code>CreateChunkRequest</code> convention of requiring an existing <code>stakeholderId</code> rather than inventing one) and returns the created branch (id, name, discipline, status='draft', divergedAt, createdAt, updatedAt, createdByStakeholderId).</li>
+<li>Returns HTTP 400 for missing/blank <code>name</code>/<code>stakeholderId</code> or invalid <code>discipline</code>, mirroring <code>parseCreateChunkRequest</code>'s IO-boundary-guard style.</li>
+<li><code>GET /branches/:id</code> returns the same branch response shape, 404 if not found.</li>
+<li>Persistence: a <code>BranchRepository</code> following the existing <code>ChunkRepository</code> pattern (parameterized queries only, per nestjs-security conventions).</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:store</code> (controller/service unit tests + new e2e spec against containerized Postgres).</p>
+</details>
+
+<details id="d-SG3">
+<summary>SG3 — branch-scoped chunk authoring <span class="badge badge-done">done</span></summary>
+<p><strong>Depends on:</strong> SG2</p>
+<p><strong>Objective:</strong> Let <code>POST /chunks</code> attach a chunk to an existing draft branch, without breaking the ratified branchless path (IDEA-78).</p>
+<ul>
+<li><code>CreateChunkRequest</code> gains an optional <code>branchId</code>. When present: the service loads the branch, returning 404 if missing; if the branch exists but <code>branch.discipline !== request.discipline</code> (single-discipline bound, IDEA-40/IDEA-53) or <code>branch.status !== 'draft'</code> (write-lock, IDEA-53), the service returns 409. Enforcement lives in the domain/service layer, not controller-only logic — consistent with the repo's existing practice pending Meridian's still-open IDEA-70 resolution on gateway-vs-domain placement.</li>
+<li>When <code>branchId</code> is present, the persisted chunk row sets both <code>branch_id</code> and <code>origin_branch_id</code> to that branch's id (first-authored-here semantics).</li>
+<li>When <code>branchId</code> is omitted, behavior is byte-for-byte unchanged from G01 (branch_id/origin_branch_id NULL, existing indexes apply).</li>
+<li><code>ChunkResponse</code> gains nullable <code>branchId</code>/<code>originBranchId</code> fields so branch attachment is observable over the API (addresses the read-side gap flagged in this goal's rubber-duck review).</li>
+<li><code>GET /chunks/:id</code> reflects the same fields; no separate endpoint needed.</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:store</code> (unit + e2e covering both the branch-scoped and branchless paths).</p>
+</details>
+
+<details id="d-SG4">
+<summary>SG4 — MCP exposure <span class="badge badge-open">open</span></summary>
+<p><strong>Depends on:</strong> SG3</p>
+<p><strong>Objective:</strong> Let an ideation assistant create a branch and author chunks within it, per IDEA-9.</p>
+<ul>
+<li>New <code>create-branch</code> MCP tool mirrors <code>capture-chunk</code>'s conventions exactly: validates untrusted input shape only (name/discipline/stakeholderId as non-empty strings), forwards to <code>POST /branches</code>, never invents a stakeholder identity, surfaces the store's 4xx errors as a typed validation error.</li>
+<li><code>capture-chunk</code> tool's input/parse function gains an optional <code>branchId</code> string field, forwarded as-is to the store; vocabulary/invariant validation remains the store's responsibility (not re-validated in the tool), per the existing tool's own documented convention.</li>
+<li>Unit tests for both tools cover: valid input parsing, missing-field rejection, and successful/error forwarding (mocked fetch).</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:mcp</code>.</p>
+</details>
+
+<details id="d-SG5">
+<summary>SG5 — Docker end-to-end verification <span class="badge badge-open">open</span></summary>
+<p><strong>Depends on:</strong> SG4</p>
+<p><strong>Objective:</strong> Prove the full four-layer slice (MCP → API → domain → persistence) works against the real containerized system, not just in-process tests.</p>
+<ul>
+<li><code>docker compose up --build spoolstore</code> brings up the store against real Postgres.</li>
+<li>Over real HTTP: <code>POST /branches</code> creates a draft branch; <code>POST /chunks</code> with that <code>branchId</code> succeeds and the response's <code>branchId</code>/<code>originBranchId</code> match; <code>GET /branches/:id</code> and <code>GET /chunks/:id</code> both reflect the association.</li>
+<li>Also over real HTTP: a branchless <code>POST /chunks</code> (no <code>branchId</code>) still succeeds exactly as in G01, proving no regression.</li>
+<li>A negative case is exercised: <code>POST /chunks</code> with a <code>branchId</code> from a different discipline, or a non-existent <code>branchId</code>, is rejected with a 4xx.</li>
+<li>The MCP layer is exercised too, against the running store: the <code>create-branch</code> tool creates a branch, and the <code>capture-chunk</code> tool with that tool-created branch's id captures a chunk into it; both are confirmed via HTTP readback (<code>GET /branches/:id</code>, <code>GET /chunks/:id</code>).</li>
+</ul>
+<p><strong>Verification:</strong> manual/scripted HTTP exercise (curl or equivalent) plus MCP tool invocation against the running <code>spoolstore</code> container — in-process/unit tests alone do not satisfy this step.</p>
+</details>
+
+<h2>Open Questions</h2>
+<ul>
+<li>IDEA-70 (conflict report) — <strong>already resolved</strong>: re-checking IDEA-35 directly (not just IDEA-70's own text) shows its content was amended in place on 2026-07-04 (predating this goal-selection session) to name domain/persistence as the primary enforcement layer, gateway as optional defense-in-depth, and to note "(see IDEA-70)". My initial classification of this as still-open was based only on IDEA-70's own stale self-description; verifying the target chunk directly showed it was already fixed. The redundant draft chunk IDEA-79 I filed proposing the same fix was deleted as a duplicate. No further action needed; does not affect G02.</li>
+<li>IDEA-71 (gap report) — <strong>resolved and ratified</strong>: draft chunk <strong>IDEA-80</strong> (amends IDEA-47 to broaden atomic merge rollback scope to include chunk-artifact associations) has been approved and promoted to <code>technical-architecture</code> by the human stakeholder, with a <code>refines</code> edge from IDEA-80 to IDEA-47 recorded in Meridian. <code>meridian-submit-feedback</code> returned a persistent 500 for the original submission (same failure mode IDEA-71 itself documents), so it was filed via the draft-chunk fallback; the edge itself also had to be inserted directly against the Meridian Postgres container (<code>meridian-db-1</code>) because <code>meridian-create-edge</code> returned a spurious 404 for an existing, verified chunk. IDEA-80 is now ratified and binding for a future merge-pipeline goal. Did not block G02 (no merge or artifacts in scope here).</li>
+</ul>
+<p><em>Authoring note (not a design question): <code>meridian-list-signals</code> returned a transient 400 upstream error on both attempts during selection; open signals beyond IDEA-70/IDEA-71 could not be independently confirmed absent via that tool. Re-check when the tool is available; not treated as blocking.</em></p>
+
+<h2>Definition of Done</h2>
+<ul>
+<li>SG0–SG4 all pass their named verification commands.</li>
+<li>SG5's Docker end-to-end exercise passes against the real containerized store, over real HTTP and via MCP tool invocation with HTTP readback.</li>
+<li><code>docs/goals/README.md</code> updated with G02's row once complete.</li>
+</ul>
+
+<script type="application/json" id="goal-data">
+{
+  "goalId": "G02",
+  "slug": "branch-creation-and-scoped-authoring",
+  "title": "Branch Creation & Branch-Scoped Chunk Authoring",
+  "status": "done",
+  "size": 4,
+  "sizeJustification": "Touches every layer (API, domain, persistence, MCP) and introduces one new domain concept (Branch) plus a schema migration removing a temporary constraint, but defers the submission/verification/merge state machine to future goals.",
+  "meridianChunks": [
+    {"label": "IDEA-24", "status": "promoted", "layer": "functional"},
+    {"label": "IDEA-17", "status": "promoted", "layer": "functional"},
+    {"label": "IDEA-40", "status": "promoted", "layer": "domain"},
+    {"label": "IDEA-41", "status": "promoted", "layer": "domain"},
+    {"label": "IDEA-74", "status": "promoted", "layer": "domain"},
+    {"label": "IDEA-53", "status": "promoted", "layer": "domain"},
+    {"label": "IDEA-9", "status": "promoted", "layer": "MCP"},
+    {"label": "IDEA-52", "status": "promoted", "layer": "API"},
+    {"label": "IDEA-34", "status": "promoted", "layer": "API"},
+    {"label": "IDEA-31", "status": "promoted", "layer": "persistence"},
+    {"label": "IDEA-32", "status": "promoted", "layer": "persistence"},
+    {"label": "IDEA-33", "status": "promoted", "layer": "persistence"},
+    {"label": "IDEA-77", "status": "promoted", "layer": "persistence (ADR amendment)"},
+    {"label": "IDEA-78", "status": "promoted", "layer": "persistence (ADR amendment)"}
+  ],
+  "subGoals": [
+    {
+      "id": "SG0",
+      "layer": "persistence/infra",
+      "dependsOn": [],
+      "objective": "Add authoritative branches table; drop temporary branchless-only CHECK on chunks; wire real FKs.",
+      "acceptanceCriteria": [
+        "Migration creates branches(id, name, discipline, status, submitted_at, diverged_at, created_at, updated_at, merged_at, origin_suggestion_id, created_by_stakeholder_id, merged_by_stakeholder_id) per IDEA-31's authoritative schema.",
+        "origin_suggestion_id is a plain nullable UUID with no FK (suggestions table does not exist yet), documented as a scope deviation mirroring G01's precedent.",
+        "idx_active_branch_name unique index on branches(name) WHERE status != 'merged' is created.",
+        "chk_chunks_branchless_only_g01 CHECK constraint is dropped from chunks.",
+        "chunks.branch_id gets REFERENCES branches(id) ON DELETE CASCADE; chunks.origin_branch_id gets REFERENCES branches(id).",
+        "All existing G01 branchless-path tests continue to pass unmodified."
+      ],
+      "verification": "pnpm test:store",
+      "status": "done"
+    },
+    {
+      "id": "SG1",
+      "layer": "domain",
+      "dependsOn": [],
+      "objective": "Implement Branch entity and DivergencePoint value type with validation invariants.",
+      "acceptanceCriteria": [
+        "BranchStatus models all four values (draft, submitted, verified, merged); this goal's write path only ever produces draft.",
+        "Branch entity rejects blank name, invalid discipline, and blank createdByStakeholderId by throwing.",
+        "DivergencePoint is an opaque validated ISO-8601 timestamp defaulting to now at construction.",
+        "Unit tests cover valid construction and each rejection case."
+      ],
+      "verification": "pnpm test:store",
+      "status": "done"
+    },
+    {
+      "id": "SG2",
+      "layer": "API",
+      "dependsOn": ["SG0", "SG1"],
+      "objective": "Expose POST /branches and GET /branches/:id.",
+      "acceptanceCriteria": [
+        "POST /branches accepts { name, discipline, stakeholderId } and returns the created draft branch (id, name, discipline, status, divergedAt, createdAt, updatedAt, createdByStakeholderId).",
+        "POST /branches returns 400 for missing/blank name or stakeholderId, or invalid discipline.",
+        "GET /branches/:id returns the same shape; 404 if not found.",
+        "BranchRepository uses parameterized queries only."
+      ],
+      "verification": "pnpm test:store",
+      "status": "done"
+    },
+    {
+      "id": "SG3",
+      "layer": "API + domain (chunk authoring)",
+      "dependsOn": ["SG2"],
+      "objective": "Allow POST /chunks to attach a chunk to an existing draft branch while preserving the branchless path.",
+      "acceptanceCriteria": [
+        "CreateChunkRequest gains optional branchId.",
+        "When branchId is present: 404 if branch missing, 409 if branch.discipline !== request.discipline, 409 if branch.status !== 'draft'.",
+        "When branchId is present, persisted chunk sets both branch_id and origin_branch_id to that branch's id.",
+        "When branchId is omitted, behavior is unchanged from G01 (branch_id/origin_branch_id NULL).",
+        "ChunkResponse gains nullable branchId/originBranchId fields, returned by both POST /chunks and GET /chunks/:id."
+      ],
+      "verification": "pnpm test:store",
+      "status": "done"
+    },
+    {
+      "id": "SG4",
+      "layer": "MCP",
+      "dependsOn": ["SG3"],
+      "objective": "Add create-branch MCP tool and extend capture-chunk tool with optional branchId.",
+      "acceptanceCriteria": [
+        "create-branch tool validates name/discipline/stakeholderId as non-empty strings, forwards to POST /branches, never invents a stakeholder identity, surfaces store 4xx errors as a typed validation error.",
+        "capture-chunk tool's parse function accepts an optional branchId string, forwarded as-is; vocabulary/invariant validation remains the store's responsibility.",
+        "Unit tests cover valid parsing, missing-field rejection, and mocked success/error forwarding for both tools."
+      ],
+      "verification": "pnpm test:mcp",
+      "status": "done"
+    },
+    {
+      "id": "SG5",
+      "layer": "docker-e2e",
+      "dependsOn": ["SG4"],
+      "objective": "Exercise branch creation and branch-scoped chunk authoring (HTTP and MCP) against the real containerized store.",
+      "acceptanceCriteria": [
+        "docker compose up --build spoolstore succeeds.",
+        "POST /branches then POST /chunks with that branchId succeeds; response branchId/originBranchId match; GET /branches/:id and GET /chunks/:id reflect the association.",
+        "A branchless POST /chunks (no branchId) still succeeds exactly as in G01 (no regression).",
+        "A negative case (wrong-discipline or non-existent branchId) is rejected with a 4xx.",
+        "The create-branch MCP tool creates a branch and the capture-chunk MCP tool captures a chunk into it; both confirmed via HTTP readback."
+      ],
+      "verification": "manual/scripted HTTP exercise (curl or equivalent) plus MCP tool invocation against the running spoolstore container (not satisfied by unit/in-process tests alone)",
+      "status": "done"
+    }
+  ]
+}
+</script>
+
+<script>
+  mermaid.initialize({ startOnLoad: true, theme: 'neutral' });
+  (function () {
+    var data = JSON.parse(document.getElementById('goal-data').textContent);
+    var statusClass = { open: 'badge-open', 'in-progress': 'badge-in-progress', done: 'badge-done', blocked: 'badge-blocked' };
+    var goalBadge = document.getElementById('goal-status-badge');
+    goalBadge.textContent = data.status;
+    goalBadge.className = 'badge ' + (statusClass[data.status] || 'badge-open');
+    data.subGoals.forEach(function (sg) {
+      var el = document.getElementById('d-' + sg.id);
+      if (!el) return;
+      var badge = el.querySelector('.badge');
+      if (badge) {
+        badge.textContent = sg.status;
+        badge.className = 'badge ' + (statusClass[sg.status] || 'badge-open');
+      }
+    });
+  })();
+</script>
+
+</body>
+</html>

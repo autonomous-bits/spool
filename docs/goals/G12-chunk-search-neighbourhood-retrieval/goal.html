@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>G12: Chunk Search + Neighbourhood Retrieval</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  body { font-family: -apple-system, Segoe UI, sans-serif; max-width: 980px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
+  h1 { font-size: 1.4rem; }
+  h2 { font-size: 1.1rem; border-bottom: 1px solid #ddd; padding-bottom: .25rem; margin-top: 2rem; }
+  table { border-collapse: collapse; width: 100%; margin: .5rem 0; }
+  th, td { border: 1px solid #ccc; padding: .4rem .6rem; text-align: left; font-size: .9rem; vertical-align: top; }
+  th { background: #f2f2f2; }
+  .badge { display: inline-block; padding: .1rem .5rem; border-radius: .8rem; font-size: .75rem; font-weight: 600; color: #fff; }
+  .badge.open { background: #b8860b; }
+  .badge.done { background: #2e7d32; }
+  .badge.blocked { background: #b71c1c; }
+  .badge.in-progress { background: #1565c0; }
+  details { border: 1px solid #ddd; border-radius: 6px; margin: .5rem 0; padding: .4rem .8rem; }
+  summary { cursor: pointer; font-weight: 600; }
+  code { background: #f2f2f2; padding: .1rem .3rem; border-radius: 3px; }
+  .meta { color: #555; font-size: .9rem; }
+  ul { margin: .3rem 0; }
+</style>
+</head>
+<body>
+
+<h1>G12: Chunk Search + Neighbourhood Retrieval <span class="badge open" id="goal-status-badge">open</span></h1>
+<p class="meta">
+  Size: <strong>4 (substantial)</strong> — touches every layer (API, domain, persistence, MCP) and introduces
+  a new auth-tier departure (session-token-only reads) that must be plumbed through MCP tool inputs for the
+  first time, plus new domain concepts (cursor-based ranked pagination, multi-hop discipline-gated graph
+  traversal).
+</p>
+
+<h2>Meridian Source</h2>
+<table>
+<thead><tr><th>Chunk</th><th>Status</th><th>Layer</th><th>Note</th></tr></thead>
+<tbody>
+<tr><td>IDEA-110</td><td>promoted</td><td>API/domain</td><td>Need: no chunk search/filter surface exists today.</td></tr>
+<tr><td>IDEA-111</td><td>promoted</td><td>API</td><td>Proposal: <code>GET /chunks</code> filtered by discipline/type/status/contextKind/branch.</td></tr>
+<tr><td>IDEA-112</td><td>promoted</td><td>domain</td><td>Neighbourhood depth: default 1 hop, server-enforced max 5.</td></tr>
+<tr><td>IDEA-113</td><td>promoted</td><td>domain/persistence</td><td>Cursor-based pagination; default limit 20, max 100; no offset mode.</td></tr>
+<tr><td>IDEA-115</td><td>promoted</td><td>API/MCP (auth)</td><td>Session-token required for both surfaces; no delegated/tokenless tier (departure from existing precedent).</td></tr>
+<tr><td>IDEA-116</td><td>promoted</td><td>API</td><td>Proposal: <code>GET /chunks/:id/neighbourhood</code>, depth-parameterized.</td></tr>
+<tr><td>IDEA-117</td><td>promoted</td><td>MCP</td><td>Proposal: <code>search-chunks</code>, <code>get-neighbourhood</code> MCP tools.</td></tr>
+<tr><td>IDEA-118</td><td>promoted</td><td>API/domain</td><td>Need: no way to discover a chunk's connected edges/neighbours today.</td></tr>
+<tr><td>IDEA-119</td><td>promoted</td><td>domain</td><td>Branch-filtered queries must discipline-isolate; mainline stays cross-discipline visible.</td></tr>
+<tr><td>IDEA-120</td><td>promoted</td><td>MCP</td><td>Both capabilities must have MCP tool parity with the API routes.</td></tr>
+<tr><td>IDEA-121</td><td>promoted</td><td>domain</td><td>Always workspace-scoped on both API and MCP surfaces.</td></tr>
+<tr><td>IDEA-122</td><td>promoted</td><td>domain</td><td>Cross-discipline branch-filtered query &rarr; 403 Forbidden (not a filtered/empty result).</td></tr>
+<tr><td>IDEA-123</td><td>promoted</td><td>domain</td><td>Caller with no resolvable discipline on a branch-filtered query &rarr; 400 Bad Request.</td></tr>
+<tr><td>IDEA-124</td><td>promoted</td><td>API/domain/MCP</td><td>Technical specification resolving 110&ndash;123/125 into concrete route/response shapes.</td></tr>
+<tr><td>IDEA-125</td><td>promoted</td><td>MCP</td><td>MCP token-plumbing mechanism: add required <code>sessionToken</code> input field, forward as <code>Authorization</code> header, fail fast if missing/malformed.</td></tr>
+</tbody>
+</table>
+<p class="meta">All chunks above are <strong>promoted</strong> (ratified). No draft-only or missing layer; no Meridian escalation was required for this goal.</p>
+
+<h2>Locked Design Decisions (not ambiguous, but must not be re-derived or re-guessed)</h2>
+<ul>
+<li><strong>branchId scope = strict, not overlay.</strong> Prior goals (G03/G04) explicitly deferred generic branch-overlay/UNION reads (<code>edge.repository.ts</code>: "Meridian IDEA-33's branch-overlay UNION read is out of scope until a future goal"; <code>chunk.repository.ts findByLabel</code>: "not a generic branch-overlay/UNION read"). This goal continues that precedent: when <code>branchId</code> is supplied, both <code>GET /chunks</code> and the neighbourhood traversal match <em>only</em> rows whose own <code>branch_id = branchId</code> (plus, for neighbourhood, the root chunk itself regardless of its branch) &mdash; never a merged view of branch-scoped rows unioned with mainline rows. When <code>branchId</code> is omitted, only branchless/mainline-equivalent rows are visible (no discipline gate applies, per IDEA-119).</li>
+<li><strong>Cursor ordering/tie-break (IDEA-113).</strong> With <code>q</code> supplied: order by <code>ts_rank DESC, created_at DESC, id DESC</code>. Without <code>q</code>: order by <code>created_at DESC, id DESC</code>. The cursor encodes the last row's tie-break fields (opaque, e.g. base64 JSON) so pages are stable even with duplicate <code>created_at</code> values.</li>
+<li><strong>Neighbourhood dedupe/cycles (IDEA-112).</strong> Traversal uses a visited-chunk-id set; a chunk reachable via multiple paths/hops appears exactly once in the response, recorded at its <em>minimum</em> hop distance. Depth &gt; 5 &rarr; 400 Bad Request.</li>
+<li><strong>Auth pattern reuse.</strong> Do not add a new guard/interceptor framework. Reuse the existing <code>verifySessionClaims(authorizationHeader, sessionTokenService)</code> (apps/store/src/auth/session-claims.helper.ts) and <code>assertWorkspaceScope(headerWorkspaceId, { tier: 'token', workspaceIdClaim })</code> (apps/store/src/domain/workspace-scope.ts) exactly as branches/notifications controllers already do.</li>
+<li><strong>MCP tools require both fields.</strong> Per IDEA-125, <code>search-chunks</code>/<code>get-neighbourhood</code> take a required <code>sessionToken</code> field (forwarded as <code>Authorization</code> header in the same format extractBearerToken parses today, and, per IDEA-121/G11 precedent (e.g. <code>capture-chunk.ts</code>), a required <code>workspaceId</code> field (forwarded as <code>X-Workspace-Id</code>). Missing/blank either field &rarr; the MCP tool fails fast with a 401/400-equivalent tool error before calling the store.</li>
+</ul>
+
+<h2>Vertical Slice Diagram</h2>
+<p class="meta">Two read capabilities, each cutting through all four layers; both reuse the same session-token auth tier and discipline-gate logic.</p>
+<pre class="mermaid">
+flowchart TB
+  subgraph API["API / URL surface"]
+    A1["GET /chunks?discipline&type&status&contextKind&branchId&q&limit&cursor"]
+    A2["GET /chunks/:id/neighbourhood?depth&branchId"]
+  end
+  subgraph DOMAIN["Domain"]
+    D1["Discipline-scope gate (400 no-discipline / 403 mismatch)"]
+    D2["Cursor pagination (rank/created_at/id tie-break)"]
+    D3["Multi-hop traversal (depth<=5, visited-set dedupe)"]
+  end
+  subgraph PERSISTENCE["Persistence"]
+    P1["ChunkRepository.search (full-text ranked, filtered, cursor)"]
+    P2["EdgeRepository / ChunkRepository neighbourhood traversal queries"]
+  end
+  subgraph MCP["MCP exposure"]
+    M1["search-chunks tool"]
+    M2["get-neighbourhood tool"]
+  end
+  A1 --> D1 --> D2 --> P1
+  A2 --> D1
+  A2 --> D3 --> P2
+  M1 -->|sessionToken + workspaceId| A1
+  M2 -->|sessionToken + workspaceId| A2
+</pre>
+
+<h2>Dependency Diagram</h2>
+<pre class="mermaid">
+flowchart LR
+  SG1["SG1: Chunk Search (search-chunks)<br/>persistence+domain+API+MCP+tests"]
+  SG2["SG2: Neighbourhood Retrieval (get-neighbourhood)<br/>persistence+domain+API+MCP+tests"]
+  SG3["SG3: Docker end-to-end verification"]
+  SG1 --> SG2 --> SG3
+</pre>
+
+<h2>Sub-goal Detail</h2>
+
+<details open>
+<summary>SG1 &mdash; Chunk Search vertical slice <span class="badge open" data-sg="SG1">open</span></summary>
+<p><strong>Layer:</strong> persistence + domain + API + MCP (full vertical slice) &nbsp;|&nbsp; <strong>Depends on:</strong> none</p>
+<p><strong>Objective:</strong> Implement <code>GET /chunks</code> search/filter/pagination end to end, plus the <code>search-chunks</code> MCP tool, both session-token gated.</p>
+<ul>
+<li>Acceptance criteria:</li>
+<ul>
+<li><code>ChunkRepository</code> gains a <code>search(...)</code> method supporting combinable AND filters: <code>discipline</code>, <code>chunkType</code>, <code>status</code>, <code>contextKind</code>, <code>branchId</code> (strict-scope per Locked Design Decisions), <code>q</code> (Postgres full-text ranked search across label+content, e.g. <code>to_tsvector</code>/<code>plainto_tsquery</code>/<code>ts_rank</code>), workspace-scoped always.</li>
+<li>Cursor pagination: default <code>limit</code> 20, max 100; a caller-supplied <code>limit</code> &gt; 100 is <strong>clamped down to 100</strong> (not rejected with 400), consistent with IDEA-113's framing as a server-enforced cap; opaque cursor token, ordering/tie-break exactly as specified in Locked Design Decisions.</li>
+<li><code>GET /chunks</code> controller route added to <code>ChunksController</code>: requires <code>an Authorization header in the same format extractBearerToken parses today</code> (via <code>verifySessionClaims</code>) and <code>X-Workspace-Id</code> matching the token's <code>workspaceId</code> claim (via <code>assertWorkspaceScope</code> tier <code>'token'</code>) &mdash; no delegated/tokenless mode, per IDEA-115.</li>
+<li>If <code>branchId</code> supplied and token's <code>discipline</code> claim is <code>null</code> &rarr; 400. If resolved but mismatched vs. the branch's discipline &rarr; 403. If <code>branchId</code> omitted &rarr; no discipline gate (mainline visible cross-discipline).</li>
+<li>Response shape: <code>{ chunks: ChunkResponse[], nextCursor: string | null }</code>.</li>
+<li>New MCP tool <code>apps/mcp/src/tools/search-chunks.ts</code>: required inputs include <code>sessionToken</code> and <code>workspaceId</code> (plus the same filter params); forwards <code>Authorization</code> and <code>X-Workspace-Id</code> headers to the store; fails fast (no store call) if either is missing/blank.</li>
+<li>Unit tests for the repository query building/tie-break and the discipline-gate helper; e2e tests in <code>apps/store/test</code> covering: no filters, each filter individually, combined filters, pagination across &gt;1 page, missing token (401), missing workspace header (403), branch discipline mismatch (403), branch with no-discipline token (400).</li>
+<li>MCP integration test for <code>search-chunks</code> covering the missing-sessionToken and missing-workspaceId fail-fast paths plus a successful forwarded call.</li>
+</ul>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:store</code>, <code>pnpm test:mcp</code></p>
+</details>
+
+<details>
+<summary>SG2 &mdash; Neighbourhood Retrieval vertical slice <span class="badge open" data-sg="SG2">open</span></summary>
+<p><strong>Layer:</strong> persistence + domain + API + MCP (full vertical slice) &nbsp;|&nbsp; <strong>Depends on:</strong> SG1</p>
+<p><strong>Objective:</strong> Implement <code>GET /chunks/:id/neighbourhood</code> multi-hop traversal end to end, plus the <code>get-neighbourhood</code> MCP tool, reusing SG1's session-token auth and discipline-gate helper.</p>
+<ul>
+<li>Acceptance criteria:</li>
+<ul>
+<li>Traversal query (edge/chunk repositories) walks outgoing+incoming edges from the root chunk up to <code>depth</code> hops (default 1, max 5; <code>depth &gt; 5</code> &rarr; 400).</li>
+<li>Visited-set dedupe: a chunk reachable via multiple paths appears once, at its minimum hop distance (per Locked Design Decisions).</li>
+<li>If <code>branchId</code> supplied: strict branch-scope (per Locked Design Decisions) applied at every hop, not just the root; discipline gate (400 no-discipline / 403 mismatch, identical semantics to SG1) re-checked at every hop &mdash; a multi-hop walk must never surface a different-discipline branch's chunks at any hop.</li>
+<li><code>GET /chunks/:id/neighbourhood</code> controller route added to <code>ChunksController</code>, same auth requirements as SG1 (<code>verifySessionClaims</code> + <code>assertWorkspaceScope</code> tier <code>'token'</code>).</li>
+<li>Response shape: <code>{ chunk: ChunkResponse, neighbours: { edgeId, chunkId, label, content, type, status, discipline, contextKind, direction, hop }[] }</code>.</li>
+<li>New MCP tool <code>apps/mcp/src/tools/get-neighbourhood.ts</code>: required <code>sessionToken</code> + <code>workspaceId</code> inputs, same forwarding/fail-fast behavior as SG1's <code>search-chunks</code>.</li>
+<li>Unit tests for traversal dedupe/cycle-safety and per-hop discipline gating; e2e tests in <code>apps/store/test</code> covering: depth 1 default, depth &gt; 1 multi-hop, depth &gt; 5 (400), a graph cycle (root reachable back to itself), branch-scoped traversal with matching/mismatched/no discipline.</li>
+<li>MCP integration test for <code>get-neighbourhood</code> mirroring SG1's fail-fast coverage.</li>
+</ul>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:store</code>, <code>pnpm test:mcp</code></p>
+</details>
+
+<details>
+<summary>SG3 &mdash; Docker end-to-end verification <span class="badge open" data-sg="SG3">open</span></summary>
+<p><strong>Layer:</strong> Docker / system &nbsp;|&nbsp; <strong>Depends on:</strong> SG2</p>
+<p><strong>Objective:</strong> Exercise both new routes against the real containerized store using a real session token.</p>
+<ul>
+<li>Acceptance criteria:</li>
+<ul>
+<li>Build and run with <code>docker compose up --build spoolstore</code> (per <code>apps/store/AGENTS.md</code>); run <code>pnpm build</code>/<code>pnpm --filter store build</code> first so the container runs current code.</li>
+<li>Obtain a real session token via <code>pnpm dev:session-token</code> (drives the real <code>GET /auth/github/login</code> &rarr; <code>GET /auth/github/callback</code> flow against the running container via the <code>github-oauth-stub</code> service already wired into <code>compose.yaml</code>). <strong>Do not</strong> substitute a hand-crafted/manually-signed token or a client-supplied field &mdash; this is the only faithful way to exercise every auth-gated scenario below.</li>
+<li>Using that token: call <code>GET /chunks</code> with at least one filter and confirm a 200 with the expected <code>{ chunks, nextCursor }</code> shape against real seeded/created data.</li>
+<li>Call <code>GET /chunks/:id/neighbourhood</code> on a chunk with at least one edge and confirm a 200 with the expected <code>{ chunk, neighbours }</code> shape, including a <code>hop</code> field.</li>
+<li>Negative cases against the running container: omit the <code>Authorization</code> header (401), omit <code>X-Workspace-Id</code> (403), and (if a second-discipline branch/stakeholder fixture is available) a cross-discipline branch-filtered query (403).</li>
+<li>Repeat the successful search/neighbourhood calls via the MCP server's <code>search-chunks</code>/<code>get-neighbourhood</code> tools (built from <code>apps/mcp</code>), confirming the token/workspace forwarding works end to end through the MCP layer, not just in-process.</li>
+</ul>
+</ul>
+<p><strong>Verification:</strong> Manual/tooled exercise of the running Docker container as described above; no unit/in-process test satisfies this step.</p>
+</details>
+
+<h2>Open Questions</h2>
+<p>None. All layers are clear and ratified; the branch-scope/cursor/dedupe semantics that a rubber-duck review flagged as underspecified in the raw Meridian chunks have been locked above as explicit design decisions consistent with existing repo precedent (G01&ndash;G11), not escalated to Meridian.</p>
+
+<h2>Definition of Done</h2>
+<ul>
+<li>SG1 and SG2 acceptance criteria met; <code>pnpm test:store</code> and <code>pnpm test:mcp</code> pass.</li>
+<li><code>pnpm --filter store typecheck</code>, <code>pnpm --filter store build</code>, and workspace-root <code>pnpm build</code>/<code>pnpm typecheck</code> pass.</li>
+<li>SG3's Docker end-to-end exercise passes against the real containerized store using a token from <code>pnpm dev:session-token</code>.</li>
+<li><code>docs/goals/README.md</code> updated with a G12 row on completion.</li>
+</ul>
+
+<script type="application/json" id="goal-data">
+{
+  "goalId": "G12",
+  "slug": "chunk-search-neighbourhood-retrieval",
+  "title": "Chunk Search + Neighbourhood Retrieval",
+  "status": "open",
+  "size": 4,
+  "sizeJustification": "Touches every layer (API, domain, persistence, MCP); introduces a new session-token-only read auth tier plumbed through MCP tool inputs for the first time; new domain concepts (cursor pagination, multi-hop discipline-gated traversal).",
+  "meridianChunks": [
+    {"id": "IDEA-110", "status": "promoted", "layer": "API/domain"},
+    {"id": "IDEA-111", "status": "promoted", "layer": "API"},
+    {"id": "IDEA-112", "status": "promoted", "layer": "domain"},
+    {"id": "IDEA-113", "status": "promoted", "layer": "domain/persistence"},
+    {"id": "IDEA-115", "status": "promoted", "layer": "API/MCP auth"},
+    {"id": "IDEA-116", "status": "promoted", "layer": "API"},
+    {"id": "IDEA-117", "status": "promoted", "layer": "MCP"},
+    {"id": "IDEA-118", "status": "promoted", "layer": "API/domain"},
+    {"id": "IDEA-119", "status": "promoted", "layer": "domain"},
+    {"id": "IDEA-120", "status": "promoted", "layer": "MCP"},
+    {"id": "IDEA-121", "status": "promoted", "layer": "domain"},
+    {"id": "IDEA-122", "status": "promoted", "layer": "domain"},
+    {"id": "IDEA-123", "status": "promoted", "layer": "domain"},
+    {"id": "IDEA-124", "status": "promoted", "layer": "API/domain/MCP"},
+    {"id": "IDEA-125", "status": "promoted", "layer": "MCP"}
+  ],
+  "subGoals": [
+    {
+      "id": "SG1",
+      "layer": "persistence+domain+API+MCP",
+      "dependsOn": [],
+      "objective": "Implement GET /chunks search/filter/pagination end to end plus the search-chunks MCP tool, session-token gated.",
+      "acceptanceCriteria": [
+        "ChunkRepository.search supports combinable AND filters: discipline, chunkType, status, contextKind, branchId (strict-scope), q (ranked full-text), workspace-scoped always",
+        "Cursor pagination: default limit 20, max 100 (limit>100 is clamped to 100, not rejected), ordering q-present=rank DESC,created_at DESC,id DESC; q-absent=created_at DESC,id DESC; cursor is an opaque token (e.g. base64 JSON) encoding the last row's tie-break field values",
+        "GET /chunks requires an Authorization header in extractBearerToken format, verified via verifySessionClaims and X-Workspace-Id matching token workspaceId claim (assertWorkspaceScope tier token)",
+        "branchId + null discipline claim -> 400; branchId + mismatched discipline -> 403; no branchId -> no discipline gate",
+        "Response shape { chunks: ChunkResponse[], nextCursor: string | null }",
+        "New MCP tool search-chunks requires sessionToken and workspaceId inputs, forwards Authorization and X-Workspace-Id, fails fast if either missing",
+        "Unit + e2e tests covering filters, pagination, auth failures (401/403/400), MCP fail-fast and success paths"
+      ],
+      "verification": "pnpm test:store, pnpm test:mcp",
+      "status": "open"
+    },
+    {
+      "id": "SG2",
+      "layer": "persistence+domain+API+MCP",
+      "dependsOn": ["SG1"],
+      "objective": "Implement GET /chunks/:id/neighbourhood multi-hop traversal end to end plus the get-neighbourhood MCP tool, reusing SG1 auth/discipline-gate logic.",
+      "acceptanceCriteria": [
+        "Traversal walks outgoing+incoming edges up to depth hops, default 1, max 5; depth>5 -> 400",
+        "Visited-set dedupe: chunk appears once at minimum hop distance",
+        "branchId supplied -> strict branch-scope applied to neighbour chunks/edges at every hop (root chunk itself is always included regardless of its own branch_id) + discipline gate (400/403) re-checked at every hop, not just root",
+        "GET /chunks/:id/neighbourhood same auth requirements as SG1",
+        "Response shape { chunk: ChunkResponse, neighbours: {edgeId, chunkId, label, content, type, status, discipline, contextKind, direction, hop}[] }",
+        "New MCP tool get-neighbourhood requires sessionToken and workspaceId inputs, same forwarding/fail-fast behavior as search-chunks",
+        "Unit + e2e tests covering depth defaults/max, cycle-safety, per-hop discipline gating, MCP fail-fast and success paths"
+      ],
+      "verification": "pnpm test:store, pnpm test:mcp",
+      "status": "open"
+    },
+    {
+      "id": "SG3",
+      "layer": "docker/system",
+      "dependsOn": ["SG2"],
+      "objective": "Exercise both new routes and their MCP tools against the real containerized store using a real session token.",
+      "acceptanceCriteria": [
+        "docker compose up --build spoolstore after pnpm build",
+        "Session token obtained via pnpm dev:session-token (real GitHub OAuth login/callback flow against github-oauth-stub) -- no shortcut token",
+        "GET /chunks with a filter returns 200 with { chunks, nextCursor }",
+        "GET /chunks/:id/neighbourhood on a chunk with an edge returns 200 with { chunk, neighbours } including hop",
+        "Negative cases: missing Authorization -> 401, missing X-Workspace-Id -> 403, cross-discipline branch-filtered query -> 403 if fixture available",
+        "search-chunks and get-neighbourhood MCP tools exercised end to end through the running MCP server, not just in-process"
+      ],
+      "verification": "Manual Docker exercise per acceptance criteria; not satisfied by unit/in-process tests alone",
+      "status": "open"
+    }
+  ],
+  "openQuestions": [],
+  "definitionOfDone": [
+    "SG1 and SG2 acceptance criteria met; pnpm test:store and pnpm test:mcp pass",
+    "pnpm --filter store typecheck, pnpm --filter store build, workspace pnpm build/pnpm typecheck pass",
+    "SG3 Docker end-to-end exercise passes using a pnpm dev:session-token token",
+    "docs/goals/README.md updated with a G12 row"
+  ]
+}
+</script>
+
+<script>
+  mermaid.initialize({ startOnLoad: true, securityLevel: 'loose' });
+  try {
+    const data = JSON.parse(document.getElementById('goal-data').textContent);
+    const badge = document.getElementById('goal-status-badge');
+    badge.textContent = data.status;
+    badge.className = 'badge ' + data.status;
+    for (const sg of data.subGoals) {
+      const el = document.querySelector(`[data-sg="${sg.id}"]`);
+      if (el) {
+        el.textContent = sg.status;
+        el.className = 'badge ' + sg.status;
+      }
+    }
+  } catch (e) {
+    console.error('goal-data parse failed', e);
+  }
+</script>
+
+</body>
+</html>

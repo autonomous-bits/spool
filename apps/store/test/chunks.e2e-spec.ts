@@ -1,0 +1,272 @@
+import { randomUUID } from 'node:crypto';
+import type { INestApplication } from '@nestjs/common';
+import type { Server } from 'node:http';
+import { Test, type TestingModule } from '@nestjs/testing';
+import request from 'supertest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { AppModule } from '../src/app.module.js';
+import { SessionTokenService } from '../src/auth/session-token.service.js';
+import { BOOTSTRAP_STAKEHOLDER_ID } from '../src/persistence/bootstrap-stakeholder.js';
+import { setUpTestDatabase, type TestDatabase } from './support/test-database.js';
+
+const WORKSPACE_ID = '00000000-0000-0000-0000-00000000d0fa';
+
+describe('Chunks HTTP API (containerized Postgres)', () => {
+  let app: INestApplication<Server>;
+  let database: TestDatabase;
+  let sessionTokenService: SessionTokenService;
+
+  beforeAll(async () => {
+    database = await setUpTestDatabase();
+
+    const moduleRef: TestingModule = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+
+    app = moduleRef.createNestApplication();
+    await app.init();
+    sessionTokenService = moduleRef.get(SessionTokenService);
+  });
+
+  afterAll(async () => {
+    await app.close();
+    await database.close();
+  });
+
+  async function createWorkspaceFor(stakeholderId: string): Promise<string> {
+    const token = sessionTokenService.sign({
+      stakeholderId,
+      discipline: 'engineering',
+      authTime: Math.floor(Date.now() / 1000),
+      workspaceId: null,
+    });
+    const response = await request(app.getHttpServer())
+      .post('/workspaces')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: `e2e-chunks-workspace-${randomUUID()}` });
+
+    expect(response.status).toBe(201);
+    return response.body.id as string;
+  }
+
+  it('POST /chunks creates a chunk and GET /chunks/:id retrieves it', async () => {
+    const createResponse = await request(app.getHttpServer())
+      .post('/chunks')
+      .set('X-Workspace-Id', WORKSPACE_ID)
+      .send({
+        label: `e2e-${Math.random().toString(36).slice(2, 10)}`,
+        content: 'An atomic idea captured over HTTP.',
+        discipline: 'engineering',
+        chunkType: 'feature',
+        contextKind: 'permanent',
+        stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
+      });
+
+    expect(createResponse.status).toBe(201);
+    expect(createResponse.body.id).toBeTruthy();
+    expect(createResponse.body.status).toBe('draft');
+
+    const getResponse = await request(app.getHttpServer())
+      .get(`/chunks/${createResponse.body.id as string}`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
+      .query({ stakeholderId: BOOTSTRAP_STAKEHOLDER_ID });
+
+    expect(getResponse.status).toBe(200);
+    expect(getResponse.body).toMatchObject({
+      id: createResponse.body.id,
+      chunkType: 'feature',
+      contextKind: 'permanent',
+      discipline: 'engineering',
+    });
+  });
+
+  it('POST /chunks returns 400 for an invalid vocab value', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/chunks')
+      .set('X-Workspace-Id', WORKSPACE_ID)
+      .send({
+        label: 'bad-vocab',
+        content: 'content',
+        discipline: 'bogus',
+        chunkType: 'feature',
+        contextKind: 'permanent',
+        stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
+      });
+
+    expect(response.status).toBe(400);
+  });
+
+  it('POST /chunks returns 400 for a missing required field', async () => {
+    const response = await request(app.getHttpServer()).post('/chunks').send({
+      content: 'content',
+      discipline: 'engineering',
+      chunkType: 'feature',
+      contextKind: 'permanent',
+      stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
+    });
+
+    expect(response.status).toBe(400);
+  });
+
+  it('POST /chunks returns 403 for an unknown stakeholderId', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/chunks')
+      .set('X-Workspace-Id', WORKSPACE_ID)
+      .send({
+        label: `e2e-unknown-stakeholder-${Math.random().toString(36).slice(2, 10)}`,
+        content: 'content',
+        discipline: 'engineering',
+        chunkType: 'feature',
+        contextKind: 'permanent',
+        stakeholderId: '00000000-0000-0000-0000-0000000000ff',
+      });
+
+    expect(response.status).toBe(403);
+  });
+
+  it('GET /chunks/:id returns 404 for an unknown id', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/chunks/00000000-0000-0000-0000-00000000dead')
+      .set('X-Workspace-Id', WORKSPACE_ID)
+      .query({ stakeholderId: BOOTSTRAP_STAKEHOLDER_ID });
+
+    expect(response.status).toBe(404);
+  });
+
+  it('POST /chunks attaches a chunk to an existing draft branch', async () => {
+    const branchResponse = await request(app.getHttpServer())
+      .post('/branches')
+      .set('X-Workspace-Id', WORKSPACE_ID)
+      .send({
+        name: `e2e-branch-${Math.random().toString(36).slice(2, 10)}`,
+        discipline: 'engineering',
+        stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
+      });
+    expect(branchResponse.status).toBe(201);
+    const branchId = branchResponse.body.id as string;
+
+    const createResponse = await request(app.getHttpServer())
+      .post('/chunks')
+      .set('X-Workspace-Id', WORKSPACE_ID)
+      .send({
+        label: `e2e-branch-scoped-${Math.random().toString(36).slice(2, 10)}`,
+        content: 'A branch-scoped idea.',
+        discipline: 'engineering',
+        chunkType: 'feature',
+        contextKind: 'permanent',
+        stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
+        branchId,
+      });
+
+    expect(createResponse.status).toBe(201);
+    expect(createResponse.body.branchId).toBe(branchId);
+    expect(createResponse.body.originBranchId).toBe(branchId);
+
+    const getResponse = await request(app.getHttpServer())
+      .get(`/chunks/${createResponse.body.id as string}`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
+      .query({ stakeholderId: BOOTSTRAP_STAKEHOLDER_ID });
+
+    expect(getResponse.status).toBe(200);
+    expect(getResponse.body.branchId).toBe(branchId);
+    expect(getResponse.body.originBranchId).toBe(branchId);
+  });
+
+  it('POST /chunks returns 404 when branchId does not exist', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/chunks')
+      .set('X-Workspace-Id', WORKSPACE_ID)
+      .send({
+        label: `e2e-missing-branch-${Math.random().toString(36).slice(2, 10)}`,
+        content: 'content',
+        discipline: 'engineering',
+        chunkType: 'feature',
+        contextKind: 'permanent',
+        stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
+        branchId: '00000000-0000-0000-0000-00000000dead',
+      });
+
+    expect(response.status).toBe(404);
+  });
+
+  it('POST /chunks returns 409 when branch discipline does not match the request', async () => {
+    const branchResponse = await request(app.getHttpServer())
+      .post('/branches')
+      .set('X-Workspace-Id', WORKSPACE_ID)
+      .send({
+        name: `e2e-branch-${Math.random().toString(36).slice(2, 10)}`,
+        discipline: 'design',
+        stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
+      });
+    expect(branchResponse.status).toBe(201);
+
+    const response = await request(app.getHttpServer())
+      .post('/chunks')
+      .set('X-Workspace-Id', WORKSPACE_ID)
+      .send({
+        label: `e2e-wrong-discipline-${Math.random().toString(36).slice(2, 10)}`,
+        content: 'content',
+        discipline: 'engineering',
+        chunkType: 'feature',
+        contextKind: 'permanent',
+        stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
+        branchId: branchResponse.body.id,
+      });
+
+    expect(response.status).toBe(409);
+  });
+
+  it('allows the same chunk label to be created independently in two different workspaces', async () => {
+    const otherWorkspaceId = await createWorkspaceFor(BOOTSTRAP_STAKEHOLDER_ID);
+    const label = `e2e-cross-workspace-${Math.random().toString(36).slice(2, 10)}`;
+
+    const firstResponse = await request(app.getHttpServer())
+      .post('/chunks')
+      .set('X-Workspace-Id', WORKSPACE_ID)
+      .send({
+        label,
+        content: 'An idea captured in the default workspace.',
+        discipline: 'engineering',
+        chunkType: 'feature',
+        contextKind: 'permanent',
+        stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
+      });
+    expect(firstResponse.status).toBe(201);
+
+    const secondResponse = await request(app.getHttpServer())
+      .post('/chunks')
+      .set('X-Workspace-Id', otherWorkspaceId)
+      .send({
+        label,
+        content: 'The same label captured in a different workspace.',
+        discipline: 'engineering',
+        chunkType: 'feature',
+        contextKind: 'permanent',
+        stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
+      });
+    expect(secondResponse.status).toBe(201);
+    expect(secondResponse.body.id).not.toBe(firstResponse.body.id);
+
+    const firstGet = await request(app.getHttpServer())
+      .get(`/chunks/${firstResponse.body.id as string}`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
+      .query({ stakeholderId: BOOTSTRAP_STAKEHOLDER_ID });
+    expect(firstGet.status).toBe(200);
+    expect(firstGet.body.label).toBe(label);
+
+    const secondGet = await request(app.getHttpServer())
+      .get(`/chunks/${secondResponse.body.id as string}`)
+      .set('X-Workspace-Id', otherWorkspaceId)
+      .query({ stakeholderId: BOOTSTRAP_STAKEHOLDER_ID });
+    expect(secondGet.status).toBe(200);
+    expect(secondGet.body.label).toBe(label);
+
+    // Cross-workspace reads must not resolve: fetching the other workspace's chunk id under this
+    // workspace's header is indistinguishable from "doesn't exist" (never leaks existence).
+    const crossWorkspaceGet = await request(app.getHttpServer())
+      .get(`/chunks/${secondResponse.body.id as string}`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
+      .query({ stakeholderId: BOOTSTRAP_STAKEHOLDER_ID });
+    expect(crossWorkspaceGet.status).toBe(404);
+  });
+});

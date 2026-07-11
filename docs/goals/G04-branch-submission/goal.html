@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>G04 — Branch Submission (draft → submitted)</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  body { font-family: -apple-system, Segoe UI, sans-serif; max-width: 960px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
+  h1 { font-size: 1.4rem; }
+  h2 { font-size: 1.1rem; margin-top: 2rem; border-bottom: 1px solid #ddd; padding-bottom: 0.25rem; }
+  table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; font-size: 0.9rem; }
+  th, td { border: 1px solid #ccc; padding: 4px 8px; text-align: left; vertical-align: top; }
+  th { background: #f0f0f0; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 0.75rem; font-weight: 600; color: #fff; }
+  .badge-open { background: #6c757d; }
+  .badge-in-progress { background: #f0ad4e; }
+  .badge-done { background: #28a745; }
+  .badge-blocked { background: #d9534f; }
+  details { border: 1px solid #ddd; border-radius: 6px; padding: 0.5rem 0.75rem; margin: 0.5rem 0; }
+  summary { cursor: pointer; font-weight: 600; }
+  code { background: #f5f5f5; padding: 1px 4px; border-radius: 3px; }
+  .mermaid { background: #fafafa; padding: 0.5rem; border-radius: 6px; }
+  .warn { background: #fff3cd; border: 1px solid #ffe08a; padding: 0.5rem 0.75rem; border-radius: 6px; }
+</style>
+</head>
+<body>
+
+<h1>G04 — Branch Submission (draft → submitted)</h1>
+<p>
+  Status: <span id="goal-status-badge" class="badge badge-done">done</span> &middot;
+  Size: <strong>5/5</strong> — touches every layer this goal needs (API, domain, persistence), introduces two
+  new domain concepts (<code>ActorKind</code>/<code>ActorContext</code> and branch-lifecycle assertions), a
+  schema-adjacent behavior change (atomic status transition), and retrofits the existing chunk/edge write
+  paths so the new write-lock is not bypassable — no single layer/file captures this goal.
+</p>
+
+<h2>Meridian Source</h2>
+<table>
+<thead><tr><th>Chunk</th><th>Status</th><th>Layer</th><th>Note</th></tr></thead>
+<tbody>
+<tr><td>IDEA-18</td><td>promoted</td><td>functional</td><td>Merge Pipeline: Submission → Human Verification → Merge. This goal implements only Submission.</td></tr>
+<tr><td>IDEA-20</td><td>promoted</td><td>functional</td><td>Submission signifies the authoring role has vetted and agreed the draft branch's current state, locking it for verification.</td></tr>
+<tr><td>IDEA-17</td><td>promoted</td><td>functional</td><td>Branches are owned by a single discipline; boundaries persist through the pipeline.</td></tr>
+<tr><td>IDEA-35</td><td>promoted (ADR amendment)</td><td>domain</td><td>Submission-gate verification, write-lock enforcement, and discipline-boundary controls are enforced in apps/store domain/persistence layers, not a gateway.</td></tr>
+<tr><td>IDEA-40</td><td>promoted</td><td>domain</td><td>Submission/verification/merge require direct human authentication, not a self-reported delegation header — see Open Questions for how this goal scopes it.</td></tr>
+<tr><td>IDEA-53</td><td>promoted</td><td>domain</td><td>Domain Invariant Protection: branch write-locks, submission gates within the authoring discipline, discipline bounds.</td></tr>
+<tr><td>IDEA-75</td><td>promoted</td><td>domain</td><td>ActorKind is exactly 'human' or 'delegated'; human-only operations assert isHumanActor(actor), never spoofable by a caller-supplied field.</td></tr>
+<tr><td>IDEA-57</td><td>promoted</td><td>domain</td><td>Autonomous AI agents are forbidden from executing or approving mainline merges/submissions; must be human-triggered.</td></tr>
+<tr><td>IDEA-9</td><td>promoted</td><td>domain (scope)</td><td>Delegated agents act strictly as tools under human supervision — informs why this goal does not add an MCP submit tool (see scope note).</td></tr>
+<tr><td>IDEA-52 / IDEA-34</td><td>promoted</td><td>API</td><td>All external traffic goes through the NestJS gateway; exact REST shape is repo-derived, as for G01–G03.</td></tr>
+<tr><td>IDEA-31</td><td>promoted (ADR)</td><td>persistence</td><td>Authoritative schema; <code>branches.status</code>/<code>submitted_at</code> columns already exist (added in G02's migration, unused until now).</td></tr>
+<tr><td>IDEA-79</td><td>promoted (feedback, this session)</td><td>domain (resolved)</td><td>Gap report filed against IDEA-35/IDEA-40: no chunk defined a concrete human-authentication mechanism. Resolved by IDEA-81 (ADR). See Open Questions.</td></tr>
+<tr><td>IDEA-81</td><td>promoted (ADR, this session)</td><td>domain + API</td><td>Ratifies GitHub OAuth 2.0 authorization-code flow as the concrete human-authentication mechanism for IDEA-40/IDEA-35, superseding the caller-declared <code>actorKind</code> stopgap. Implemented as new SG0.</td></tr>
+</tbody>
+</table>
+
+<p class="warn">
+  <strong>Scope note (not exposed via MCP):</strong> submission is human-only per IDEA-9/IDEA-40/IDEA-57.
+  Delegated (agent) actors must never be able to trigger it. IDEA-81 now ratifies GitHub OAuth's authorization-code
+  flow as the concrete mechanism (SG0), but its interactive consent step still doesn't fit MCP's synchronous
+  tool-call model — an MCP tool cannot itself complete a human's GitHub login. MCP exposure therefore remains
+  deferred to a future goal, now for that structural reason rather than "no mechanism exists at all."
+</p>
+
+<h2>Vertical slice diagram</h2>
+<p>A human completes GitHub OAuth once to get a store-issued session token; submitting a draft branch requires that token, enforces human-only + discipline-matched + draft-status, atomically transitions it, and the same write-lock now also blocks chunk/edge writes on a submitted branch.</p>
+<div class="mermaid">
+flowchart LR
+  subgraph AUTH["GitHub OAuth (SG0)"]
+    G1["GET /auth/github/login\n(redirect to github.com/login/oauth/authorize)"]
+    G2["GET /auth/github/callback\n(exchange code, fetch /user)"]
+    G3["SessionTokenService.sign\n(stakeholderId, discipline, authTime)"]
+  end
+  subgraph API["API surface"]
+    C0["Authorization: Bearer session-token"]
+    C1["POST /branches/:id/submit"]
+    C2["POST /chunks (existing)"]
+    C3["POST /edges (existing)"]
+  end
+  subgraph DOMAIN["Domain"]
+    D1["ActorKind + ActorContext\n(human | delegated)"]
+    D2["assertIsHumanActor"]
+    D3["assertSubmitDiscipline"]
+    D4["assertDraftStatus"]
+  end
+  subgraph PERSIST["Persistence"]
+    P0["StakeholderRepository.findByGithubLogin"]
+    P1["StakeholderRepository.findById\n(loads discipline server-side)"]
+    P2[("branches table\nstatus, submitted_at")]
+    P3["BranchRepository.submit\n(atomic UPDATE...WHERE status='draft')"]
+    P4["ChunkRepository.create /\nEdgeRepository.create\n(retrofit: guarded against submitted branch)"]
+  end
+  G1 --> G2 --> P0
+  P0 --> G3
+  G3 --> C0
+  C0 --> C1 --> D1 --> D2 --> D3 --> D4
+  D1 --> P1
+  D4 --> P3 --> P2
+  C2 --> P4
+  C3 --> P4
+  P4 -. "guard: branch must still be draft" .-> P2
+</div>
+
+<h2>Dependency diagram</h2>
+<div class="mermaid">
+flowchart TD
+  SG0["SG0: GitHub OAuth login/callback + session-token minting"] --> SG4["SG4: POST /branches/:id/submit API"]
+  SG1["SG1: ActorKind/ActorContext + branch-lifecycle assertions"] --> SG4
+  SG2["SG2: StakeholderRepository + atomic BranchRepository.submit"] --> SG4
+  SG2 --> SG3["SG3: Harden chunk/edge writes against submitted branches"]
+  SG3 --> SG5["SG5: Docker end-to-end"]
+  SG4 --> SG5
+  SG0 --> SG5
+</div>
+
+<h2>Sub-goal detail</h2>
+
+<details id="d-SG0">
+<summary>SG0 — API + persistence: GitHub OAuth login/callback + session-token minting <span class="badge badge-done">done</span></summary>
+<p><strong>Depends on:</strong> none</p>
+<p><strong>Objective:</strong> Implement the concrete human-authentication mechanism ratified by IDEA-81: a completed GitHub OAuth 2.0 authorization-code grant mints a short-lived, store-issued session token.</p>
+<ul>
+<li><code>GET /auth/github/login</code> redirects to <code>github.com/login/oauth/authorize</code> with <code>client_id</code>/<code>redirect_uri</code>/a generated anti-CSRF <code>state</code> value.</li>
+<li><code>GET /auth/github/callback?code&amp;state</code> validates <code>state</code>, exchanges <code>code</code> for a GitHub access token via <code>POST https://github.com/login/oauth/access_token</code>, then resolves the GitHub identity via <code>GET https://api.github.com/user</code>.</li>
+<li>Both GitHub-facing HTTP calls go through an injectable HTTP client (e.g. a <code>GithubOAuthClient</code> port), so SG5's Docker e2e can substitute a local stub implementing the same two endpoints instead of driving a live, interactive github.com consent screen.</li>
+<li>New <code>stakeholders.github_login</code> column (migration) plus <code>StakeholderRepository.findByGithubLogin(login): Promise&lt;{ id: string; discipline: Discipline | null } | undefined&gt;</code>. 400/401 if the resolved GitHub login has no matching stakeholder.</li>
+<li><code>SessionTokenService.sign({ stakeholderId, discipline, authTime })</code> mints a short-lived (e.g. 15 min) signed token (JWT via <code>@nestjs/jwt</code> or <code>jose</code>, server-held secret from config, never the client); <code>SessionTokenService.verify(token)</code> returns the claims or throws on expiry/invalid signature.</li>
+<li>Callback response returns the session token to the caller (JSON body or <code>Set-Cookie</code>); exact transport is repo-derived but must be usable as a Bearer token by SG4.</li>
+<li>Unit/integration tests cover: successful callback mints a token whose claims round-trip through <code>verify</code>; unknown GitHub login is rejected; invalid/missing <code>state</code> is rejected; expired token fails <code>verify</code>.</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:store</code> (new auth module unit + integration tests).</p>
+</details>
+
+<details id="d-SG1">
+<summary>SG1 — domain: ActorKind/ActorContext + branch-lifecycle assertions <span class="badge badge-done">done</span></summary>
+<p><strong>Depends on:</strong> none</p>
+<p><strong>Objective:</strong> Model the human/delegated actor distinction and the submission invariants as pure, testable domain functions, per IDEA-75/IDEA-35/IDEA-53.</p>
+<ul>
+<li><code>ActorKind</code> closed vocabulary: <code>'human' | 'delegated'</code>, with <code>isActorKind</code>/<code>parseActorKind</code> guards mirroring existing vocab modules (e.g. <code>branch-status.ts</code>).</li>
+<li><code>ActorContext</code> type: <code>{ kind: ActorKind; stakeholderId: string; discipline: Discipline }</code>. <code>HumanActorContext</code>/<code>DelegatedActorContext</code> are the <code>kind</code>-narrowed variants (discriminated union), per IDEA-75's exact naming.</li>
+<li><code>assertIsHumanActor(actor: ActorContext): asserts actor is HumanActorContext</code> — throws a typed domain error (e.g. <code>ActorAuthorizationError</code>) when <code>actor.kind !== 'human'</code>.</li>
+<li><code>assertSubmitDiscipline(actor: ActorContext, branch: Branch): void</code> — throws a typed domain error when <code>actor.discipline !== branch.discipline</code>.</li>
+<li><code>assertDraftStatus(branch: Branch): void</code> — throws a typed domain error when <code>branch.status !== 'draft'</code>.</li>
+<li>These three assertions are pure functions with no persistence access; the caller (SG4) is responsible for constructing <code>ActorContext</code> from SG0's verified session-token claims (<code>stakeholderId</code>/<code>discipline</code>), never a client-supplied <code>discipline</code> or a body-declared <code>actorKind</code>.</li>
+<li>Unit tests cover: each assertion's pass/throw cases, and that <code>ActorKind</code> rejects any value outside the closed set.</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:store</code> (new domain unit tests).</p>
+</details>
+
+<details id="d-SG2">
+<summary>SG2 — persistence/infra: StakeholderRepository + atomic branch transition <span class="badge badge-done">done</span></summary>
+<p><strong>Depends on:</strong> none</p>
+<p><strong>Objective:</strong> Load a stakeholder's discipline server-side (never trust a client-supplied discipline for authorization) and persist the draft→submitted transition without a read-then-write race.</p>
+<ul>
+<li>New <code>StakeholderRepository.findById(id): Promise&lt;{ id: string; discipline: Discipline | null } | undefined&gt;</code> (mirrors <code>ChunkRepository</code>/<code>BranchRepository</code> query style; <code>stakeholders.discipline</code> is nullable per the existing schema, so the type reflects that).</li>
+<li><code>BranchRepository.submit(branchId: string): Promise&lt;Branch | undefined&gt;</code> — a single atomic statement: <code>UPDATE branches SET status = 'submitted', submitted_at = now(), updated_at = now() WHERE id = $1 AND status = 'draft' RETURNING *</code>. Returns <code>undefined</code> when zero rows match (covers both "not found" and "not currently draft" — the caller disambiguates via a preceding <code>findById</code> used only for the 404/409 error message, not as the authorization check itself).</li>
+<li>This atomic <code>UPDATE ... WHERE status = 'draft'</code> pattern is the reference pattern SG3 retrofits onto chunk/edge writes.</li>
+<li>Integration tests (containerized Postgres, per repo convention) cover: <code>StakeholderRepository.findById</code> round-trip including a stakeholder with <code>discipline IS NULL</code>; <code>BranchRepository.submit</code> succeeds exactly once for a draft branch and returns <code>undefined</code> on a second concurrent/sequential call (status no longer 'draft'); <code>submitted_at</code> is persisted and round-trips.</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:store</code> (repository e2e tests against containerized Postgres).</p>
+</details>
+
+<details id="d-SG3">
+<summary>SG3 — persistence: harden chunk/edge writes against submitted branches <span class="badge badge-done">done</span></summary>
+<p><strong>Depends on:</strong> SG2</p>
+<p><strong>Objective:</strong> Close the race where a chunk/edge write lands between <code>ChunksService</code>/<code>EdgesService</code>'s pre-read branch-status check and the insert, so submission actually locks the branch (current check-then-insert in <code>chunks.service.ts</code>/<code>edges.service.ts</code> is not atomic).</p>
+<ul>
+<li><code>ChunkRepository.create</code> and <code>EdgeRepository.create</code> are changed to guard the insert against the branch's current status inside the same statement/transaction, e.g. wrapping in a client transaction that does <code>SELECT status FROM branches WHERE id = $1 FOR UPDATE</code> (only when a <code>branchId</code> is present) before the insert, rolling back and signalling a conflict if status is no longer <code>'draft'</code>.</li>
+<li><code>ChunksService</code>/<code>EdgesService</code>'s existing pre-read status check remains (fast-path, unchanged error shape for the common case) but is no longer the sole enforcement — the repository-level guard is what actually prevents the race.</li>
+<li>A conflict raised by the repository-level guard surfaces as the same <code>ConflictException</code>/409 shape the services already throw for a non-draft branch, so no API-visible behavior changes for the non-racing case.</li>
+<li>Integration tests (containerized Postgres) demonstrate the race is closed: a branch is submitted concurrently with a chunk (and separately an edge) creation targeting the same branch, and exactly one of the two operations succeeds — the write path branch-status is never split by a stale in-process read.</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:store</code> (repository e2e tests, including the concurrency case).</p>
+</details>
+
+<details id="d-SG4">
+<summary>SG4 — API: POST /branches/:id/submit <span class="badge badge-done">done</span></summary>
+<p><strong>Depends on:</strong> SG0, SG1, SG2</p>
+<p><strong>Objective:</strong> Expose the submission transition over HTTP, requiring a valid GitHub-OAuth-derived session token (SG0) rather than a caller-declared actor field, wiring SG1's assertions and SG2's persistence together.</p>
+<ul>
+<li><code>POST /branches/:id/submit</code> requires <code>Authorization: Bearer &lt;session-token&gt;</code>; no <code>actorKind</code>/<code>discipline</code> is accepted in the request body.</li>
+<li>401 if the header is missing, malformed, or <code>SessionTokenService.verify</code> rejects it (invalid signature, expired, or <code>authTime</code> outside a bounded max-age).</li>
+<li>404 if the branch does not exist.</li>
+<li>400 if the token's <code>stakeholderId</code> does not resolve via <code>StakeholderRepository.findById</code>, or resolves with <code>discipline IS NULL</code> (a stakeholder with no assigned discipline cannot satisfy the discipline-match invariant).</li>
+<li>The service constructs a <code>HumanActorContext</code> directly from the verified token's claims (a valid session token can only ever represent a human actor per IDEA-81, so <code>assertIsHumanActor</code> becomes a structural guarantee of SG0's token issuance rather than a runtime branch on client input) — delegated/agent callers have no path to a session token and so 401 before reaching this check.</li>
+<li>Calls <code>assertSubmitDiscipline(actor, branch)</code>: 409 if the stakeholder's discipline does not match the branch's discipline.</li>
+<li>Calls <code>assertDraftStatus(branch)</code> as a fast-path check, then <code>BranchRepository.submit(branchId)</code> as the atomic guard: 409 if the branch is not (or no longer) in <code>'draft'</code> status.</li>
+<li><code>BranchResponse</code> gains a nullable <code>submittedAt</code> field, populated on <code>GET /branches/:id</code> and the submit response.</li>
+<li>e2e tests cover: successful submission by a matching-discipline human actor with a valid session token; 401 (missing/invalid/expired token); 400 (unknown stakeholder / null-discipline stakeholder); 404 (unknown branch); 409 (discipline mismatch); 409 (branch already submitted).</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:store</code> (controller/service unit tests + e2e spec against containerized Postgres).</p>
+</details>
+
+<details id="d-SG5">
+<summary>SG5 — Docker end-to-end verification <span class="badge badge-done">done</span></summary>
+<p><strong>Depends on:</strong> SG0, SG3, SG4</p>
+<p><strong>Objective:</strong> Prove the full slice (GitHub OAuth → API → domain → persistence, including the hardened write-lock) works against the real containerized system, not just in-process tests.</p>
+<ul>
+<li><code>docker compose up --build spoolstore</code> brings up the store against real Postgres, with SG0's <code>GithubOAuthClient</code> pointed at a local stub standing in for <code>github.com</code>'s token-exchange/user endpoints (a live interactive GitHub consent screen cannot be automated in this e2e run; this substitution is scoped explicitly, not silently faked).</li>
+<li>Over real HTTP: drive <code>GET /auth/github/login</code> → stubbed callback → <code>GET /auth/github/callback</code> for a GitHub login mapped to the repo's known-valid bootstrap stakeholder fixture (non-null discipline matching the branch), obtaining a real minted session token.</li>
+<li>Create a branch (<code>POST /branches</code>) using that same stakeholderId; submit it (<code>POST /branches/:id/submit</code>) with <code>Authorization: Bearer &lt;session-token&gt;</code> succeeds, and <code>GET /branches/:id</code> reflects <code>status: 'submitted'</code> and a non-null <code>submittedAt</code>.</li>
+<li>Negative case over HTTP: submitting the same branch again returns 409.</li>
+<li>Negative case over HTTP: submitting with no <code>Authorization</code> header (i.e. no completed GitHub OAuth flow) returns 401.</li>
+<li>Negative case over HTTP: after submission, <code>POST /chunks</code> (and separately <code>POST /edges</code>) targeting that branch is rejected (409), confirming the write-lock retrofit from SG3 holds against the real running system, not only in-process tests.</li>
+</ul>
+<p><strong>Verification:</strong> manual/scripted HTTP exercise (curl or equivalent) against <code>spoolstore</code>, covering the success path and all four negative cases above — not satisfied by unit/in-process tests alone.</p>
+</details>
+
+<h2>Open Questions</h2>
+<ul>
+<li>
+  <strong>Resolved.</strong> The prior open question — no concrete human-authentication mechanism was ratified for
+  IDEA-40/IDEA-35's "human-scoped session credentials" / "direct human authentication" requirement — is now
+  resolved by <strong>IDEA-81</strong> (ADR, promoted this session): a completed GitHub OAuth 2.0
+  authorization-code grant is the concrete mechanism, implemented as SG0 and required by SG4. IDEA-81 explicitly
+  supersedes this goal's earlier interim scope decision (a caller-declared, store-trusted <code>actorKind</code>
+  body field). No open question remains blocking this goal's design; SG0/SG4 above reflect the ratified mechanism.
+</li>
+</ul>
+
+<h2>Definition of Done</h2>
+<ul>
+<li>SG0–SG4 all pass their named verification commands.</li>
+<li>SG5's Docker end-to-end exercise passes against the real containerized store over real HTTP, covering the success path and all four negative cases, including the GitHub OAuth login/callback flow against the stubbed provider.</li>
+<li><code>docs/goals/README.md</code> updated with G04's row once complete.</li>
+</ul>
+
+<script type="application/json" id="goal-data">
+{
+  "goalId": "G04",
+  "slug": "branch-submission",
+  "title": "Branch Submission (draft \u2192 submitted)",
+  "status": "done",
+  "size": 5,
+  "sizeJustification": "Touches every layer this goal needs (API, domain, persistence) plus a new GitHub OAuth integration (SG0), introduces three new domain/infra concepts (ActorKind/ActorContext, branch-lifecycle assertions, and session-token issuance/verification), a schema-adjacent atomic-transition behavior change, and retrofits the existing chunk/edge write paths so the new write-lock is not bypassable.",
+  "meridianChunks": [
+    {"label": "IDEA-18", "status": "promoted", "layer": "functional"},
+    {"label": "IDEA-20", "status": "promoted", "layer": "functional"},
+    {"label": "IDEA-17", "status": "promoted", "layer": "functional"},
+    {"label": "IDEA-35", "status": "promoted", "statusDetail": "promoted (ADR amendment)", "layer": "domain"},
+    {"label": "IDEA-40", "status": "promoted", "layer": "domain"},
+    {"label": "IDEA-53", "status": "promoted", "layer": "domain"},
+    {"label": "IDEA-75", "status": "promoted", "layer": "domain"},
+    {"label": "IDEA-57", "status": "promoted", "layer": "domain"},
+    {"label": "IDEA-9", "status": "promoted", "layer": "domain (scope)"},
+    {"label": "IDEA-52", "status": "promoted", "layer": "API"},
+    {"label": "IDEA-34", "status": "promoted", "layer": "API"},
+    {"label": "IDEA-31", "status": "promoted", "layer": "persistence"},
+    {"label": "IDEA-79", "status": "promoted", "statusDetail": "promoted (feedback, filed this session; resolved by IDEA-81)", "layer": "domain (resolved)"},
+    {"label": "IDEA-81", "status": "promoted", "statusDetail": "promoted (ADR, filed this session)", "layer": "domain + API"}
+  ],
+  "scopeNotes": [
+    "No MCP exposure this goal: submission is human-only per IDEA-9/IDEA-40/IDEA-57. IDEA-81 ratifies GitHub OAuth as the mechanism (SG0), but its interactive consent step doesn't fit MCP's synchronous tool-call model. Deferred to a future goal.",
+    "SG0's GitHub-facing HTTP calls go through an injectable client so SG5's Docker e2e can substitute a local stub instead of driving a live interactive github.com consent screen."
+  ],
+  "subGoals": [
+    {
+      "id": "SG0",
+      "layer": "API + persistence",
+      "dependsOn": [],
+      "objective": "Implement GitHub OAuth login/callback and mint a short-lived, store-issued session token, per IDEA-81.",
+      "acceptanceCriteria": [
+        "GET /auth/github/login redirects to github.com/login/oauth/authorize with client_id/redirect_uri/state.",
+        "GET /auth/github/callback validates state, exchanges code for a GitHub access token, and resolves the GitHub identity via GitHub's /user endpoint, through an injectable GithubOAuthClient.",
+        "New stakeholders.github_login column and StakeholderRepository.findByGithubLogin; 400/401 if no matching stakeholder.",
+        "SessionTokenService.sign({ stakeholderId, discipline, authTime }) mints a short-lived signed token; SessionTokenService.verify(token) returns claims or throws on expiry/invalid signature.",
+        "Tests cover: successful callback mints a verifiable token; unknown GitHub login rejected; invalid/missing state rejected; expired token fails verify."
+      ],
+      "verification": "pnpm test:store",
+      "status": "done"
+    },
+    {
+      "id": "SG1",
+      "layer": "domain",
+      "dependsOn": [],
+      "objective": "Implement ActorKind/ActorContext types and branch-lifecycle assertions (assertIsHumanActor, assertSubmitDiscipline, assertDraftStatus).",
+      "acceptanceCriteria": [
+        "ActorKind is a closed enum: 'human' | 'delegated', with isActorKind/parseActorKind guards.",
+        "ActorContext = { kind, stakeholderId, discipline }, with HumanActorContext/DelegatedActorContext as kind-narrowed variants.",
+        "assertIsHumanActor throws a typed domain error when actor.kind !== 'human'.",
+        "assertSubmitDiscipline throws a typed domain error when actor.discipline !== branch.discipline.",
+        "assertDraftStatus throws a typed domain error when branch.status !== 'draft'.",
+        "ActorContext is always populated from SG0's verified session-token claims, never from a client-supplied discipline or body-declared actorKind.",
+        "Unit tests cover each assertion's pass/throw cases and ActorKind's closed-set rejection."
+      ],
+      "verification": "pnpm test:store",
+      "status": "done"
+    },
+    {
+      "id": "SG2",
+      "layer": "persistence/infra",
+      "dependsOn": [],
+      "objective": "Add StakeholderRepository.findById and an atomic BranchRepository.submit compare-and-set transition.",
+      "acceptanceCriteria": [
+        "StakeholderRepository.findById(id) returns { id, discipline } where discipline may be null, or undefined if not found.",
+        "BranchRepository.submit(branchId) runs UPDATE branches SET status='submitted', submitted_at=now(), updated_at=now() WHERE id=$1 AND status='draft' RETURNING *, returning undefined on zero rows.",
+        "Integration tests cover: StakeholderRepository round-trip including null-discipline stakeholder; BranchRepository.submit succeeds once and returns undefined on a repeat call; submitted_at persists and round-trips."
+      ],
+      "verification": "pnpm test:store",
+      "status": "done"
+    },
+    {
+      "id": "SG3",
+      "layer": "persistence",
+      "dependsOn": ["SG2"],
+      "objective": "Retrofit ChunkRepository.create and EdgeRepository.create to atomically guard against a branch that is no longer draft, closing the check-then-insert race.",
+      "acceptanceCriteria": [
+        "ChunkRepository.create and EdgeRepository.create guard the insert against the branch's current status within the same transaction (e.g. SELECT ... FOR UPDATE on the branch row before insert) when a branchId is present.",
+        "A conflict raised by the repository-level guard surfaces as the same ConflictException/409 shape the services already throw for a non-draft branch.",
+        "ChunksService/EdgesService's existing pre-read branch-status check remains in place as a fast-path (unchanged error shape for the non-racing case); the repository-level guard is the actual enforcement, not a replacement for the fast-path.",
+        "Integration tests demonstrate the race is closed: concurrent submit + chunk-create (and separately submit + edge-create) targeting the same branch resolve so exactly one operation succeeds."
+      ],
+      "verification": "pnpm test:store",
+      "status": "done"
+    },
+    {
+      "id": "SG4",
+      "layer": "API",
+      "dependsOn": ["SG0", "SG1", "SG2"],
+      "objective": "Expose POST /branches/:id/submit, requiring a valid GitHub-OAuth-derived session token (SG0), wiring SG1's assertions and SG2's persistence together, with submittedAt surfaced on BranchResponse.",
+      "acceptanceCriteria": [
+        "POST /branches/:id/submit requires Authorization: Bearer <session-token>; no actorKind/discipline accepted in the body.",
+        "401 if the header is missing, malformed, or SessionTokenService.verify rejects it (invalid signature, expired, authTime outside bounded max-age).",
+        "404 if the branch does not exist.",
+        "400 if the token's stakeholderId does not resolve, or resolves with discipline IS NULL.",
+        "A HumanActorContext is constructed directly from the verified token's claims; delegated/agent callers have no path to a session token and so 401 before any actor-kind check.",
+        "409 if the stakeholder's discipline does not match the branch's discipline (assertSubmitDiscipline).",
+        "409 if the branch is not (or no longer) in 'draft' status.",
+        "BranchResponse includes a nullable submittedAt, populated on successful submit and on GET /branches/:id.",
+        "e2e tests cover the success path and every listed error case."
+      ],
+      "verification": "pnpm test:store",
+      "status": "done"
+    },
+    {
+      "id": "SG5",
+      "layer": "docker-e2e",
+      "dependsOn": ["SG0", "SG3", "SG4"],
+      "objective": "Exercise GitHub OAuth login/callback, branch submission, and the retrofitted write-lock against the real containerized store over HTTP.",
+      "acceptanceCriteria": [
+        "docker compose up --build spoolstore runs against real Postgres, with SG0's GithubOAuthClient pointed at a local stub standing in for github.com's token-exchange/user endpoints.",
+        "Real HTTP flow: GET /auth/github/login -> stubbed callback -> GET /auth/github/callback for a GitHub login mapped to the bootstrap stakeholder fixture yields a real minted session token.",
+        "POST /branches then POST /branches/:id/submit with Authorization: Bearer <session-token> (matching discipline) succeeds; GET /branches/:id shows status 'submitted' and non-null submittedAt.",
+        "Repeat submit returns 409.",
+        "Submit with no Authorization header returns 401.",
+        "POST /chunks and POST /edges against the now-submitted branch both return 409."
+      ],
+      "verification": "manual/scripted HTTP exercise against spoolstore covering the success path and all four negative cases",
+      "status": "done"
+    }
+  ]
+}
+</script>
+
+<script>
+  const data = JSON.parse(document.getElementById('goal-data').textContent);
+  const badgeClass = (s) => ({ open: 'badge-open', 'in-progress': 'badge-in-progress', done: 'badge-done', blocked: 'badge-blocked' }[s] || 'badge-open');
+  data.subGoals.forEach((sg) => {
+    const el = document.getElementById('d-' + sg.id);
+    if (!el) return;
+    const badge = el.querySelector('.badge');
+    if (badge) {
+      badge.className = 'badge ' + badgeClass(sg.status);
+      badge.textContent = sg.status;
+    }
+  });
+  const goalBadge = document.getElementById('goal-status-badge');
+  if (goalBadge) {
+    goalBadge.className = 'badge ' + badgeClass(data.status);
+    goalBadge.textContent = data.status;
+  }
+  if (window.mermaid) mermaid.initialize({ startOnLoad: true });
+</script>
+
+</body>
+</html>

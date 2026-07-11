@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>G10 — Workspace Registry &amp; Membership Bootstrap</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  body { font-family: -apple-system, Segoe UI, sans-serif; max-width: 980px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
+  h1 { font-size: 1.4rem; }
+  h2 { font-size: 1.1rem; margin-top: 2rem; border-bottom: 1px solid #ddd; padding-bottom: .25rem; }
+  table { border-collapse: collapse; width: 100%; margin: .5rem 0; font-size: .9rem; }
+  th, td { border: 1px solid #ccc; padding: .4rem .6rem; text-align: left; vertical-align: top; }
+  th { background: #f2f2f2; }
+  .badge { display: inline-block; padding: .1rem .5rem; border-radius: .8rem; font-size: .75rem; font-weight: 600; color: #fff; }
+  .badge-open { background: #888; }
+  .badge-in-progress { background: #d38b00; }
+  .badge-done { background: #1e8e3e; }
+  .badge-blocked { background: #c62828; }
+  details { border: 1px solid #ccc; border-radius: 6px; margin: .5rem 0; padding: .4rem .8rem; }
+  summary { cursor: pointer; font-weight: 600; }
+  .mermaid { background: #fafafa; padding: 1rem; border: 1px solid #eee; border-radius: 6px; }
+  code { background: #f2f2f2; padding: 0 .3rem; border-radius: 3px; }
+  .note { background: #fff8e1; border-left: 4px solid #f9a825; padding: .5rem .8rem; margin: .5rem 0; font-size: .9rem; }
+</style>
+</head>
+<body>
+
+<h1>G10 — Workspace Registry &amp; Membership Bootstrap
+  <span class="badge badge-done" id="goal-status-badge">done</span>
+</h1>
+<p><strong>Size:</strong> 4/5 — two new domain concepts (Workspace, WorkspaceMembership), a new Postgres schema/migration, and a new NestJS API layer reusing (not extending) existing human-auth; no MCP layer, no isolation enforcement, so it stops short of 5.</p>
+
+<div class="note">
+<strong>Scope framing:</strong> this goal delivers the <em>workspace registry + membership primitives</em> (IDEA-94/95/96) only. It does <strong>not</strong> implement workspace <em>isolation</em> (IDEA-90), request-scoping/auth-claim binding (IDEA-92), or domain-invariant enforcement of membership boundaries (IDEA-98). After this goal, a <code>workspaces</code> table and membership rows exist and are administrable via API, but every existing chunk/branch/edge/artifact/suggestion/signal/notification path remains globally scoped exactly as before — Workspace has no isolation effect yet. Treat IDEA-88/89 as motivating product context, not as fully realized by this slice.
+</div>
+
+<h2>Meridian Source</h2>
+<table>
+<tr><th>Chunk</th><th>Status</th><th>Layer</th><th>Note</th></tr>
+<tr><td>IDEA-94</td><td>promoted</td><td>API</td><td>Workspace Management Service: POST /workspaces, POST /workspaces/:id/members. Directly implemented.</td></tr>
+<tr><td>IDEA-95</td><td>promoted</td><td>Domain</td><td>Direct-add membership, no roles, creator has no special privilege beyond being first row. Directly implemented.</td></tr>
+<tr><td>IDEA-96</td><td>promoted</td><td>Persistence</td><td>Exact schema for <code>workspaces</code> / <code>workspace_memberships</code>. Directly implemented.</td></tr>
+<tr><td>IDEA-88</td><td>promoted</td><td>Domain (context)</td><td>Membership concept motivating this slice; write-scoping to membership (per-chunk enforcement) is <strong>not</strong> built here — deferred with IDEA-90/92/98.</td></tr>
+<tr><td>IDEA-89</td><td>promoted</td><td>Domain (context)</td><td>Workspace = isolated graph scope; isolation itself is out of scope for this goal (IDEA-90).</td></tr>
+<tr><td>IDEA-97</td><td>promoted</td><td>Domain (constraint)</td><td>Discipline stays global/orthogonal to Workspace — no implementation action required, just a boundary to respect (don't scope Discipline by workspace).</td></tr>
+<tr><td>IDEA-81</td><td>promoted</td><td>Auth (reused, unmodified)</td><td>Existing GitHub-OAuth human session token mechanism. Reused as-is to gate both new endpoints; not extended with a workspaceId claim in this goal.</td></tr>
+<tr><td>IDEA-90</td><td>promoted (deferred)</td><td>Persistence/Domain</td><td>Workspace-scoped labels/indexes on existing tables. Explicit future goal — see Open Questions.</td></tr>
+<tr><td>IDEA-92</td><td>promoted (deferred)</td><td>Auth/API</td><td>X-Workspace-Id header + token workspaceId claim + OAuth callback param. Explicit future goal — see Open Questions.</td></tr>
+<tr><td>IDEA-98</td><td>promoted (deferred)</td><td>Domain</td><td>Domain Invariant Protection Service amendment for membership boundaries. Depends on IDEA-92; future goal.</td></tr>
+<tr><td>IDEA-99</td><td>draft (not ratified)</td><td>Auth (context)</td><td>Gap-report flagging OAuth bootstrap ambiguity + mixed-auth-model gap for IDEA-92. Not resolved here; this goal sidesteps it by not implementing IDEA-92 at all. Now resolved for a future goal via IDEA-100/IDEA-101 (see below) — IDEA-99 itself stays draft as the original report, but is no longer a blocker.</td></tr>
+<tr><td>IDEA-100</td><td>promoted</td><td>Auth/API (future goal)</td><td>Canonical resolution to IDEA-99 gap #2 (delegated/tokenless routes validate X-Workspace-Id against caller-supplied stakeholderId's membership row, no session token required). Not implemented by this goal; informs a future IDEA-92 goal.</td></tr>
+<tr><td>IDEA-101</td><td>promoted</td><td>Auth/API (future goal)</td><td>Canonical resolution to IDEA-99 gap #1 (workspace-less session token, usable only for POST /workspaces, minted when a stakeholder has zero memberships). Not implemented by this goal; informs a future IDEA-92 goal. Note: this goal's own POST /workspaces reuses today's unmodified IDEA-81 token instead, since IDEA-92/101's workspace-less-token variant does not exist yet.</td></tr>
+</table>
+
+<h2>Vertical Slice Diagram</h2>
+<p>Two endpoints, reusing existing auth, writing to two new tables. No existing business module's handlers/schemas/domain logic is touched (only app-level composition wiring is added — see note below).</p>
+<div class="mermaid">
+flowchart LR
+  subgraph API["API surface (new WorkspacesModule)"]
+    A["POST /workspaces"]
+    B["POST /workspaces/:id/members"]
+  end
+  subgraph AUTH["Auth (existing, reused unmodified)"]
+    T["SessionTokenService<br/>(IDEA-81 human token)"]
+  end
+  subgraph DOMAIN["Domain (new)"]
+    W["Workspace"]
+    M["WorkspaceMembership"]
+  end
+  subgraph PERSIST["Persistence (new)"]
+    WT[("workspaces table")]
+    MT[("workspace_memberships table")]
+  end
+  A -->|requires valid human token| T
+  B -->|requires valid human token + caller is existing member| T
+  A --> W
+  W -->|creator becomes first member| M
+  B -->|existing member direct-adds target| M
+  W --> WT
+  M --> MT
+</div>
+<p><em>Note: <code>app.module.ts</code> is wired to import the new <code>WorkspacesModule</code> (app-level composition only). No existing business module (chunks/branches/edges/artifacts/suggestions/verification-signals/notifications) has its handlers, schemas, or domain logic modified by this goal.</em></p>
+
+<h2>Dependency Diagram</h2>
+<div class="mermaid">
+flowchart TD
+  SG1["SG1: Domain model<br/>Workspace + WorkspaceMembership"]
+  SG2["SG2: Persistence<br/>migration + repository"]
+  SG3["SG3: API<br/>WorkspacesModule + controllers"]
+  SG4["SG4: Docker e2e (final, mandatory)"]
+  SG1 --> SG2 --> SG3 --> SG4
+</div>
+
+<h2>Sub-goal Detail</h2>
+
+<details id="sg-SG1">
+<summary>SG1 — Domain model <span class="badge badge-done">done</span></summary>
+<p><strong>Layer:</strong> Domain &nbsp;|&nbsp; <strong>Depends on:</strong> none</p>
+<p><strong>Objective:</strong> Add <code>Workspace</code> and <code>WorkspaceMembership</code> domain types plus invariants in <code>apps/store/src/domain/</code> (e.g. <code>workspace.ts</code>, <code>workspace-membership.ts</code>), following existing domain-file conventions (see <code>branch.ts</code>, <code>branch-lifecycle.ts</code>). The domain layer owns pure decision logic only (what membership rows a creation implies, who may add a member); SG2's repository is responsible for executing those decisions as real writes — SG1 does not touch persistence.</p>
+<p><strong>Acceptance criteria:</strong></p>
+<ul>
+<li>Workspace has: id, name, createdByStakeholderId, createdAt, updatedAt — matching IDEA-96 exactly (see SG2's exact DDL).</li>
+<li>WorkspaceMembership has: workspaceId, stakeholderId, createdAt — no role field, per IDEA-95.</li>
+<li>A pure domain function (e.g. <code>deriveInitialMembership(workspace)</code>) returns the single membership row implied by a new workspace (the creator, per IDEA-88/95) — this is the authoritative statement of "creator becomes first member"; SG2's repository calls it and persists the result in the same transaction as the workspace insert, it does not re-derive the rule itself.</li>
+<li>A pure domain function (e.g. <code>assertCanAddMember(actorIsMember: boolean)</code>) throws unless the caller is an existing member; the creator has no special privilege beyond being the first membership row (per IDEA-88/95).</li>
+<li>Unit tests cover: <code>deriveInitialMembership</code> produces exactly one membership row for the creator, <code>assertCanAddMember</code> rejects a non-member caller, <code>assertCanAddMember</code> allows any existing member regardless of whether they were the creator.</li>
+<li>Domain-level duplicate-membership handling: adding a member who is already a member is a distinct outcome from "non-member cannot add" — model it as its own explicit domain error (e.g. <code>WorkspaceMembershipAlreadyExistsError</code>), not silently swallowed and not conflated with the non-member-caller rejection. SG3 maps this domain error to HTTP 409 (see SG3).</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:store</code> (targeted: new domain spec files)</p>
+</details>
+
+<details id="sg-SG2">
+<summary>SG2 — Persistence <span class="badge badge-done">done</span></summary>
+<p><strong>Layer:</strong> Persistence &nbsp;|&nbsp; <strong>Depends on:</strong> SG1</p>
+<p><strong>Objective:</strong> Add migration <code>0012_add_workspaces_tables.sql</code> creating <code>workspaces</code> and <code>workspace_memberships</code> exactly per IDEA-96, plus a <code>WorkspaceRepository</code> (or equivalent) in <code>apps/store/src/persistence/</code> providing: create-workspace-with-first-member (single atomic transaction, calling SG1's <code>deriveInitialMembership</code>), add-member (calling SG1's <code>assertCanAddMember</code> and raising SG1's <code>WorkspaceMembershipAlreadyExistsError</code> on duplicates), and an <code>isMember(workspaceId, stakeholderId)</code> lookup.</p>
+<p><strong>Exact schema (authoritative — do not deviate):</strong></p>
+<pre><code>CREATE TABLE workspaces (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  created_by_stakeholder_id UUID NOT NULL REFERENCES stakeholders(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE workspace_memberships (
+  workspace_id UUID NOT NULL REFERENCES workspaces(id),
+  stakeholder_id UUID NOT NULL REFERENCES stakeholders(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (workspace_id, stakeholder_id)
+);</code></pre>
+<p>Match existing migration conventions (see <code>0001_init_chunk_capture_schema.sql</code>/<code>0003_add_branches_table.sql</code>) for exact column-type/default idioms (e.g. the repo's existing UUID-default and timestamp-default style) if they differ from the above — the above is the column/constraint contract from IDEA-96, not a mandate to break from repo SQL style.</p>
+<p><strong>Acceptance criteria:</strong></p>
+<ul>
+<li>Migration runs cleanly against the existing Postgres migration chain (0001-0011) with no FK/index conflicts.</li>
+<li>Creating a workspace inserts exactly one <code>workspaces</code> row and one <code>workspace_memberships</code> row (creator) atomically — a failure in either rolls back both.</li>
+<li>Adding a duplicate member raises SG1's <code>WorkspaceMembershipAlreadyExistsError</code> (backed by the composite primary key uniquely enforcing one row per (workspace, stakeholder)) — this is a distinct, explicit conflict outcome, not a silent no-op and not conflated with the non-member-caller rejection.</li>
+<li>This goal does not add a <code>workspace_id</code> column, index, or constraint to any existing table (chunks, edges, branches, artifacts, chunk_artifacts, suggestions, verification_signals, feedback_notifications) — that is IDEA-90, explicitly out of scope (OQ1).</li>
+<li>Integration tests run against a real containerized Postgres (per repo convention — no in-memory substitute).</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:store</code> (targeted: new persistence integration spec)</p>
+</details>
+
+<details id="sg-SG3">
+<summary>SG3 — API <span class="badge badge-done">done</span></summary>
+<p><strong>Layer:</strong> API &nbsp;|&nbsp; <strong>Depends on:</strong> SG2</p>
+<p><strong>Objective:</strong> Add a <code>WorkspacesModule</code> (controller + service + DTOs, mirroring <code>branches</code> module structure) exposing <code>POST /workspaces</code> and <code>POST /workspaces/:id/members</code> per IDEA-94, wired into <code>app.module.ts</code>. Both endpoints require a valid existing human session token (reuse <code>SessionTokenService</code> exactly as branches/verification endpoints do — no new auth logic, no workspaceId claim, no X-Workspace-Id header). <code>POST /workspaces</code>: any authenticated human stakeholder may call it. <code>POST /workspaces/:id/members</code>: caller must be an existing member of the named workspace (checked via SG2's <code>isMember</code>), naming a target stakeholder id to add.</p>
+<p><strong>Acceptance criteria:</strong></p>
+<ul>
+<li>Request/response contract: <code>POST /workspaces</code> body <code>{ "name": string }</code> → 201 <code>{ "id": uuid, "name": string, "createdByStakeholderId": uuid, "createdAt": ISO-8601 }</code>. <code>POST /workspaces/:id/members</code> body <code>{ "stakeholderId": uuid }</code> → 201 <code>{ "workspaceId": uuid, "stakeholderId": uuid, "createdAt": ISO-8601 }</code>.</li>
+<li>Missing/invalid session token on either endpoint → 401.</li>
+<li>Valid token, <code>POST /workspaces</code> → 201 with created workspace id; caller is the sole initial member.</li>
+<li><code>:id</code> in <code>POST /workspaces/:id/members</code> naming a nonexistent workspace → 404.</li>
+<li>Valid token, caller not a member of the target workspace, <code>POST /workspaces/:id/members</code> → 403.</li>
+<li>Target <code>stakeholderId</code> in the request body naming a nonexistent stakeholder → 404.</li>
+<li>Valid token, caller is a member, <code>POST /workspaces/:id/members</code> with a valid target stakeholder id → 201 (membership resource created) with membership confirmation.</li>
+<li>Valid token, caller is a member, target stakeholder is already a member (SG1's <code>WorkspaceMembershipAlreadyExistsError</code>, SG2) → 409.</li>
+<li>No MCP tool is added for either endpoint (both are human-only actions per IDEA-94, matching the established repo precedent that branch submit/verify/merge — also human-only — have no MCP tool exposure).</li>
+<li>Controller + e2e-spec tests cover all cases above, including the non-member-rejection case (this is the one negative case that cannot be reproduced in the single-fixture Docker environment — see SG4).</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:store</code></p>
+</details>
+
+<details id="sg-SG4">
+<summary>SG4 — Docker end-to-end (mandatory final step) <span class="badge badge-done">done</span></summary>
+<p><strong>Layer:</strong> Docker e2e &nbsp;|&nbsp; <strong>Depends on:</strong> SG3</p>
+<p><strong>Objective:</strong> Bring up the real containerized system and exercise both new endpoints over HTTP using a real human session token obtained the only way the constitution permits.</p>
+<p><strong>Acceptance criteria:</strong></p>
+<ul>
+<li>Run <code>docker compose up --build spoolstore</code> (rebuild required — host <code>dist/</code> must be rebuilt first per repo convention).</li>
+<li>Obtain a real human session token via <code>pnpm dev:session-token</code> (drives the actual GET /auth/github/login → GET /auth/github/callback flow against the running container via the wired <code>github-oauth-stub</code> service). Do not substitute a hand-crafted or client-supplied token.</li>
+<li>Using that token, call <code>POST /workspaces</code> → observe 201 and a created workspace id.</li>
+<li>Using that same token, call <code>POST /workspaces/:id/members</code> naming the existing seeded bootstrap stakeholder (migration <code>0002_seed_bootstrap_stakeholder.sql</code>, id <code>00000000-0000-0000-0000-000000000002</code>) as the target → observe success and a persisted second membership row.</li>
+<li>Negative case exercised in Docker: call <code>POST /workspaces</code> with no/invalid token → observe 401. (The other negative case — non-member rejected from add-member — is proven in SG3's Vitest e2e-spec, not here, since only one OAuth-mapped fixture identity exists in the Docker environment; do not attempt to fabricate a second real human token to reproduce it in Docker.)</li>
+<li>Confirm persisted state directly against the running Postgres container (e.g. <code>docker compose exec</code> psql query on <code>workspaces</code>/<code>workspace_memberships</code>) as supplementary confirmation alongside the API responses.</li>
+</ul>
+<p><strong>Verification:</strong> manual Docker exercise as described above (not satisfied by unit/integration tests alone).</p>
+</details>
+
+<h2>Open Questions</h2>
+<ul>
+<li><strong>OQ1 (scope boundary, intentional):</strong> IDEA-90 (workspace_id columns + re-keyed uniqueness on chunks/edges/branches/artifacts/chunk_artifacts/suggestions/verification_signals/feedback_notifications) is explicitly deferred to a future goal. This goal's tables and existing tables remain unlinked.</li>
+<li><strong>OQ2 (scope boundary, intentional):</strong> IDEA-92 (session-token <code>workspaceId</code> claim, <code>X-Workspace-Id</code> header, OAuth callback <code>workspaceId</code> param) and IDEA-98 (Domain Invariant Protection Service membership-boundary amendment) are explicitly deferred to a future goal. This goal's endpoints authenticate with the existing, unmodified human session token only.</li>
+<li><strong>OQ3 (resolved for future goals, not implemented here):</strong> IDEA-99 (draft, unratified) originally flagged that IDEA-92's OAuth bootstrap path was ambiguous and that IDEA-92's "every request/MCP call needs X-Workspace-Id" conflicted with today's tokenless delegated routes. Both gaps are now resolved by promoted ADRs <strong>IDEA-101</strong> (bootstrap: workspace-less session token, usable only for <code>POST /workspaces</code>, minted when a stakeholder has zero memberships) and <strong>IDEA-100</strong> (mixed auth: delegated/tokenless routes validate <code>X-Workspace-Id</code> against the caller-supplied stakeholderId's membership row, no token required). This goal does not implement either resolution — it still authenticates <code>POST /workspaces</code> with today's unmodified IDEA-81 token, since IDEA-92 itself remains unimplemented — but a future goal implementing IDEA-92 can proceed directly against IDEA-100/101 without further Meridian escalation.</li>
+<li><strong>OQ4 (cross-goal note, informational only):</strong> G09's notification fan-out was justified as global specifically because "no membership model exists" at the time. That statement becomes literally stale once this goal lands `workspace_memberships`, even though notification behavior itself is intentionally untouched here. A future workspace-scoping goal should revisit G09's fan-out scope alongside IDEA-90/92/98.</li>
+</ul>
+
+<h2>Definition of Done</h2>
+<ul>
+<li>SG1-SG3 all pass their targeted <code>pnpm test:store</code> verification.</li>
+<li><code>pnpm build</code> and <code>pnpm typecheck</code> pass at repo root.</li>
+<li>SG4's Docker end-to-end exercise passes exactly as specified (real session token via <code>pnpm dev:session-token</code>, real HTTP calls, real Postgres confirmation) — not satisfied by unit/integration tests alone.</li>
+<li>Open Questions OQ1-OQ4 are carried into any future goal that touches Workspace isolation/request-scoping; none are silently resolved by this goal.</li>
+</ul>
+
+<script type="application/json" id="goal-data">
+{
+  "goalId": "G10",
+  "slug": "workspace-registry-membership",
+  "title": "Workspace Registry & Membership Bootstrap",
+  "status": "done",
+  "size": 4,
+  "sizeJustification": "Two new domain concepts (Workspace, WorkspaceMembership), a new schema/migration, and a new API layer reusing existing human auth; no MCP layer, no isolation enforcement.",
+  "meridianChunks": [
+    {"id": "IDEA-94", "status": "promoted", "layer": "API", "role": "implemented"},
+    {"id": "IDEA-95", "status": "promoted", "layer": "domain", "role": "implemented"},
+    {"id": "IDEA-96", "status": "promoted", "layer": "persistence", "role": "implemented"},
+    {"id": "IDEA-88", "status": "promoted", "layer": "domain", "role": "context-only"},
+    {"id": "IDEA-89", "status": "promoted", "layer": "domain", "role": "context-only"},
+    {"id": "IDEA-97", "status": "promoted", "layer": "domain", "role": "constraint-respected"},
+    {"id": "IDEA-81", "status": "promoted", "layer": "auth", "role": "reused-unmodified"},
+    {"id": "IDEA-90", "status": "promoted", "layer": "persistence/domain", "role": "deferred"},
+    {"id": "IDEA-92", "status": "promoted", "layer": "auth/API", "role": "deferred"},
+    {"id": "IDEA-98", "status": "promoted", "layer": "domain", "role": "deferred"},
+    {"id": "IDEA-99", "status": "draft", "layer": "auth", "role": "context-resolved-by-100-101"},
+    {"id": "IDEA-100", "status": "promoted", "layer": "auth/API", "role": "resolves-IDEA-99-gap2-not-implemented-here"},
+    {"id": "IDEA-101", "status": "promoted", "layer": "auth/API", "role": "resolves-IDEA-99-gap1-not-implemented-here"}
+  ],
+  "subGoals": [
+    {
+      "id": "SG1",
+      "layer": "domain",
+      "dependsOn": [],
+      "objective": "Workspace + WorkspaceMembership domain types and invariants (pure decision logic only, no persistence)",
+      "acceptanceCriteria": [
+        "Workspace: id, name, createdByStakeholderId, createdAt, updatedAt",
+        "WorkspaceMembership: workspaceId, stakeholderId, createdAt, no role field",
+        "deriveInitialMembership(workspace) returns the single creator membership row implied by IDEA-88/95; SG2 persists it, does not re-derive it",
+        "assertCanAddMember(actorIsMember) throws unless caller is an existing member",
+        "WorkspaceMembershipAlreadyExistsError is a distinct domain error for duplicate-add, separate from the non-member-caller rejection",
+        "Unit tests: deriveInitialMembership yields creator-only row, assertCanAddMember rejects non-member, assertCanAddMember allows any existing member"
+      ],
+      "verification": "pnpm test:store",
+      "status": "done"
+    },
+    {
+      "id": "SG2",
+      "layer": "persistence",
+      "dependsOn": ["SG1"],
+      "objective": "Migration + repository for workspaces/workspace_memberships",
+      "schemaDDL": "CREATE TABLE workspaces (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), name TEXT NOT NULL, created_by_stakeholder_id UUID NOT NULL REFERENCES stakeholders(id), created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now()); CREATE TABLE workspace_memberships (workspace_id UUID NOT NULL REFERENCES workspaces(id), stakeholder_id UUID NOT NULL REFERENCES stakeholders(id), created_at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY (workspace_id, stakeholder_id));",
+      "acceptanceCriteria": [
+        "Migration 0012_add_workspaces_tables.sql: workspaces(id uuid pk, name text not null, created_by_stakeholder_id uuid not null references stakeholders, created_at, updated_at); workspace_memberships(workspace_id uuid references workspaces, stakeholder_id uuid references stakeholders, created_at, primary key (workspace_id, stakeholder_id)) -- exact IDEA-96 contract",
+        "Atomic create-workspace-with-first-member transaction calling SG1's deriveInitialMembership",
+        "add-member calls SG1's assertCanAddMember; duplicate add raises SG1's WorkspaceMembershipAlreadyExistsError",
+        "No workspace_id column/index/constraint added to any existing table (chunks/edges/branches/artifacts/chunk_artifacts/suggestions/verification_signals/feedback_notifications) -- IDEA-90 explicitly out of scope",
+        "Integration tests against real containerized Postgres"
+      ],
+      "verification": "pnpm test:store",
+      "status": "done"
+    },
+    {
+      "id": "SG3",
+      "layer": "API",
+      "dependsOn": ["SG2"],
+      "objective": "WorkspacesModule with POST /workspaces and POST /workspaces/:id/members",
+      "acceptanceCriteria": [
+        "POST /workspaces body {name: string} -> 201 {id, name, createdByStakeholderId, createdAt}",
+        "POST /workspaces/:id/members body {stakeholderId: uuid} -> 201 {workspaceId, stakeholderId, createdAt}",
+        "Missing/invalid token -> 401 on both endpoints",
+        "Valid token POST /workspaces -> 201, caller is sole initial member",
+        "Nonexistent workspace :id on POST /workspaces/:id/members -> 404",
+        "Valid token, non-member, POST /workspaces/:id/members -> 403",
+        "Nonexistent target stakeholderId in body -> 404",
+        "Valid token, member, POST /workspaces/:id/members with valid target -> 201, membership created",
+        "Valid token, member, target already a member (WorkspaceMembershipAlreadyExistsError) -> 409",
+        "No MCP tool added for either endpoint (human-only precedent)",
+        "Controller + e2e-spec tests cover all cases including non-member rejection"
+      ],
+      "verification": "pnpm test:store",
+      "status": "done"
+    },
+    {
+      "id": "SG4",
+      "layer": "docker-e2e",
+      "dependsOn": ["SG3"],
+      "objective": "Exercise both endpoints against the running containerized store using a real human session token",
+      "acceptanceCriteria": [
+        "docker compose up --build spoolstore after rebuilding host dist/",
+        "Real session token obtained via pnpm dev:session-token (real OAuth login/callback flow)",
+        "POST /workspaces -> 201 with created workspace id",
+        "POST /workspaces/:id/members targeting seeded bootstrap stakeholder 00000000-0000-0000-0000-000000000002 -> success, persisted membership row",
+        "No/invalid token -> 401 observed in Docker",
+        "Non-member-rejection negative case is NOT reproduced in Docker (only one OAuth fixture identity exists); it is proven in SG3's Vitest e2e-spec instead",
+        "Persisted state confirmed directly against running Postgres container as supplementary check"
+      ],
+      "verification": "manual Docker exercise (docker compose up --build spoolstore + pnpm dev:session-token + curl)",
+      "status": "done"
+    }
+  ],
+  "openQuestions": [
+    "OQ1: IDEA-90 (workspace_id scoping of existing tables) deferred to future goal.",
+    "OQ2: IDEA-92 (token workspaceId claim + X-Workspace-Id header) and IDEA-98 (domain invariant membership enforcement) deferred to future goal.",
+    "OQ3: IDEA-99 (draft, unratified) OAuth-bootstrap and mixed-auth-model gaps are now resolved via promoted IDEA-101 (bootstrap) and IDEA-100 (mixed auth); not implemented by this goal, but unblocks a future IDEA-92 goal.",
+    "OQ4: G09's global-fan-out rationale becomes stale-in-spirit once workspace_memberships exists; revisit in a future workspace-scoping goal."
+  ],
+  "definitionOfDone": [
+    "SG1-SG3 all pass their targeted pnpm test:store verification",
+    "pnpm build and pnpm typecheck pass at repo root",
+    "SG4's Docker end-to-end exercise passes exactly as specified (real session token via pnpm dev:session-token, real HTTP calls, real Postgres confirmation)",
+    "Open Questions OQ1-OQ4 are carried into any future goal touching Workspace isolation/request-scoping; none are silently resolved by this goal"
+  ]
+}
+</script>
+
+<script>
+  mermaid.initialize({ startOnLoad: true, theme: 'neutral' });
+  try {
+    const data = JSON.parse(document.getElementById('goal-data').textContent);
+    const statusClass = s => ({ open: 'badge-open', 'in-progress': 'badge-in-progress', done: 'badge-done', blocked: 'badge-blocked' }[s] || 'badge-open');
+    document.getElementById('goal-status-badge').className = 'badge ' + statusClass(data.status);
+    document.getElementById('goal-status-badge').textContent = data.status;
+    for (const sg of data.subGoals) {
+      const el = document.querySelector('#sg-' + sg.id + ' summary .badge, #sg-' + sg.id + ' .badge');
+      if (el) {
+        el.className = 'badge ' + statusClass(sg.status);
+        el.textContent = sg.status;
+      }
+    }
+  } catch (e) { console.error('goal-data render failed', e); }
+</script>
+
+</body>
+</html>

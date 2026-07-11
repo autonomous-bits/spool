@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>G09 — Branch Feedback &amp; Notifications</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  body { font-family: -apple-system, Segoe UI, sans-serif; max-width: 960px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
+  h1 { font-size: 1.4rem; }
+  h2 { font-size: 1.1rem; margin-top: 2rem; border-bottom: 1px solid #ddd; padding-bottom: .25rem; }
+  table { border-collapse: collapse; width: 100%; margin: .5rem 0; }
+  th, td { border: 1px solid #ccc; padding: .4rem .6rem; text-align: left; font-size: .9rem; }
+  th { background: #f2f2f2; }
+  .badge { display: inline-block; padding: .1rem .5rem; border-radius: .75rem; font-size: .75rem; font-weight: 600; color: #fff; }
+  .badge.open { background: #6c757d; }
+  .badge.in-progress { background: #d9822b; }
+  .badge.done { background: #2e7d32; }
+  .badge.blocked { background: #c62828; }
+  details { border: 1px solid #ddd; border-radius: .4rem; margin: .5rem 0; padding: .4rem .8rem; }
+  summary { cursor: pointer; font-weight: 600; }
+  code { background: #f5f5f5; padding: 0 .3rem; border-radius: .2rem; }
+  .mermaid { background: #fafafa; padding: .5rem; }
+</style>
+</head>
+<body>
+
+<h1>G09 — Branch Feedback &amp; Notifications <span id="goal-status-badge" class="badge done">done</span></h1>
+<p><strong>Size:</strong> 4/5 — touches every layer (domain, persistence, API, MCP) and introduces two new domain concepts (<code>VerificationSignal</code>, <code>FeedbackNotification</code>) plus a stakeholder-broadcast fan-out rule, but reuses existing session-token auth (G04/G05) and the delegated-actor MCP pattern (G02/G03/G07) — no brand-new infra.</p>
+
+<h2>Meridian Source</h2>
+<table>
+<tr><th>Chunk</th><th>Status</th><th>Layer</th><th>Note</th></tr>
+<tr><td>IDEA-21</td><td>promoted</td><td>domain</td><td>Evaluation and Feedback: agents/tools/humans evaluate submitted branches and provide feedback/reports, logged for auditability.</td></tr>
+<tr><td>IDEA-30</td><td>promoted</td><td>domain</td><td>Feedback Routing and Notifications: reports route to branch history and notify stakeholders; merging authorities decide verify/merge; evaluation history fully preserved.</td></tr>
+<tr><td>IDEA-43</td><td>promoted (refines IDEA-25)</td><td>domain</td><td>Verification signals are recorded as feedback in branch history but do NOT trigger automated state transitions; the human stakeholder decides whether to verify or send back to draft.</td></tr>
+<tr><td>IDEA-68</td><td>promoted (ADR)</td><td>persistence/domain</td><td>Feedback Notification Routing: routed to stakeholders immediately on ingestion; stored in a dedicated table so human review is promptly alerted.</td></tr>
+<tr><td>IDEA-67</td><td>promoted (component)</td><td>API/domain</td><td>Notification Service: dispatches unread notification objects to the branch author and other stakeholders when evaluation feedback is submitted.</td></tr>
+<tr><td>IDEA-75</td><td>promoted (ADR)</td><td>domain/MCP</td><td>ActorKind human/delegated; explicitly names "verification signals" as advisory feedback that may legitimately come from delegated actors (unlike human-only merge/verify/accept operations).</td></tr>
+<tr><td>IDEA-31</td><td>promoted (ADR)</td><td>persistence</td><td>Postgres stores the versioned graph; authoritative schema file defines <code>verification_signals</code> and <code>feedback_notifications</code> tables in full (columns below).</td></tr>
+<tr><td>IDEA-34</td><td>promoted (ADR)</td><td>API</td><td>NestJS API gateway is the sole application boundary.</td></tr>
+<tr><td>IDEA-11</td><td>promoted</td><td>domain</td><td>Any human stakeholder acts as a merging authority — basis for broadcasting notifications to all stakeholders, not a scoped subset (no watcher/membership model exists in the schema).</td></tr>
+<tr><td>IDEA-20</td><td>promoted</td><td>domain</td><td>Submission locks branch state for verification — basis for restricting signal submission to <code>submitted</code>/<code>verified</code> branches, not <code>draft</code>/<code>merged</code>.</td></tr>
+</table>
+
+<h2>Vertical Slice Diagram</h2>
+<p>Each sub-goal below is a full vertical slice (domain → persistence → API → MCP where applicable), not a horizontal layer pass.</p>
+<div class="mermaid">
+flowchart TB
+  subgraph SG1["SG1: submit verification signal"]
+    A1[POST /branches/:id/verification-signals] --> A2[BranchesService.submitVerificationSignal]
+    A2 --> A3[(verification_signals table)]
+  end
+  subgraph SG2["SG2: notification fan-out"]
+    B1[Same POST, one transaction] --> B2[StakeholderRepository.findAll]
+    B2 --> B3[(feedback_notifications: one unread row per stakeholder)]
+  end
+  subgraph SG3["SG3: notification consumption (new NotificationsModule)"]
+    C1[GET /notifications + session token] --> C2[NotificationsService.listForStakeholder]
+    C3[POST /notifications/:id/read + session token] --> C4[NotificationsService.markRead]
+    C2 --> C5[(feedback_notifications)]
+    C4 --> C5
+  end
+  subgraph SG1read["SG1: read signals"]
+    A4[GET /branches/:id/verification-signals] --> A5[BranchesService.listVerificationSignals]
+    A5 --> A3
+  end
+  subgraph SG4["SG4: MCP submit-verification-signal"]
+    D1[MCP submit-verification-signal tool] --> A1
+  end
+  SG1 --> SG2 --> SG3
+  SG1 --> SG4
+</div>
+
+<h2>Dependency Diagram</h2>
+<div class="mermaid">
+graph LR
+  SG1[sg1-submit-verification-signal] --> SG2[sg2-notification-fanout]
+  SG1 --> SG4[sg4-mcp-submit-verification-signal]
+  SG2 --> SG3[sg3-notification-consumption]
+  SG2 --> SG5[sg5-docker-e2e]
+  SG3 --> SG5
+  SG4 --> SG5
+</div>
+
+<h2>Sub-goal Detail</h2>
+
+<details open>
+<summary>SG1 — submit verification signal <span class="sg-badge badge done" data-sg="sg1-submit-verification-signal">done</span></summary>
+<p><strong>Layer:</strong> domain + persistence + API &nbsp; <strong>Depends on:</strong> none</p>
+<p><strong>Objective:</strong> Any named verifier (agent, tool, or human) can log a pass/fail evaluation against a branch under review; it is recorded as feedback but never auto-transitions the branch.</p>
+<ul>
+  <li><code>verification_signals</code> table exactly matches schema.sql (ratified via IDEA-31, no deviation needed): <code>id</code> UUID PK, <code>branch_id</code> UUID FK <code>branches(id)</code> ON DELETE CASCADE, <code>verifier_name</code> VARCHAR(255) NOT NULL (free text — not a stakeholder FK, since IDEA-21 explicitly allows "agents, tools, or other humans" that need not be registered stakeholders), <code>status</code> VARCHAR(50) NOT NULL CHECK IN ('pass','fail'), <code>reason</code> TEXT (nullable), <code>created_at</code> TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW().</li>
+  <li>Migration <code>0010_add_verification_signals_table.sql</code> creates this table only (feedback_notifications ships in SG2's migration).</li>
+  <li><code>POST /branches/:id/verification-signals</code>: unauthenticated (mirrors <code>POST /suggestions</code> precedent — no actor-context/session-token needed since <code>verifier_name</code> is free text, not an authenticated identity). Body: <code>{ verifierName: string, status: 'pass' | 'fail', reason?: string }</code>.</li>
+  <li><strong>Domain rule (IDEA-20/IDEA-43):</strong> signal submission is only allowed when the branch status is <code>submitted</code> or <code>verified</code> (the review window) — <code>draft</code> or <code>merged</code> branches reject with 409. Add <code>assertReviewableStatus</code> to <code>branch-lifecycle.ts</code> alongside the existing assert* helpers.</li>
+  <li>Submitting a signal never changes <code>branches.status</code> (IDEA-43 is explicit: no automated state transition) — the human stakeholder still calls the existing <code>POST /branches/:id/verify</code>/<code>reject</code> to decide.</li>
+  <li><code>GET /branches/:id/verification-signals</code>: unauthenticated list read, ordered by <code>created_at</code> ascending, matching this codebase's existing unauthenticated-GET precedent (<code>GET /branches/:id</code>, <code>GET /suggestions</code>).</li>
+</ul>
+<p><strong>Acceptance criteria:</strong></p>
+<ul>
+  <li><code>POST /branches/:id/verification-signals</code> on a <code>submitted</code> or <code>verified</code> branch with a valid body persists one row and returns it; unknown <code>branchId</code> → 404.</li>
+  <li>Same request against a <code>draft</code> or <code>merged</code> branch → 409, no row persisted.</li>
+  <li><code>status</code> outside <code>'pass'|'fail'</code>, or blank <code>verifierName</code>, → 400.</li>
+  <li>Submitting a signal does not change the branch's <code>status</code> field (assert via <code>GET /branches/:id</code> before/after).</li>
+  <li><code>GET /branches/:id/verification-signals</code> returns all signals for that branch ordered oldest-first, with no <code>Authorization</code> header required.</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:store</code></p>
+</details>
+
+<details>
+<summary>SG2 — notification fan-out <span class="sg-badge badge done" data-sg="sg2-notification-fanout">done</span></summary>
+<p><strong>Layer:</strong> domain + persistence (extends SG1's endpoint) &nbsp; <strong>Depends on:</strong> sg1-submit-verification-signal</p>
+<p><strong>Objective:</strong> Every verification signal immediately creates one unread notification per stakeholder in the system, so any of them (as a potential merging authority per IDEA-11) is promptly alerted.</p>
+<ul>
+  <li><code>feedback_notifications</code> table exactly matches schema.sql (ratified via IDEA-31): <code>id</code> UUID PK, <code>branch_id</code> UUID NOT NULL FK <code>branches(id)</code> ON DELETE CASCADE, <code>stakeholder_id</code> UUID NOT NULL FK <code>stakeholders(id)</code> ON DELETE CASCADE, <code>signal_id</code> UUID NOT NULL FK <code>verification_signals(id)</code> ON DELETE CASCADE, <code>status</code> VARCHAR(50) NOT NULL CHECK IN ('unread','read'), <code>created_at</code>/<code>updated_at</code> TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(); index <code>idx_feedback_notifications_stakeholder (stakeholder_id, status)</code> per schema.sql.</li>
+  <li>Migration <code>0011_add_feedback_notifications_table.sql</code> creates this table + index.</li>
+  <li><strong>Documented recipient-scope decision (literal reading of IDEA-67 "the author of the branch and other stakeholders" applied to the only membership model that exists — a flat, global <code>stakeholders</code> table with no branch-watcher/subscription concept):</strong> fan-out targets <em>every</em> stakeholder in the system, not a discipline-scoped subset. This is consistent with G05's already-ratified rule that any human stakeholder, regardless of discipline, may act as a merging authority for the branch — so any of them is a legitimate notification recipient.</li>
+  <li>Add <code>StakeholderRepository.findAll(): Promise&lt;StakeholderRecord[]&gt;</code> (new method; the repository currently only exposes <code>findById</code>/<code>findByGithubLogin</code>).</li>
+  <li>SG1's <code>POST /branches/:id/verification-signals</code> handler becomes one atomic DB transaction: insert the <code>verification_signals</code> row, then insert one <code>feedback_notifications</code> row (<code>status='unread'</code>) per row returned by <code>findAll()</code> — all-or-nothing, mirroring G07 SG2's accept-suggestion transaction pattern.</li>
+</ul>
+<p><strong>Acceptance criteria:</strong></p>
+<ul>
+  <li>Submitting a valid verification signal when N stakeholders exist creates exactly N <code>feedback_notifications</code> rows, all <code>status='unread'</code>, all referencing the new signal's id and the branch's id.</li>
+  <li>A stakeholder created after signal submission does not retroactively receive a notification for that earlier signal.</li>
+  <li>A failure injected mid-transaction (e.g. simulated notification insert failure) rolls back the signal row too — no orphaned signal without notifications.</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:store</code></p>
+</details>
+
+<details>
+<summary>SG3 — notification consumption <span class="sg-badge badge done" data-sg="sg3-notification-consumption">done</span></summary>
+<p><strong>Layer:</strong> domain + persistence + API (no MCP tool — personal inbox reads are human-only, mirrors G07's no-MCP-tool precedent for human-only ops) &nbsp; <strong>Depends on:</strong> sg2-notification-fanout</p>
+<p><strong>Objective:</strong> A human stakeholder can list their own notifications and mark one as read.</p>
+<ul>
+  <li><strong>New module:</strong> <code>apps/store/src/notifications/</code> with <code>NotificationsModule</code>, <code>NotificationsController</code>, <code>NotificationsService</code>, plus a <code>NotificationRepository</code> in <code>apps/store/src/persistence/</code> — mirrors the existing per-domain module layout (<code>branches/</code>, <code>suggestions/</code>, <code>artifacts/</code>).</li>
+  <li>Auth: extract the bearer-token-extraction and session-claims-verification logic currently duplicated inline in <code>BranchesController</code> and <code>SuggestionsController</code> (<code>extractBearerToken</code>/<code>verifySessionClaims</code>) into one shared helper (e.g. <code>apps/store/src/auth/session-claims.helper.ts</code>), and have <code>NotificationsController</code> use that shared helper — do not write a third inline copy.</li>
+  <li><code>GET /notifications</code>: returns only the caller's own <code>feedback_notifications</code> rows (scoped by the session token's <code>stakeholderId</code>, never a client-supplied id), ordered by <code>created_at</code> descending. Optional <code>?status=unread</code> query filter.</li>
+  <li><code>POST /notifications/:id/read</code>: sets <code>status='read'</code>, <code>updated_at=NOW()</code>; 404 if the notification does not exist OR does not belong to the caller (never leak existence of another stakeholder's notification via a 403); idempotent — marking an already-read notification read again returns 200 unchanged.</li>
+  <li>Missing/invalid/expired session token on either route → 401 (mirrors existing branch-lifecycle auth tests).</li>
+</ul>
+<p><strong>Acceptance criteria:</strong></p>
+<ul>
+  <li><code>GET /notifications</code> with a valid session token returns only that stakeholder's rows, newest first.</li>
+  <li><code>GET /notifications?status=unread</code> returns only unread rows for that stakeholder.</li>
+  <li><code>POST /notifications/:id/read</code> on the caller's own unread notification returns it with <code>status='read'</code>.</li>
+  <li><code>POST /notifications/:id/read</code> on a notification seeded (directly via the repository in the test, not through Docker) as belonging to a different stakeholder → 404 (not 403 — do not reveal existence).</li>
+  <li>Both routes without a valid session token → 401.</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:store</code></p>
+</details>
+
+<details>
+<summary>SG4 — MCP submit-verification-signal <span class="sg-badge badge done" data-sg="sg4-mcp-submit-verification-signal">done</span></summary>
+<p><strong>Layer:</strong> MCP &nbsp; <strong>Depends on:</strong> sg1-submit-verification-signal</p>
+<p><strong>Objective:</strong> A delegated actor (evaluation/ideation assistant, per IDEA-75's delegated-actor-eligible advisory feedback) can submit a verification signal via MCP, mirroring the existing <code>submit-suggestion</code> tool's structure.</p>
+<ul>
+  <li>New file <code>apps/mcp/src/tools/submit-verification-signal.ts</code>, structured exactly like <code>submit-suggestion.ts</code>: own <code>parse*Input</code>, <code>*ValidationError</code>, result type, spec file.</li>
+  <li>Input: <code>{ branchId: string, verifierName: string, status: 'pass' | 'fail', reason?: string }</code>. Forwards unchanged to the store's <code>POST /branches/:id/verification-signals</code> (SG1). Never re-validates the <code>status</code> vocabulary itself — the store is authoritative and its 4xx errors must be surfaced, not duplicated or pre-empted (mirrors <code>create-edge.ts</code>'s documented approach).</li>
+</ul>
+<p><strong>Acceptance criteria:</strong></p>
+<ul>
+  <li>Valid input produces a successful store call and returns the created signal.</li>
+  <li>Missing/blank required fields → tool-level validation error before any store call.</li>
+  <li>Store 4xx (e.g. unreviewable branch status, unknown branch) is surfaced as-is, not swallowed or rewritten.</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:mcp</code></p>
+</details>
+
+<details>
+<summary>SG5 — Docker end-to-end verification <span class="sg-badge badge done" data-sg="sg5-docker-e2e">done</span></summary>
+<p><strong>Layer:</strong> full stack, containerized &nbsp; <strong>Depends on:</strong> sg2-notification-fanout, sg3-notification-consumption, sg4-mcp-submit-verification-signal</p>
+<p><strong>Objective:</strong> Prove the full submit-signal → fan-out → list/read-notification loop against the real running system.</p>
+<ul>
+  <li>Bring the system up with <code>docker compose up --build spoolstore</code> (per <code>apps/store/AGENTS.md</code>).</li>
+  <li>Obtain a real human session token via <code>pnpm dev:session-token</code> (drives the actual <code>GET /auth/github/login</code> → <code>GET /auth/github/callback</code> flow against the running container, using the <code>github-oauth-stub</code> service in <code>compose.yaml</code>). <strong>Do not</strong> substitute a hand-crafted token, a client-supplied actor field, or any auth bypass — <code>GET /notifications</code> and <code>POST /notifications/:id/read</code> are human-only and must be exercised with this real token for both the success path and the negative case (missing/invalid token). The cross-stakeholder 404 case (SG3's acceptance criteria) is verified at the store test level via directly-seeded rows, not required in this Docker exercise (the containerized OAuth stub only backs a single fixture stakeholder).</li>
+  <li>Create a branch and submit it (existing G02/G04 flows) so it reaches <code>submitted</code> status.</li>
+  <li>Submit a verification signal via the <code>submit-verification-signal</code> MCP tool specifically (not a bare HTTP call) against the running store — required to prove the MCP integration path.</li>
+  <li>Confirm via a direct DB check or <code>GET /branches/:id/verification-signals</code> that the signal was recorded, and that the branch's <code>status</code> is still <code>submitted</code> (no auto-transition).</li>
+  <li>Using the human session token, call <code>GET /notifications</code> and confirm at least one unread notification referencing that signal/branch exists.</li>
+  <li>Mark it read via <code>POST /notifications/:id/read</code> with the human token; re-fetch <code>GET /notifications?status=unread</code> and confirm it no longer appears.</li>
+  <li>Confirm <code>GET /notifications</code> and <code>POST /notifications/:id/read</code> without a valid human session token are rejected with 401 against the running container.</li>
+</ul>
+<p><strong>Acceptance criteria:</strong> all bullets above observed against the containerized system (not unit/integration tests alone).</p>
+<p><strong>Verification:</strong> manual/scripted HTTP + MCP calls against the Dockerized <code>spoolstore</code>, using a token minted by <code>pnpm dev:session-token</code>.</p>
+</details>
+
+<h2>Open Questions</h2>
+<p>None. (The one prior ambiguity — exactly which stakeholders IDEA-67's "other stakeholders" covers, given the schema has no branch-watcher/membership model — is resolved: SG2 documents the decision to broadcast to every stakeholder in the system, directly following IDEA-67's literal text plus G05's already-ratified "any human stakeholder may act as a merging authority" rule. See SG2's design decisions.)</p>
+
+<h2>Definition of Done</h2>
+<ul>
+  <li>SG1, SG2, SG3, SG4 all pass their store/MCP verification commands.</li>
+  <li>SG5's Docker end-to-end exercise passes against the containerized <code>spoolstore</code>, using a session token obtained via <code>pnpm dev:session-token</code>.</li>
+  <li><code>docs/goals/README.md</code> updated with G09's row.</li>
+</ul>
+
+<script type="application/json" id="goal-data">
+{
+  "goalId": "G09",
+  "slug": "branch-feedback-notifications",
+  "status": "done",
+  "size": 4,
+  "sizeJustification": "Touches every layer (domain, persistence, API, MCP) and introduces two new domain concepts (VerificationSignal, FeedbackNotification) plus a stakeholder-broadcast fan-out rule, but reuses existing session-token auth and the delegated-actor MCP pattern -- no brand-new infra.",
+  "meridianChunks": [
+    { "id": "IDEA-21", "status": "promoted", "layer": "domain", "note": "Agents/tools/humans evaluate submitted branches and provide feedback/reports, logged for auditability." },
+    { "id": "IDEA-30", "status": "promoted", "layer": "domain", "note": "Feedback routes to branch history and notifies stakeholders; merging authorities decide verify/merge; evaluation history fully preserved." },
+    { "id": "IDEA-43", "status": "promoted", "layer": "domain", "note": "Verification signals are recorded as feedback but do NOT trigger automated state transitions; human decides." },
+    { "id": "IDEA-68", "status": "promoted", "layer": "persistence/domain", "note": "Feedback routed to stakeholders immediately on ingestion; stored in a dedicated table." },
+    { "id": "IDEA-67", "status": "promoted", "layer": "API/domain", "note": "Notification Service dispatches unread notification objects to the branch author and other stakeholders." },
+    { "id": "IDEA-75", "status": "promoted", "layer": "domain/MCP", "note": "ActorKind ADR names verification signals as delegated-actor-eligible advisory feedback." },
+    { "id": "IDEA-31", "status": "promoted", "layer": "persistence", "note": "Authoritative schema defines verification_signals and feedback_notifications tables in full." },
+    { "id": "IDEA-34", "status": "promoted", "layer": "API", "note": "NestJS API gateway is the sole application boundary." },
+    { "id": "IDEA-11", "status": "promoted", "layer": "domain", "note": "Any human stakeholder acts as a merging authority -- basis for broadcasting notifications to all stakeholders." },
+    { "id": "IDEA-20", "status": "promoted", "layer": "domain", "note": "Submission locks branch state for verification -- basis for restricting signal submission to submitted/verified branches." }
+  ],
+  "verifiedRepoFacts": [
+    "verification_signals and feedback_notifications tables are fully specified column-for-column in the authoritative schema.sql referenced by promoted ADR IDEA-31 -- no additive scope deviation needed, unlike G07's suggestions table",
+    "verifier_name is a plain VARCHAR, not a stakeholder FK -- verification signal submission needs no ActorContext/session-token, matching IDEA-21's 'agents, tools, or other humans' (not all registered stakeholders)",
+    "StakeholderRepository (apps/store/src/persistence/stakeholder.repository.ts) currently only exposes findById/findByGithubLogin -- findAll must be added in SG2",
+    "BranchesController's verifySessionClaims/extractBearerToken helpers already implement the exact session-token auth pattern SG3 needs to reuse",
+    "grep confirms zero existing references to 'notification', 'verification signal', or 'evaluation feedback' anywhere in apps/store/src or apps/mcp/src -- fully greenfield",
+    "Next available migration number is 0010"
+  ],
+  "subGoals": [
+    {
+      "id": "sg1-submit-verification-signal",
+      "layer": "domain+persistence+API",
+      "dependsOn": [],
+      "objective": "Any named verifier can log a pass/fail evaluation against a submitted/verified branch; recorded as feedback, never auto-transitions the branch.",
+      "designDecisions": [
+        "verification_signals table exactly matches schema.sql (ratified via IDEA-31, no deviation): id UUID PK, branch_id FK branches(id) ON DELETE CASCADE, verifier_name VARCHAR(255) NOT NULL (free text, not a stakeholder FK), status VARCHAR(50) NOT NULL CHECK IN ('pass','fail'), reason TEXT nullable, created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()",
+        "migration 0010_add_verification_signals_table.sql creates this table only",
+        "POST /branches/:id/verification-signals is unauthenticated (mirrors POST /suggestions precedent) -- body { verifierName: string, status: 'pass'|'fail', reason?: string }",
+        "new assertReviewableStatus in branch-lifecycle.ts: signal submission only allowed when branch status is submitted or verified; draft/merged -> 409 (IDEA-20/IDEA-43)",
+        "submitting a signal never changes branches.status (IDEA-43 explicit no-auto-transition rule)",
+        "GET /branches/:id/verification-signals is an unauthenticated list read ordered by created_at ascending, matching existing GET precedent"
+      ],
+      "acceptanceCriteria": [
+        "POST on a submitted or verified branch with a valid body persists one row and returns it; unknown branchId returns 404",
+        "Same request against a draft or merged branch returns 409, no row persisted",
+        "status outside 'pass'|'fail', or blank verifierName, returns 400",
+        "Submitting a signal does not change the branch's status field",
+        "GET /branches/:id/verification-signals returns all signals oldest-first with no Authorization header required"
+      ],
+      "verification": "pnpm test:store",
+      "status": "done"
+    },
+    {
+      "id": "sg2-notification-fanout",
+      "layer": "domain+persistence",
+      "dependsOn": ["sg1-submit-verification-signal"],
+      "objective": "Every verification signal immediately creates one unread notification per stakeholder in the system.",
+      "designDecisions": [
+        "feedback_notifications table exactly matches schema.sql (ratified via IDEA-31): id UUID PK, branch_id UUID NOT NULL FK branches(id) ON DELETE CASCADE, stakeholder_id UUID NOT NULL FK stakeholders(id) ON DELETE CASCADE, signal_id UUID NOT NULL FK verification_signals(id) ON DELETE CASCADE, status VARCHAR(50) NOT NULL CHECK IN ('unread','read'), created_at/updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(); index idx_feedback_notifications_stakeholder (stakeholder_id, status)",
+        "migration 0011_add_feedback_notifications_table.sql creates this table + index",
+        "documented recipient-scope decision: fan-out targets every stakeholder in the system (literal reading of IDEA-67's 'the author of the branch and other stakeholders' applied to the only membership model that exists -- a flat global stakeholders table with no branch-watcher concept), consistent with G05's ratified 'any human stakeholder may act as a merging authority' rule",
+        "add StakeholderRepository.findAll(): Promise<StakeholderRecord[]>",
+        "SG1's POST handler becomes one atomic DB transaction: insert verification_signals row, then insert one feedback_notifications row (status=unread) per stakeholder from findAll() -- all-or-nothing, mirrors G07 SG2's accept-suggestion transaction pattern"
+      ],
+      "acceptanceCriteria": [
+        "Submitting a valid signal when N stakeholders exist creates exactly N feedback_notifications rows, all status=unread, all referencing the new signal id and branch id",
+        "A stakeholder created after signal submission does not retroactively receive a notification for that earlier signal",
+        "A failure injected mid-transaction rolls back the signal row too -- no orphaned signal without notifications"
+      ],
+      "verification": "pnpm test:store",
+      "status": "done"
+    },
+    {
+      "id": "sg3-notification-consumption",
+      "layer": "domain+persistence+API",
+      "dependsOn": ["sg2-notification-fanout"],
+      "objective": "A human stakeholder can list their own notifications and mark one as read.",
+      "designDecisions": [
+        "New module apps/store/src/notifications/ with NotificationsModule, NotificationsController, NotificationsService, plus a NotificationRepository in apps/store/src/persistence/ -- mirrors the existing per-domain module layout (branches/, suggestions/, artifacts/)",
+        "Auth: extract the bearer-token-extraction and session-claims-verification logic currently duplicated inline in BranchesController and SuggestionsController (extractBearerToken/verifySessionClaims) into one shared helper (e.g. apps/store/src/auth/session-claims.helper.ts), used by NotificationsController instead of a third inline copy",
+        "GET /notifications returns only the caller's own feedback_notifications rows (scoped by session token's stakeholderId, never a client-supplied id), ordered by created_at descending; optional ?status=unread filter",
+        "POST /notifications/:id/read sets status=read, updated_at=NOW(); 404 if the notification does not exist OR does not belong to the caller (never leak existence of another stakeholder's notification); idempotent",
+        "Missing/invalid/expired session token on either route returns 401"
+      ],
+      "acceptanceCriteria": [
+        "GET /notifications with a valid session token returns only that stakeholder's rows, newest first",
+        "GET /notifications?status=unread returns only unread rows for that stakeholder",
+        "POST /notifications/:id/read on the caller's own unread notification returns it with status=read",
+        "POST /notifications/:id/read on another stakeholder's notification returns 404",
+        "Both routes without a valid session token return 401"
+      ],
+      "verification": "pnpm test:store",
+      "status": "done"
+    },
+    {
+      "id": "sg4-mcp-submit-verification-signal",
+      "layer": "MCP",
+      "dependsOn": ["sg1-submit-verification-signal"],
+      "objective": "A delegated actor (ideation/evaluation assistant) can submit a verification signal via MCP, mirroring submit-suggestion.ts.",
+      "designDecisions": [
+        "New apps/mcp/src/tools/submit-verification-signal.ts, structured exactly like submit-suggestion.ts: own parse*Input, *ValidationError, result type, spec file",
+        "Input: { branchId: string, verifierName: string, status: 'pass'|'fail', reason?: string }, forwarded unchanged to POST /branches/:id/verification-signals",
+        "Never re-validates the status vocabulary itself -- store is authoritative, its 4xx errors must be surfaced not duplicated (mirrors create-edge.ts)"
+      ],
+      "acceptanceCriteria": [
+        "Valid input produces a successful store call and returns the created signal",
+        "Missing/blank required fields produce a tool-level validation error before any store call",
+        "Store 4xx (unreviewable branch status, unknown branch) is surfaced as-is"
+      ],
+      "verification": "pnpm test:mcp",
+      "status": "done"
+    },
+    {
+      "id": "sg5-docker-e2e",
+      "layer": "full-stack-docker",
+      "dependsOn": ["sg2-notification-fanout", "sg3-notification-consumption", "sg4-mcp-submit-verification-signal"],
+      "objective": "Exercise submit-signal -> fan-out -> list/read-notification loop against the running containerized store using a real human session token from pnpm dev:session-token, including the MCP submission path.",
+      "acceptanceCriteria": [
+        "docker compose up --build spoolstore succeeds",
+        "pnpm dev:session-token produces a valid human session token via the real OAuth login/callback flow against github-oauth-stub",
+        "A branch is created and submitted (existing flows) so it reaches submitted status",
+        "A verification signal is submitted via the submit-verification-signal MCP tool specifically against the running store",
+        "The signal is recorded (verified via GET /branches/:id/verification-signals or DB check) and the branch's status remains submitted (no auto-transition)",
+        "GET /notifications with the human session token shows at least one unread notification referencing that signal/branch",
+        "POST /notifications/:id/read with the human token marks it read; a follow-up GET /notifications?status=unread no longer shows it",
+        "GET /notifications and POST /notifications/:id/read without a valid human session token return 401 against the running container"
+      ],
+      "verification": "manual/scripted HTTP+MCP calls against dockerized spoolstore using pnpm dev:session-token",
+      "status": "done"
+    }
+  ],
+  "openQuestions": []
+}
+</script>
+
+<script>
+  mermaid.initialize({ startOnLoad: true, theme: 'neutral' });
+  const data = JSON.parse(document.getElementById('goal-data').textContent);
+  const statusColor = { open: 'open', 'in-progress': 'in-progress', done: 'done', blocked: 'blocked' };
+  document.querySelectorAll('.sg-badge').forEach((el) => {
+    const sg = data.subGoals.find((s) => s.id === el.dataset.sg);
+    if (sg) {
+      el.textContent = sg.status;
+      el.className = 'sg-badge badge ' + (statusColor[sg.status] || 'open');
+    }
+  });
+  const goalBadge = document.getElementById('goal-status-badge');
+  goalBadge.textContent = data.status;
+  goalBadge.className = 'badge ' + (statusColor[data.status] || 'open');
+</script>
+
+</body>
+</html>

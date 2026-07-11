@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>G06 — Branch Merge</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  body { font-family: -apple-system, Segoe UI, Arial, sans-serif; max-width: 980px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
+  table { border-collapse: collapse; width: 100%; margin: 0.5rem 0 1.25rem; }
+  th, td { border: 1px solid #ccc; padding: 6px 10px; text-align: left; font-size: 0.92rem; vertical-align: top; }
+  th { background: #f2f2f2; }
+  h1 { margin-bottom: 0.2rem; }
+  .meta { color: #555; margin-bottom: 1rem; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.75rem; font-weight: 600; color: #fff; }
+  .badge.open { background: #b06a00; }
+  .badge.in-progress { background: #1a6fb0; }
+  .badge.done { background: #1a8a3d; }
+  .badge.blocked { background: #a01a1a; }
+  details { border: 1px solid #ddd; border-radius: 6px; padding: 0.5rem 0.8rem; margin-bottom: 0.6rem; background: #fafafa; }
+  summary { cursor: pointer; font-weight: 600; }
+  .sg-meta { font-size: 0.85rem; color: #444; margin: 0.3rem 0; }
+  code { background: #eee; padding: 1px 5px; border-radius: 3px; }
+  .mermaid { background: #fff; }
+</style>
+</head>
+<body>
+
+<h1>G06 — Branch Merge <span id="status-badge" class="badge"></span></h1>
+<div class="meta">
+  <strong>Status:</strong> open &nbsp;|&nbsp;
+  <strong>Size:</strong> 4 / 5 — substantial: touches domain (new lineage/provenance types + lifecycle guard), persistence (atomic conflict-checked promotion transaction), and API layers; no MCP layer (human-only, matching G04/G05 precedent).
+</div>
+
+<h2>Meridian Source</h2>
+<table>
+<tr><th>Chunk</th><th>Status</th><th>Layer</th><th>Note</th></tr>
+<tr><td>IDEA-18</td><td>promoted</td><td>domain (scope)</td><td>Merge Pipeline = Submission (G04) → Verification (G05) → Merge (this goal).</td></tr>
+<tr><td>IDEA-22</td><td>promoted</td><td>domain/persistence</td><td>Branch merge integrates a verified branch atomically; branch boundary/provenance persists.</td></tr>
+<tr><td>IDEA-23</td><td>promoted</td><td>persistence</td><td>Post-merge: branch status → 'merged' permanently, archived not deleted.</td></tr>
+<tr><td>IDEA-42</td><td>promoted</td><td>domain</td><td>Merge restricted to human stakeholders; never autonomous AI agents.</td></tr>
+<tr><td>IDEA-43</td><td>promoted</td><td>domain</td><td>Human stakeholders manually transition state; no auto-transition.</td></tr>
+<tr><td>IDEA-46</td><td>promoted</td><td>persistence</td><td>Pre-merge conflict detection on chunk/edge modifications between branch and mainline. Scoped concretely below (no versioning/update mechanism exists yet in this repo).</td></tr>
+<tr><td>IDEA-47</td><td>promoted</td><td>persistence</td><td>Merge executed as one atomic DB transaction; any chunk/edge/branch-status failure rolls back completely.</td></tr>
+<tr><td>IDEA-54</td><td>promoted</td><td>persistence</td><td>Branch Conflict Detector component.</td></tr>
+<tr><td>IDEA-55</td><td>promoted</td><td>persistence</td><td>Atomic Merge Engine component.</td></tr>
+<tr><td>IDEA-57</td><td>promoted</td><td>domain</td><td>Human-only merging (reiterates IDEA-42).</td></tr>
+<tr><td>IDEA-69</td><td>promoted</td><td>persistence</td><td>Promotion sets branch_id → NULL; origin_branch_id persists permanently for lineage reconstruction.</td></tr>
+<tr><td>IDEA-74</td><td>promoted</td><td>domain</td><td>Formalizes MergeLineage / BranchGraphProvenance shapes. Scoped down here (workspaceId has no concept anywhere in this repo yet) — see Open Questions.</td></tr>
+<tr><td>IDEA-80</td><td>promoted</td><td>persistence (N/A this goal)</td><td>Amends IDEA-47 to include chunk-artifact associations in rollback scope. Not applicable: the separate Artifacts feature it depends on is not implemented anywhere in this repo, so there is nothing to roll back.</td></tr>
+<tr><td>IDEA-81</td><td>promoted</td><td>API (reused)</td><td>GitHub OAuth session tokens (already built in G04); reused unchanged for merge auth.</td></tr>
+<tr><td>IDEA-9/IDEA-40</td><td>promoted</td><td>domain (scope)</td><td>Delegated agents act strictly as tools under human supervision — informs why this goal does not add an MCP merge tool (see scope note), matching G04/G05 precedent.</td></tr>
+</table>
+
+<h2>Vertical Slice Diagram</h2>
+<p>HTTP request flows through auth → domain guard → conflict-checked atomic promotion in Postgres. No MCP node (human-only, same as G04/G05).</p>
+<div class="mermaid">
+flowchart TD
+  subgraph API["API / URL surface"]
+    A["POST /branches/:id/merge<br/>(Bearer session token)"]
+  end
+  subgraph DOMAIN["Domain"]
+    B["assertIsHumanActor (reused)"]
+    C["assertMergeableStatus (new: verified-only)"]
+    D["MergeLineage / BranchGraphProvenance (new types)"]
+  end
+  subgraph PERSIST["Persistence (Postgres, one transaction)"]
+    E["Row-lock branch FOR UPDATE"]
+    F["Conflict check: mainline chunk/edge<br/>identity collision (IDEA-46/54)"]
+    G["Promote: chunks/edges branch_id→NULL,<br/>chunk.status→'promoted' (IDEA-69)"]
+    H["branches: status→'merged', merged_at,<br/>merged_by_stakeholder_id (IDEA-23/47)"]
+  end
+  A --> B --> C --> D --> E --> F
+  F -- "conflict found" --> X["409 Conflict, full rollback"]
+  F -- "no conflict" --> G --> H --> Y["200 OK, mergedAt in response"]
+</div>
+
+<h2>Dependency Diagram</h2>
+<div class="mermaid">
+graph LR
+  SG0["SG0: Domain<br/>lineage/provenance types + merge guard"] --> SG1["SG1: Persistence<br/>atomic conflict-checked merge transaction"]
+  SG1 --> SG2["SG2: API<br/>POST /branches/:id/merge"]
+  SG2 --> SG3["SG3: Docker E2E<br/>(mandatory final step)"]
+</div>
+
+<h2>Sub-goal Detail</h2>
+
+<details>
+<summary>SG0 — Domain: merge lifecycle guard + lineage/provenance types <span class="sg-status badge" data-sg="SG0"></span></summary>
+<div class="sg-meta"><strong>Layer:</strong> domain &nbsp;|&nbsp; <strong>Depends on:</strong> none</div>
+<p><strong>Objective:</strong> Add the domain-level guard and types needed before any persistence work can safely promote branch content to mainline.</p>
+<ul>
+<li>Add <code>assertMergeableStatus(branch)</code> to <code>apps/store/src/domain/branch-lifecycle.ts</code>: throws <code>BranchLifecycleError</code> unless <code>branch.status === 'verified'</code> (IDEA-43). Reuse existing <code>assertIsHumanActor</code> for the human-only check (IDEA-42/IDEA-57) — no new human-check code.</li>
+<li>Add <code>mergedAt?: Date</code> and <code>mergedByStakeholderId?: string</code> to <code>Branch</code>/<code>BranchProps</code> in <code>apps/store/src/domain/branch.ts</code>.</li>
+<li>Add a new <code>MergeLineage</code> type (new file, e.g. <code>apps/store/src/domain/merge-lineage.ts</code>) per IDEA-74: <code>{ branchId, discipline, divergedAt: DivergencePoint, mergedAt: Date, mergedByStakeholderId }</code>. Explicitly omit <code>workspaceId</code> — no workspace concept exists anywhere in this repo yet (verified: no <code>workspace_id</code> column or type in <code>apps/store/src</code>); document this scope deviation in the file's doc comment, mirroring the existing <code>origin_suggestion_id</code> precedent in migration 0003.</li>
+<li>Add a new <code>BranchGraphProvenance</code> type (new file, e.g. <code>apps/store/src/domain/branch-graph-provenance.ts</code>) per IDEA-74, scoped to <code>{ sourceBranchId }</code> only — a thin wrapper documenting the existing <code>originBranchId</code> field's semantic role. Explicitly omit <code>sourceWorkspaceId</code>/<code>sourceDiscipline</code> for the same reason as above; document the deviation.</li>
+</ul>
+<p><strong>Acceptance criteria:</strong></p>
+<ul>
+<li><code>assertMergeableStatus</code> throws for every non-'verified' status and passes for 'verified'.</li>
+<li><code>Branch</code> round-trips <code>mergedAt</code>/<code>mergedByStakeholderId</code> when provided, and leaves them <code>undefined</code> when omitted (matches existing <code>submittedAt</code>/<code>verifiedAt</code> pattern).</li>
+<li><code>MergeLineage</code> and <code>BranchGraphProvenance</code> construct successfully with valid inputs and are covered by unit tests; both carry a doc comment stating the workspaceId/sourceWorkspaceId/sourceDiscipline omission and citing IDEA-74.</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:store</code> (targeted: <code>branch-lifecycle.spec.ts</code>, <code>branch.spec.ts</code>, new <code>merge-lineage.spec.ts</code>, new <code>branch-graph-provenance.spec.ts</code>)</p>
+</details>
+
+<details>
+<summary>SG1 — Persistence: atomic conflict-checked merge transaction <span class="sg-status badge" data-sg="SG1"></span></summary>
+<div class="sg-meta"><strong>Layer:</strong> persistence/infra &nbsp;|&nbsp; <strong>Depends on:</strong> SG0</div>
+<p><strong>Objective:</strong> Implement <code>BranchRepository.merge(branchId, mergedByStakeholderId)</code> as a single atomic transaction that conflict-checks then promotes a verified branch's chunks/edges into the mainline.</p>
+<ul>
+<li>Row-lock the branch (<code>SELECT ... FOR UPDATE</code>, matching submit/verify/reject); if not found or <code>status !== 'verified'</code>, rollback and return <code>undefined</code> (mirrors existing repository return-undefined-for-conflict convention).</li>
+<li><strong>Conflict check (concrete scope for IDEA-46/IDEA-54, given no chunk/edge update-or-override mechanism exists yet in this repo):</strong> for every chunk in the branch (<code>branch_id = branchId</code>), check whether a mainline chunk already exists with the same <code>label</code> where <code>branch_id IS NULL AND status = 'promoted'</code> (this is exactly the row-set guarded by the existing <code>idx_chunks_mainline</code> partial unique index). For every edge in the branch, check whether a mainline edge already exists with the same <code>(from_chunk_label, to_chunk_label, type)</code> where <code>branch_id IS NULL AND status = 'active'</code> (guarded by <code>idx_edges_mainline</code>). Any single collision aborts the entire merge (rollback, no partial promotion) and the method returns a distinct conflict marker (e.g. a discriminated result, not <code>undefined</code>, so the service layer can tell "conflict" apart from "not mergeable status").</li>
+<li>If no conflicts: <code>UPDATE chunks SET branch_id = NULL, status = 'promoted', updated_at = now() WHERE branch_id = $branchId</code>; <code>UPDATE edges SET branch_id = NULL, updated_at = now() WHERE branch_id = $branchId</code> (edge status stays <code>'active'</code>; <code>origin_branch_id</code> is never modified on either table — it already equals the branch id from creation and must persist permanently per IDEA-69).</li>
+<li><code>UPDATE branches SET status = 'merged', merged_at = now(), merged_by_stakeholder_id = $mergedByStakeholderId, updated_at = now() WHERE id = $branchId RETURNING *</code> (columns already exist in schema since migration 0003 — no new migration needed).</li>
+<li>Commit; return the merged <code>Branch</code>. On any exception mid-transaction, rollback fully (IDEA-47).</li>
+</ul>
+<p><strong>Acceptance criteria:</strong></p>
+<ul>
+<li>Merging a verified branch with no mainline collisions promotes every one of its chunks (now <code>branch_id IS NULL</code>, <code>status = 'promoted'</code>, <code>origin_branch_id</code> unchanged) and edges (<code>branch_id IS NULL</code>, <code>origin_branch_id</code> unchanged) and sets the branch to <code>status = 'merged'</code> with <code>merged_at</code>/<code>merged_by_stakeholder_id</code> populated — all within one transaction.</li>
+<li>A branch with a chunk-label or edge-identity collision against mainline is rejected in full (zero chunks/edges promoted, branch status unchanged) and a distinguishable conflict result is returned.</li>
+<li>A branch not in <code>'verified'</code> status returns <code>undefined</code> (mirrors submit/verify/reject convention) without mutating any row.</li>
+<li>A simulated mid-transaction failure (e.g. a forced error after the chunk UPDATE but before the branch UPDATE) leaves the database in its pre-merge state (full rollback, IDEA-47).</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:store</code> (targeted: new <code>branch.repository.e2e-spec.ts</code> merge cases, run against real containerized Postgres per the existing repository e2e pattern)</p>
+</details>
+
+<details>
+<summary>SG2 — API: POST /branches/:id/merge <span class="sg-status badge" data-sg="SG2"></span></summary>
+<div class="sg-meta"><strong>Layer:</strong> API/URL surface &nbsp;|&nbsp; <strong>Depends on:</strong> SG1</div>
+<p><strong>Objective:</strong> Expose branch merge over HTTP, reusing the exact auth/discipline-agnostic pattern already established by verify/reject.</p>
+<ul>
+<li><code>BranchesController</code>: add <code>@Post(':id/merge')</code> calling <code>verifySessionClaims</code> (identical to submit/verify/reject) then <code>branches.merge(id, claims)</code>.</li>
+<li><code>BranchesService.merge(branchId, claims)</code>: reuse <code>resolveActorForVerification</code> (discipline-agnostic, human-only — same as verify/reject per G05's resolved question) then <code>assertIsHumanActor</code> + <code>assertMergeableStatus</code>; call <code>branchRepository.merge(...)</code>; map "not mergeable" → <code>ConflictException</code>, "mainline collision" → <code>ConflictException</code> with a distinct message, success → <code>toBranchResponse</code>.</li>
+<li><code>BranchResponse</code> DTO: add <code>mergedAt</code> field (nullable, matching existing <code>verifiedAt</code> pattern).</li>
+</ul>
+<p><strong>Acceptance criteria:</strong></p>
+<ul>
+<li>Merging a verified branch via a valid Bearer session token returns 200 with <code>mergedAt</code> populated in the response body.</li>
+<li>Merging a non-verified branch (draft/submitted/already-merged) returns 409.</li>
+<li>Merging a branch with a mainline identity collision returns 409 with a message distinguishing it from the non-verified-status 409.</li>
+<li>Missing/invalid Authorization header returns 401 (reusing existing <code>extractBearerToken</code>/<code>verifySessionClaims</code> — no new code needed here).</li>
+<li>Merge is discipline-agnostic: a human stakeholder from a different discipline than the branch's authoring discipline can still merge it (matches G05's resolved "merging authority" interpretation of IDEA-11).</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:store</code> (targeted: <code>branches.controller.spec.ts</code>, <code>branches.service.spec.ts</code>, <code>test/branches.e2e-spec.ts</code>)</p>
+</details>
+
+<details>
+<summary>SG3 — Docker end-to-end exercise (mandatory) <span class="sg-status badge" data-sg="SG3"></span></summary>
+<div class="sg-meta"><strong>Layer:</strong> full stack, containerized &nbsp;|&nbsp; <strong>Depends on:</strong> SG2</div>
+<p><strong>Objective:</strong> Prove the full merge flow works against the real running system, not just in-process tests. This step is not satisfied by unit/integration tests alone.</p>
+<ul>
+<li>Bring the system up with <code>docker compose up --build spoolstore</code> (per <code>apps/store/AGENTS.md</code>).</li>
+<li>Obtain a real session token via <code>pnpm dev:session-token</code> (drives the actual <code>GET /auth/github/login</code> → <code>GET /auth/github/callback</code> flow against the running container, using the wired-in <code>github-oauth-stub</code> service). Do not substitute a hand-crafted or client-supplied token — this is the only faithful way to exercise the human-only merge gate.</li>
+<li><strong>Part 1 (HTTP, success path):</strong> over real HTTP against the running container — create a branch, capture a chunk and an edge into it, submit, verify, then <code>POST /branches/:id/merge</code> with the real token. Confirm 200 and a populated <code>mergedAt</code> in the JSON response.</li>
+<li><strong>Part 2 (SQL, persistence invariants):</strong> because the HTTP DTOs do not expose <code>branch_id</code>/<code>origin_branch_id</code>/chunk <code>status</code>, connect directly to the running containerized Postgres and confirm: the merged chunk has <code>branch_id IS NULL</code>, <code>status = 'promoted'</code>, <code>origin_branch_id</code> still equal to the original branch id; the merged edge has <code>branch_id IS NULL</code> and the same <code>origin_branch_id</code>; the branch row has <code>status = 'merged'</code>, non-null <code>merged_at</code> and <code>merged_by_stakeholder_id</code>.</li>
+<li><strong>Part 3 (conflict path):</strong> repeat the flow with a second branch authoring a chunk with the same label already promoted to mainline by Part 1; verify it; attempt merge; confirm HTTP 409 and, via SQL, that none of its chunks/edges/branch row changed.</li>
+</ul>
+<p><strong>Acceptance criteria:</strong> All three parts pass against the real containerized store; the success path's <code>mergedAt</code> is visible over HTTP; the persistence invariants (Part 2) and conflict rejection (Part 3) are confirmed via direct SQL against the running Postgres container, not via unit/integration tests.</p>
+<p><strong>Verification:</strong> Manual/scripted exercise per above (no single pnpm command — this is the Docker end-to-end step required by every goal).</p>
+</details>
+
+<h2>Open Questions</h2>
+<p><em>Both resolved 2026-07-06 with @pewpewpotato — proceed as scoped, no Meridian escalation for either.</em></p>
+<ul>
+<li><strong>[RESOLVED] MergeLineage/BranchGraphProvenance workspaceId scope (SG0):</strong> IDEA-74 names <code>workspaceId</code> on <code>MergeLineage</code> and <code>sourceWorkspaceId</code>/<code>sourceDiscipline</code> on <code>BranchGraphProvenance</code>, but no workspace concept exists anywhere in this repo's domain or schema today. <strong>Decision:</strong> implement both types scoped down to only the fields this repo can actually persist (<code>branchId</code>/<code>discipline</code>/<code>divergedAt</code>/<code>mergedAt</code>/<code>mergedByStakeholderId</code> for MergeLineage; <code>sourceBranchId</code> only for BranchGraphProvenance), deferring the workspace-scoped fields to whichever future goal introduces a workspace concept. This is a repo-local scoping decision (not a Meridian conflict) and mirrors existing precedent (e.g. <code>origin_suggestion_id</code> declared without an FK in migration 0003 because the <code>suggestions</code> table doesn't exist yet).</li>
+<li><strong>[RESOLVED] Conflict-detection scope (SG1):</strong> IDEA-46 describes detecting modifications made in <em>both</em> branch and mainline since divergence. Because no chunk/edge update-or-supersede mechanism exists yet in this repo, this goal implements the closest buildable, schema-enforced equivalent: any mainline identity collision (same chunk label, or same edge from/to/type) blocks the merge outright, regardless of exact timing. This is stricter than "since divergence" (rejects same-identity mainline writes made even before divergence) but is the only conflict signal the current schema can express, and it prevents the unique-index violations that a naive promotion would otherwise hit. Not escalated to Meridian as a conflict — it is a superset-safe, repo-local scoping decision pending a future versioning/override goal.</li>
+</ul>
+
+<h2>Definition of Done</h2>
+<ul>
+<li>SG0, SG1, SG2 all complete with passing <code>pnpm test:store</code>.</li>
+<li>SG3's three-part Docker end-to-end exercise passes against the real containerized store (not satisfied by unit/integration tests alone).</li>
+<li><code>docs/goals/README.md</code> updated with G06's row and status.</li>
+</ul>
+
+<script type="application/json" id="goal-data">
+{
+  "goalId": "G06",
+  "slug": "branch-merge",
+  "title": "Branch Merge",
+  "status": "done",
+  "size": 4,
+  "sizeJustification": "Substantial: touches domain (new lineage/provenance types + lifecycle guard), persistence (atomic conflict-checked promotion transaction), and API layers; no MCP layer (human-only, matching G04/G05 precedent).",
+  "meridianChunks": [
+    {"id": "IDEA-18", "status": "promoted", "layer": "domain (scope)"},
+    {"id": "IDEA-22", "status": "promoted", "layer": "domain/persistence"},
+    {"id": "IDEA-23", "status": "promoted", "layer": "persistence"},
+    {"id": "IDEA-42", "status": "promoted", "layer": "domain"},
+    {"id": "IDEA-43", "status": "promoted", "layer": "domain"},
+    {"id": "IDEA-46", "status": "promoted", "layer": "persistence"},
+    {"id": "IDEA-47", "status": "promoted", "layer": "persistence"},
+    {"id": "IDEA-54", "status": "promoted", "layer": "persistence"},
+    {"id": "IDEA-55", "status": "promoted", "layer": "persistence"},
+    {"id": "IDEA-57", "status": "promoted", "layer": "domain"},
+    {"id": "IDEA-69", "status": "promoted", "layer": "persistence"},
+    {"id": "IDEA-74", "status": "promoted", "layer": "domain"},
+    {"id": "IDEA-80", "status": "promoted", "layer": "persistence (N/A this goal)"},
+    {"id": "IDEA-81", "status": "promoted", "layer": "API (reused)"},
+    {"id": "IDEA-9", "status": "promoted", "layer": "domain (scope)"},
+    {"id": "IDEA-40", "status": "promoted", "layer": "domain (scope)"}
+  ],
+  "subGoals": [
+    {
+      "id": "SG0",
+      "layer": "domain",
+      "depends_on": [],
+      "objective": "Add merge lifecycle guard (assertMergeableStatus) and MergeLineage/BranchGraphProvenance types, scoped to this repo's actual persistable fields.",
+      "acceptance_criteria": [
+        "assertMergeableStatus throws for every non-'verified' status and passes for 'verified'",
+        "Branch round-trips mergedAt/mergedByStakeholderId when provided, undefined when omitted",
+        "MergeLineage and BranchGraphProvenance construct successfully with valid inputs, unit-tested, and document the workspaceId/sourceWorkspaceId/sourceDiscipline omission citing IDEA-74"
+      ],
+      "verification": "pnpm test:store",
+      "status": "done"
+    },
+    {
+      "id": "SG1",
+      "layer": "persistence",
+      "depends_on": ["SG0"],
+      "objective": "Implement BranchRepository.merge() as a single atomic transaction: conflict-check then promote branch chunks/edges into mainline.",
+      "acceptance_criteria": [
+        "Merging a verified branch with no mainline collisions promotes all chunks (branch_id NULL, status 'promoted', origin_branch_id unchanged) and edges (branch_id NULL, origin_branch_id unchanged) and sets branch status='merged' with merged_at/merged_by_stakeholder_id, atomically",
+        "A branch with a mainline chunk-label or edge-identity collision is rejected in full (zero rows promoted) with a distinguishable conflict result",
+        "A branch not in 'verified' status returns undefined without mutating any row",
+        "A simulated mid-transaction failure leaves the database in its pre-merge state"
+      ],
+      "verification": "pnpm test:store",
+      "status": "done"
+    },
+    {
+      "id": "SG2",
+      "layer": "API",
+      "depends_on": ["SG1"],
+      "objective": "Expose POST /branches/:id/merge over HTTP, reusing the existing discipline-agnostic, human-only session-token auth pattern from verify/reject.",
+      "acceptance_criteria": [
+        "Merging a verified branch via a valid Bearer session token returns 200 with mergedAt populated",
+        "Merging a non-verified branch returns 409",
+        "Merging a branch with a mainline identity collision returns 409 with a distinguishing message",
+        "Missing/invalid Authorization header returns 401",
+        "Merge is discipline-agnostic (matches G05's resolved 'merging authority' interpretation of IDEA-11)"
+      ],
+      "verification": "pnpm test:store",
+      "status": "done"
+    },
+    {
+      "id": "SG3",
+      "layer": "docker-e2e",
+      "depends_on": ["SG2"],
+      "objective": "Exercise the full merge flow against the real running containerized store using a real GitHub-OAuth-derived session token, verifying both the HTTP response and the underlying Postgres state.",
+      "acceptance_criteria": [
+        "docker compose up --build spoolstore is running",
+        "A real session token is obtained via pnpm dev:session-token (real GET /auth/github/login -> GET /auth/github/callback flow against github-oauth-stub); no hand-crafted or client-supplied token substitution",
+        "Part 1 (HTTP): create branch -> capture chunk+edge -> submit -> verify -> merge over real HTTP returns 200 with mergedAt populated",
+        "Part 2 (SQL): merged chunk has branch_id NULL, status 'promoted', origin_branch_id unchanged; merged edge has branch_id NULL, origin_branch_id unchanged; branch row has status 'merged', non-null merged_at and merged_by_stakeholder_id — confirmed via direct SQL against the running Postgres container",
+        "Part 3 (conflict path): a second branch with a colliding chunk label, once verified, is rejected on merge with HTTP 409 and no DB state change, confirmed via SQL"
+      ],
+      "verification": "Manual/scripted Docker exercise (HTTP + direct SQL against running Postgres container); not satisfied by unit/integration tests alone",
+      "status": "done"
+    }
+  ],
+  "openQuestions": [
+    {
+      "id": "OQ1",
+      "topic": "MergeLineage/BranchGraphProvenance workspaceId scope",
+      "status": "resolved",
+      "resolvedBy": "@pewpewpotato",
+      "resolvedAt": "2026-07-06",
+      "decision": "proceed_scoped_down",
+      "text": "MergeLineage/BranchGraphProvenance are scoped down to omit workspaceId/sourceWorkspaceId/sourceDiscipline because no workspace concept exists anywhere in this repo yet; deferred to a future goal, per IDEA-74. Repo-local scoping decision, not a Meridian conflict."
+    },
+    {
+      "id": "OQ2",
+      "topic": "Conflict detection scope",
+      "status": "resolved",
+      "resolvedBy": "@pewpewpotato",
+      "resolvedAt": "2026-07-06",
+      "decision": "proceed_identity_collision",
+      "text": "Conflict detection (SG1) is scoped to 'any mainline identity collision blocks the merge' rather than IDEA-46's exact 'modified in both branch and mainline since divergence' because no chunk/edge update/supersede mechanism exists yet in this repo. Repo-local scoping decision, not a Meridian conflict, pending a future versioning/override goal."
+    }
+  ]
+}
+</script>
+
+<script>
+  mermaid.initialize({ startOnLoad: true, theme: 'default' });
+  const data = JSON.parse(document.getElementById('goal-data').textContent);
+  const statusColor = s => ({ open: 'open', 'in-progress': 'in-progress', done: 'done', blocked: 'blocked' }[s] || 'open');
+  document.getElementById('status-badge').textContent = data.status;
+  document.getElementById('status-badge').classList.add(statusColor(data.status));
+  data.subGoals.forEach(sg => {
+    const el = document.querySelector(`.sg-status[data-sg="${sg.id}"]`);
+    if (el) {
+      el.textContent = sg.status;
+      el.classList.add(statusColor(sg.status));
+    }
+  });
+</script>
+
+</body>
+</html>

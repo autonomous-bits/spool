@@ -1,14 +1,14 @@
 import { Controller, Get } from '@nestjs/common';
 
-interface HealthResponse {
+export interface HealthResponse {
   status: 'ok';
   service: 'store';
 }
 
-@Controller()
+@Controller('health')
 export class HealthController {
-  @Get('health')
-  health(): HealthResponse {
+  @Get()
+  getHealth(): HealthResponse {
     return {
       status: 'ok',
       service: 'store',

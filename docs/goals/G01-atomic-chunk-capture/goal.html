@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>G01 — Atomic Chunk Capture &amp; Retrieval</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  body { font-family: -apple-system, Segoe UI, sans-serif; max-width: 980px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
+  table { border-collapse: collapse; width: 100%; margin: 0.5rem 0 1.5rem; }
+  th, td { border: 1px solid #ccc; padding: 6px 10px; text-align: left; font-size: 0.9rem; vertical-align: top; }
+  th { background: #f0f0f0; }
+  h1 { font-size: 1.4rem; }
+  h2 { font-size: 1.1rem; margin-top: 2rem; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.75rem; font-weight: 600; color: #fff; }
+  .badge-open { background: #888; }
+  .badge-in-progress { background: #d98c00; }
+  .badge-done { background: #2a9d3f; }
+  .badge-blocked { background: #c1272d; }
+  details { border: 1px solid #ccc; border-radius: 6px; margin: 0.5rem 0; padding: 0.4rem 0.8rem; }
+  summary { cursor: pointer; font-weight: 600; }
+  code { background: #f5f5f5; padding: 1px 4px; border-radius: 3px; }
+  .mermaid { background: #fafafa; padding: 0.5rem; }
+  .oq { background: #fff8e1; border: 1px solid #f0d878; border-radius: 6px; padding: 0.6rem 1rem; }
+</style>
+</head>
+<body>
+
+<h1>G01 — Atomic Chunk Capture &amp; Retrieval
+  <span class="badge badge-done" id="header-status">done</span>
+</h1>
+<p><strong>Size:</strong> 5 — introduces multiple new domain concepts (Chunk entity, ChunkType/ContextKind/Discipline vocab, minimal Stakeholder identity) plus a repo-local schema migration and cross-layer contracts (API + domain + persistence + MCP).</p>
+
+<h2>Meridian Source</h2>
+<table>
+<tr><th>Chunk</th><th>Status</th><th>Layer</th><th>Note</th></tr>
+<tr><td>IDEA-1</td><td>promoted</td><td>product framing</td><td>Spool bridges raw ideas to implementation context.</td></tr>
+<tr><td>IDEA-2</td><td>promoted</td><td>functional</td><td>Atomic Idea Ingestion capability.</td></tr>
+<tr><td>IDEA-12</td><td>promoted</td><td>functional</td><td>Atomic Idea Capture is the ingestion surface.</td></tr>
+<tr><td>IDEA-4</td><td>promoted</td><td>domain</td><td>Discipline provenance per chunk.</td></tr>
+<tr><td>IDEA-14</td><td>promoted</td><td>domain</td><td>Discipline attribution tagging mechanism.</td></tr>
+<tr><td>IDEA-11</td><td>promoted</td><td>domain</td><td>Stakeholder authors chunks; traceability required.</td></tr>
+<tr><td>IDEA-50</td><td>promoted</td><td>infra</td><td>Postgres container.</td></tr>
+<tr><td>IDEA-51</td><td>promoted</td><td>infra</td><td>NestJS API gateway container.</td></tr>
+<tr><td>IDEA-52</td><td>promoted</td><td>API</td><td>API Gateway Controller handles REST requests.</td></tr>
+<tr><td>IDEA-34</td><td>promoted</td><td>API</td><td>All external clients and MCP servers interact via the NestJS API gateway as the sole application boundary.</td></tr>
+<tr><td>IDEA-31</td><td>promoted</td><td>persistence</td><td>Postgres schema (external schema.sql) defines <code>chunks</code>, <code>stakeholders</code> tables.</td></tr>
+<tr><td>IDEA-77</td><td>promoted</td><td>persistence</td><td>ADR amendment to IDEA-31: adds <code>chunk_type</code>/<code>context_kind</code> columns to <code>chunks</code>, formally resolving IDEA-76's schema-gap recommendation.</td></tr>
+<tr><td>IDEA-78</td><td>promoted</td><td>persistence</td><td>ADR amendment to IDEA-31/IDEA-32: ratifies branchless/draft chunk capture (branch_id NULL, status draft) plus a tightened draft-uniqueness index, formally resolving IDEA-76's branchless-capture recommendation.</td></tr>
+<tr><td>IDEA-72</td><td>promoted</td><td>domain</td><td>ChunkType enum: feature/capability/constraint/adr/spike.</td></tr>
+<tr><td>IDEA-73</td><td>promoted</td><td>domain</td><td>ContextKind enum: permanent/transient.</td></tr>
+<tr><td>IDEA-9</td><td>promoted</td><td>MCP</td><td>Agents act as delegated tools under human supervision.</td></tr>
+<tr><td>IDEA-76</td><td>promoted (gap-report + recommendation)</td><td>persistence</td><td>Escalation filed this session, now promoted with explicit recommendations: (1) add chunk_type/context_kind columns — formally resolved via IDEA-77; (2) permit branchless/draft capture with a tightened draft-uniqueness index — formally resolved via IDEA-78.</td></tr>
+</table>
+
+<h2>Vertical Slice Diagram</h2>
+<p>A delegated agent or stakeholder captures a chunk through MCP or directly via HTTP; the store validates, persists to Postgres, and returns it by id.</p>
+<div class="mermaid">
+flowchart LR
+  Agent["Delegated agent / stakeholder"] -->|capture-chunk tool call| MCP["apps/mcp: capture-chunk tool"]
+  MCP -->|HTTP POST /chunks| API["apps/store: ChunksController"]
+  Client["Direct HTTP client"] -->|HTTP POST/GET /chunks| API
+  API --> Service["ChunkService"]
+  Service --> Domain["Domain: Chunk entity, ChunkType, ContextKind, Discipline"]
+  Service --> Repo["ChunkRepository"]
+  Repo -->|SQL| DB[("Postgres: chunks, stakeholders")]
+  API -->|GET /chunks/:id| Client
+</div>
+
+<h2>Dependency Diagram</h2>
+<div class="mermaid">
+graph TD
+  SG0["SG0: DB bootstrap & migration"] --> SG2["SG2: ChunkRepository"]
+  SG1["SG1: Chunk domain model"] --> SG2
+  SG2 --> SG3["SG3: ChunksController API"]
+  SG3 --> SG4["SG4: MCP capture-chunk tool"]
+  SG4 --> SG5["SG5: Docker end-to-end verification"]
+</div>
+
+<h2>Sub-goal Detail</h2>
+
+<details>
+<summary>SG0 — Persistence/infra: DB bootstrap &amp; migration <span class="badge badge-done sg-badge" data-sg="SG0">done</span></summary>
+<p><strong>Depends on:</strong> none</p>
+<p><strong>Objective:</strong> Add a repo-local migration extending the <code>chunks</code> table with <code>chunk_type</code> and <code>context_kind</code> columns and wire it into Postgres startup; seed one bootstrap stakeholder row for dev/test use.</p>
+<ul>
+<li>A SQL migration file exists under <code>apps/store</code> (e.g. <code>apps/store/migrations/</code>) creating, at minimum: <code>stakeholders(id UUID PK, name, email, role, discipline, created_at)</code> per schema.sql, and <code>chunks(id UUID PK, label, content, discipline, status, branch_id, origin_branch_id, created_by_stakeholder_id, updated_by_stakeholder_id, created_at, updated_at)</code> per schema.sql <strong>plus the two columns ratified by IDEA-77's amendment to IDEA-31</strong>: <code>chunk_type VARCHAR(50) NOT NULL CHECK (chunk_type IN ('feature','capability','constraint','adr','spike'))</code> and <code>context_kind VARCHAR(50) NOT NULL CHECK (context_kind IN ('permanent','transient'))</code>, <strong>plus the uniqueness index ratified by IDEA-78's amendment to IDEA-31/IDEA-32</strong>: <code>CREATE UNIQUE INDEX idx_chunks_draft_mainline ON chunks (label) WHERE branch_id IS NULL AND status = 'draft';</code>.</li>
+<li>The migration is applied automatically both for the Dockerized Postgres (via <code>compose.yaml</code> init) and for host-side integration tests against <code>localhost:5433</code>.</li>
+<li>Exactly one bootstrap stakeholder row is seeded (fixed, documented UUID) usable by later sub-goals and the Docker e2e step.</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:store</code> (migration-runner unit/integration test).</p>
+</details>
+
+<details>
+<summary>SG1 — Domain: Chunk entity &amp; vocab <span class="badge badge-done sg-badge" data-sg="SG1">done</span></summary>
+<p><strong>Depends on:</strong> none (parallelizable with SG0)</p>
+<p><strong>Objective:</strong> Implement a rich <code>Chunk</code> domain entity plus closed <code>ChunkType</code>, <code>ContextKind</code>, and <code>Discipline</code> value types with validation invariants, per IDEA-72/IDEA-73/IDEA-4/IDEA-14.</p>
+<ul>
+<li><code>ChunkType</code> accepts exactly: <code>feature</code>, <code>capability</code>, <code>constraint</code>, <code>adr</code>, <code>spike</code> — anything else throws a domain validation error.</li>
+<li><code>ContextKind</code> accepts exactly: <code>permanent</code>, <code>transient</code>.</li>
+<li><code>Discipline</code> accepts exactly: <code>product</code>, <code>architecture</code>, <code>design</code>, <code>engineering</code>, <code>security</code>, <code>governance</code>.</li>
+<li>Chunk construction rejects empty/blank <code>label</code> or <code>content</code>.</li>
+<li>Chunk carries <code>createdByStakeholderId</code> (required) for authoring traceability (IDEA-11).</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:store</code> (unit tests for entity + all three vocab types, including rejection cases).</p>
+</details>
+
+<details>
+<summary>SG2 — Persistence: ChunkRepository <span class="badge badge-done sg-badge" data-sg="SG2">done</span></summary>
+<p><strong>Depends on:</strong> SG0, SG1</p>
+<p><strong>Objective:</strong> Implement a Postgres-backed <code>ChunkRepository</code> with <code>create(chunk)</code> and <code>findById(id)</code>, mapping domain invariants to/from the extended <code>chunks</code> table.</p>
+<ul>
+<li><code>create</code> persists a chunk with <code>status = 'draft'</code>, <code>branch_id = NULL</code>, and the new <code>chunk_type</code>/<code>context_kind</code> columns.</li>
+<li><code>findById</code> returns the persisted chunk with all fields round-tripped exactly (including vocab and discipline), or an explicit not-found result.</li>
+<li>Integration tests run against the containerized Postgres per <code>docs/specifications</code> testing convention (no in-memory substitute).</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:store</code> (Vitest integration test against containerized Postgres on <code>localhost:5433</code>).</p>
+</details>
+
+<details>
+<summary>SG3 — API surface: ChunksController <span class="badge badge-done sg-badge" data-sg="SG3">done</span></summary>
+<p><strong>Depends on:</strong> SG2</p>
+<p><strong>Objective:</strong> Expose <code>POST /chunks</code> and <code>GET /chunks/:id</code> on the NestJS store, wired through a <code>ChunkService</code> to SG2's repository, per IDEA-52/IDEA-34.</p>
+<ul>
+<li><code>POST /chunks</code> accepts <code>{ label, content, discipline, chunkType, contextKind, stakeholderId }</code>, returns <code>201</code> with the created chunk including generated <code>id</code>.</li>
+<li><code>POST /chunks</code> returns a <code>400</code> with a validation error for any invalid vocab value, missing required field, or unknown <code>stakeholderId</code>.</li>
+<li><code>GET /chunks/:id</code> returns <code>200</code> with the chunk for a known id, and <code>404</code> for an unknown id.</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:store</code> (Vitest e2e test under <code>apps/store/test/*.e2e-spec.ts</code> against containerized Postgres).</p>
+</details>
+
+<details>
+<summary>SG4 — MCP exposure: capture-chunk tool <span class="badge badge-done sg-badge" data-sg="SG4">done</span></summary>
+<p><strong>Depends on:</strong> SG3</p>
+<p><strong>Objective:</strong> Add an MCP tool (e.g. <code>capture-chunk</code>) in <code>apps/mcp</code> that calls the store's <code>POST /chunks</code> over HTTP on behalf of a human stakeholder, acting as a delegated actor per IDEA-9.</p>
+<ul>
+<li>Tool accepts the same fields as <code>POST /chunks</code> and forwards them to <code>HARNESS_URL</code>.</li>
+<li>Tool surfaces the store's validation errors (400) back to the calling agent without swallowing them.</li>
+<li>Tool response includes the created chunk's <code>id</code> on success.</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:mcp</code> (unit/integration test with a stubbed or real store HTTP call).</p>
+</details>
+
+<details>
+<summary>SG5 — Docker end-to-end verification <span class="badge badge-done sg-badge" data-sg="SG5">done</span></summary>
+<p><strong>Depends on:</strong> SG4</p>
+<p><strong>Objective:</strong> Bring the store up in Docker (per <code>apps/store/AGENTS.md</code>, the store always runs via Compose, never directly on host) and exercise the real capability end to end, not just in-process tests. The MCP server is a separate Node process (<code>node apps/mcp/dist/main.js</code>, not part of <code>compose.yaml</code>) started with <code>HARNESS_URL</code> pointed at the running containerized store.</p>
+<ul>
+<li><code>docker compose up --build spoolstore</code> starts Postgres (migrated per SG0) and the store container successfully, store reachable on <code>localhost:3000</code>.</li>
+<li>A real HTTP <code>POST /chunks</code> against <code>localhost:3000</code> followed by <code>GET /chunks/:id</code> returns the same chunk, including <code>chunkType</code>/<code>contextKind</code>/<code>discipline</code> round-tripped correctly.</li>
+<li>Separately, <code>apps/mcp</code> is built and started as its own Node process with <code>HARNESS_URL=http://localhost:3000</code>; a real <code>capture-chunk</code> tool call against that running MCP process creates a chunk retrievable via the store's <code>GET /chunks/:id</code> on <code>localhost:3000</code>.</li>
+</ul>
+<p><strong>Verification:</strong> Manual/scripted exercise — <code>docker compose up --build spoolstore</code> for the store/Postgres, plus a separately started <code>apps/mcp</code> process, plus real HTTP/MCP calls against both. Not satisfied by unit or e2e-in-process tests alone.</p>
+</details>
+
+<h2>Open Questions</h2>
+<div class="oq">
+<ul>
+<li><strong>Schema gap — RESOLVED via Meridian <code>IDEA-77</code> (promoted ADR amendment to IDEA-31):</strong> IDEA-31's authoritative schema now formally includes <code>chunk_type</code>/<code>context_kind</code> columns on <code>chunks</code>, matching IDEA-72/IDEA-73's vocabulary exactly. SG0's migration implements this ratified schema directly (no longer a stopgap).</li>
+<li><strong>Branchless draft retrieval — RESOLVED via Meridian <code>IDEA-78</code> (promoted ADR amendment to IDEA-31/IDEA-32):</strong> branchless/draft chunk capture (<code>branch_id = NULL</code>, <code>status = 'draft'</code>) is now formally ratified as a first-class path, distinct from branch-based authoring. SG0's migration should add the accompanying uniqueness index: <code>CREATE UNIQUE INDEX idx_chunks_draft_mainline ON chunks (label) WHERE branch_id IS NULL AND status = 'draft';</code>. This goal retrieves chunks by generated <code>id</code>, not by <code>label</code>, so it did not depend on this ruling either way, but the ratification is now available for any future label-based retrieval work.</li>
+<li><strong>Stakeholder registration</strong> is out of scope for this goal. <code>POST /chunks</code> requires an existing <code>stakeholderId</code>; SG0 seeds exactly one bootstrap stakeholder for dev/test/Docker-verification use. Full stakeholder registration is deferred to a future goal.</li>
+</ul>
+</div>
+
+<h2>Definition of Done</h2>
+<ul>
+<li>SG0–SG4 all pass their named verification commands.</li>
+<li>SG5's Docker end-to-end exercise passes against the real containerized system (not unit/e2e-in-process tests alone).</li>
+<li><code>pnpm build</code>, <code>pnpm typecheck</code>, and <code>pnpm test</code> are clean at the repository root.</li>
+<li>Both Open Questions above are now resolved: the schema-gap via IDEA-77, and branchless-capture via IDEA-78 (both promoted ADR amendments this session).</li>
+</ul>
+
+<script type="application/json" id="goal-data">
+{
+  "goalId": "G01",
+  "slug": "atomic-chunk-capture",
+  "title": "Atomic Chunk Capture & Retrieval",
+  "status": "done",
+  "size": 5,
+  "sizeJustification": "Introduces multiple new domain concepts (Chunk entity, ChunkType/ContextKind/Discipline vocab, minimal Stakeholder identity) plus a repo-local schema migration and cross-layer contracts across API, domain, persistence, and MCP layers.",
+  "meridianChunks": [
+    {"label": "IDEA-1", "status": "promoted", "layer": "product framing"},
+    {"label": "IDEA-2", "status": "promoted", "layer": "functional"},
+    {"label": "IDEA-12", "status": "promoted", "layer": "functional"},
+    {"label": "IDEA-4", "status": "promoted", "layer": "domain"},
+    {"label": "IDEA-14", "status": "promoted", "layer": "domain"},
+    {"label": "IDEA-11", "status": "promoted", "layer": "domain"},
+    {"label": "IDEA-50", "status": "promoted", "layer": "infra"},
+    {"label": "IDEA-51", "status": "promoted", "layer": "infra"},
+    {"label": "IDEA-52", "status": "promoted", "layer": "API"},
+    {"label": "IDEA-34", "status": "promoted", "layer": "API"},
+    {"label": "IDEA-31", "status": "promoted", "layer": "persistence"},
+    {"label": "IDEA-77", "status": "promoted", "layer": "persistence (ADR amendment to IDEA-31)"},
+    {"label": "IDEA-72", "status": "promoted", "layer": "domain"},
+    {"label": "IDEA-73", "status": "promoted", "layer": "domain"},
+    {"label": "IDEA-9", "status": "promoted", "layer": "MCP"},
+    {"label": "IDEA-76", "status": "promoted", "layer": "persistence (gap report + recommendation)"},
+    {"label": "IDEA-78", "status": "promoted", "layer": "persistence (ADR amendment ratifying branchless capture)"}
+  ],
+  "subGoals": [
+    {
+      "id": "SG0",
+      "layer": "persistence/infra",
+      "dependsOn": [],
+      "objective": "DB bootstrap & migration: add chunk_type/context_kind columns and seed one bootstrap stakeholder.",
+      "acceptanceCriteria": [
+        "Migration creates stakeholders(id, name, email, role, discipline, created_at) and chunks(id, label, content, discipline, status, branch_id, origin_branch_id, created_by_stakeholder_id, updated_by_stakeholder_id, created_at, updated_at) per schema.sql, plus chunk_type and context_kind columns ratified by IDEA-77's amendment to IDEA-31, plus the idx_chunks_draft_mainline uniqueness index ratified by IDEA-78's amendment to IDEA-31/IDEA-32.",
+        "Migration applies automatically for both Dockerized Postgres and host-side integration tests on localhost:5433.",
+        "Exactly one bootstrap stakeholder row is seeded with a fixed, documented UUID."
+      ],
+      "verification": "pnpm test:store",
+      "status": "done"
+    },
+    {
+      "id": "SG1",
+      "layer": "domain",
+      "dependsOn": [],
+      "objective": "Implement Chunk entity plus ChunkType/ContextKind/Discipline vocab with validation invariants.",
+      "acceptanceCriteria": [
+        "ChunkType accepts exactly feature, capability, constraint, adr, spike and rejects other values.",
+        "ContextKind accepts exactly permanent, transient and rejects other values.",
+        "Discipline accepts exactly product, architecture, design, engineering, security, governance and rejects other values.",
+        "Chunk construction rejects empty/blank label or content.",
+        "Chunk requires createdByStakeholderId."
+      ],
+      "verification": "pnpm test:store",
+      "status": "done"
+    },
+    {
+      "id": "SG2",
+      "layer": "persistence",
+      "dependsOn": ["SG0", "SG1"],
+      "objective": "Implement Postgres-backed ChunkRepository with create and findById.",
+      "acceptanceCriteria": [
+        "create persists a chunk with status draft, branch_id NULL, and the chunk_type/context_kind columns populated.",
+        "findById returns the persisted chunk with all fields round-tripped exactly, or an explicit not-found result.",
+        "Integration tests run against containerized Postgres, not an in-memory substitute."
+      ],
+      "verification": "pnpm test:store",
+      "status": "done"
+    },
+    {
+      "id": "SG3",
+      "layer": "API",
+      "dependsOn": ["SG2"],
+      "objective": "Expose POST /chunks and GET /chunks/:id on the NestJS store.",
+      "acceptanceCriteria": [
+        "POST /chunks accepts label, content, discipline, chunkType, contextKind, stakeholderId and returns 201 with the created chunk including generated id.",
+        "POST /chunks returns 400 for invalid vocab values, missing required fields, or unknown stakeholderId.",
+        "GET /chunks/:id returns 200 with the chunk for a known id and 404 for an unknown id."
+      ],
+      "verification": "pnpm test:store",
+      "status": "done"
+    },
+    {
+      "id": "SG4",
+      "layer": "MCP",
+      "dependsOn": ["SG3"],
+      "objective": "Add an MCP capture-chunk tool calling the store's POST /chunks as a delegated actor.",
+      "acceptanceCriteria": [
+        "Tool accepts the same fields as POST /chunks and forwards them to HARNESS_URL.",
+        "Tool surfaces the store's 400 validation errors back to the calling agent without swallowing them.",
+        "Tool response includes the created chunk's id on success."
+      ],
+      "verification": "pnpm test:mcp",
+      "status": "done"
+    },
+    {
+      "id": "SG5",
+      "layer": "docker-e2e",
+      "dependsOn": ["SG4"],
+      "objective": "Bring the full system up in Docker and exercise chunk capture end to end over real interfaces.",
+      "acceptanceCriteria": [
+        "docker compose up --build spoolstore starts Postgres (migrated) and the store container successfully, reachable on localhost:3000.",
+        "A real HTTP POST /chunks followed by GET /chunks/:id against localhost:3000 round-trips chunkType/contextKind/discipline correctly.",
+        "apps/mcp is built and started as its own Node process (node apps/mcp/dist/main.js) with HARNESS_URL=http://localhost:3000; a real capture-chunk tool call against it creates a chunk retrievable via the store's GET /chunks/:id."
+      ],
+      "verification": "docker compose up --build spoolstore (store/Postgres) plus a separately started apps/mcp process, exercised with real HTTP + MCP calls",
+      "status": "done"
+    }
+  ],
+  "openQuestions": [
+    "Schema gap RESOLVED via Meridian IDEA-77 (promoted ADR amendment to IDEA-31): the authoritative schema now formally includes chunk_type/context_kind columns on chunks, matching IDEA-72/IDEA-73. SG0's migration implements this ratified schema directly.",
+    "Branchless draft retrieval RESOLVED via Meridian IDEA-78 (promoted ADR amendment to IDEA-31/IDEA-32): branchless/draft chunk capture (branch_id NULL, status draft) is formally ratified as a first-class path. SG0's migration should add the accompanying idx_chunks_draft_mainline uniqueness index. This goal retrieves by generated id, not label, so it did not depend on this ruling either way.",
+    "Stakeholder registration is out of scope; POST /chunks requires an existing stakeholderId, with exactly one bootstrap stakeholder seeded by SG0."
+  ]
+}
+</script>
+
+<script>
+  mermaid.initialize({ startOnLoad: true });
+  const data = JSON.parse(document.getElementById('goal-data').textContent);
+  document.querySelectorAll('.sg-badge').forEach(el => {
+    const sg = data.subGoals.find(s => s.id === el.dataset.sg);
+    if (sg) {
+      el.textContent = sg.status;
+      el.className = 'badge sg-badge badge-' + sg.status;
+    }
+  });
+  document.getElementById('header-status').textContent = data.status;
+</script>
+
+</body>
+</html>

@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>G03 — Typed Edge Creation Between Chunks</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  body { font-family: -apple-system, Segoe UI, sans-serif; max-width: 960px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
+  h1 { font-size: 1.4rem; }
+  h2 { font-size: 1.1rem; margin-top: 2rem; border-bottom: 1px solid #ddd; padding-bottom: 0.25rem; }
+  table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; font-size: 0.9rem; }
+  th, td { border: 1px solid #ccc; padding: 4px 8px; text-align: left; vertical-align: top; }
+  th { background: #f0f0f0; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 0.75rem; font-weight: 600; color: #fff; }
+  .badge-open { background: #6c757d; }
+  .badge-in-progress { background: #f0ad4e; }
+  .badge-done { background: #28a745; }
+  .badge-blocked { background: #d9534f; }
+  details { border: 1px solid #ddd; border-radius: 6px; padding: 0.5rem 0.75rem; margin: 0.5rem 0; }
+  summary { cursor: pointer; font-weight: 600; }
+  code { background: #f5f5f5; padding: 1px 4px; border-radius: 3px; }
+  .mermaid { background: #fafafa; padding: 0.5rem; border-radius: 6px; }
+</style>
+</head>
+<body>
+
+<h1>G03 — Typed Edge Creation Between Chunks</h1>
+<p>
+  Status: <span id="goal-status-badge" class="badge badge-done">done</span> &middot;
+  Size: <strong>4/5</strong> — touches every layer (API, domain, persistence, MCP), introduces one new domain
+  concept (<code>Edge</code> + its 8-value type vocabulary), and a new schema/migration, but scopes out
+  generic branch-overlay graph reads and the supersede/deactivate lifecycle to future goals.
+</p>
+
+<h2>Meridian Source</h2>
+<table>
+<thead><tr><th>Chunk</th><th>Status</th><th>Layer</th><th>Note</th></tr></thead>
+<tbody>
+<tr><td>IDEA-19</td><td>promoted</td><td>functional</td><td>Branches allow edges to be added/modified/superseded without affecting mainline; superseding creates a version chain.</td></tr>
+<tr><td>IDEA-26</td><td>promoted</td><td>functional</td><td>Mainline edges cannot be deleted, only superseded; local deletion permitted in draft branches pre-merge (not implemented this goal — see scope note).</td></tr>
+<tr><td>IDEA-36</td><td>promoted (ADR)</td><td>domain</td><td>Edges reference chunks by logical string label (<code>from_chunk_label</code>/<code>to_chunk_label</code>), not UUID FK.</td></tr>
+<tr><td>IDEA-37</td><td>promoted</td><td>domain</td><td>Label-based references keep relationships valid across branch overrides/promotions without FK rewrites at merge.</td></tr>
+<tr><td>IDEA-38</td><td>promoted (ADR)</td><td>domain</td><td>Mainline edges immutable; at most one active edge of a given type between two chunks in a branch; supersede chain via <code>superseded_by_edge_id</code> (schema/constraint only this goal — no supersede command).</td></tr>
+<tr><td>IDEA-9</td><td>promoted</td><td>MCP</td><td>Delegated agents may author within draft branches on a stakeholder's behalf.</td></tr>
+<tr><td>IDEA-52 / IDEA-34</td><td>promoted</td><td>API</td><td>All external/MCP traffic goes through the NestJS gateway; exact REST shape is repo-derived, as it was for G01/G02.</td></tr>
+<tr><td>IDEA-31</td><td>promoted (amended by IDEA-77, IDEA-78)</td><td>persistence (ADR)</td><td>Authoritative Postgres schema; the <code>edges</code> table shape used verbatim below (from the referenced <code>schema.sql</code>).</td></tr>
+<tr><td>IDEA-32 / IDEA-33</td><td>promoted</td><td>persistence (ADR)</td><td>Branch delta rows tied to <code>branch_id</code>; dynamic active-graph-state resolution (full UNION overlay is out of scope — this goal only needs a narrow label-existence check, see scope note).</td></tr>
+<tr><td>IDEA-44</td><td>promoted</td><td>persistence (ADR)</td><td>Composite indexes <code>idx_edges_branch_lookup</code>/<code>idx_edges_mainline</code>/<code>idx_edges_branch_active</code> required for query performance.</td></tr>
+</tbody>
+</table>
+<p><em>Scope notes (not Meridian ambiguity — explicit phasing decisions, consistent with G01/G02's own scope deviations):</em></p>
+<ul>
+<li><strong>No generic branch-overlay graph read.</strong> No branch-overlay/UNION-based "active graph" resolver exists yet in this repo (confirmed: <code>ChunkRepository</code> has no label lookup, only <code>findById</code>). This goal adds only a narrow <code>ChunkRepository.findByLabel(label, branchId)</code> used solely to validate that an edge's endpoints exist in the same scope (branch-local, or both branchless) — not a general-purpose graph-read API. A full active-graph resolver is deferred to a future goal.</li>
+<li><strong>No "or mainline" resolution.</strong> This repo has no implemented promotion pipeline yet (chunks are always <code>status: 'draft'</code>), so there is no real promoted mainline graph to resolve against. Edge endpoint validation in this goal is branch-local only: both <code>fromChunkLabel</code>/<code>toChunkLabel</code> must resolve to chunks in the same <code>branchId</code> (or, if <code>branchId</code> is omitted, both must resolve to branchless draft chunks). This "no <code>branchId</code>" path is a <strong>temporary</strong> resolution against the current branchless-draft scope only (no draft-vs-promoted precedence logic) and must be revisited once a real promotion pipeline exists.</li>
+<li><strong>No supersede/deactivate command.</strong> Schema/domain model <code>EdgeStatus</code> (<code>active | superseded | deactivated</code>) and <code>superseded_by_edge_id</code> so the data model is supersede-ready per IDEA-38, but this goal only ever creates <code>status: 'active'</code> edges. Actual supersede/deactivate endpoints are a future goal.</li>
+</ul>
+
+<h2>Vertical slice diagram</h2>
+<p>Create two chunks and a branch (existing capability), then create a typed edge between them scoped to that branch, then read it back.</p>
+<div class="mermaid">
+flowchart LR
+  subgraph MCP["MCP exposure"]
+    T1["create-edge tool"]
+  end
+  subgraph API["API surface"]
+    C1["POST /edges"]
+    C2["GET /edges/:id"]
+  end
+  subgraph DOMAIN["Domain"]
+    D1["Edge entity"]
+    D2["EdgeType vocab (8 values)"]
+    D3["EdgeStatus vocab"]
+  end
+  subgraph PERSIST["Persistence"]
+    P1[("edges table\nFK to branches")]
+    P2["ChunkRepository.findByLabel\n(endpoint existence check)"]
+    P3[("chunks table")]
+  end
+  T1 --> C1
+  C1 --> D1 --> P1
+  D1 --> D2
+  D1 --> D3
+  C1 --> P2 --> P3
+  C2 --> P1
+  D1 -. "branch_id FK" .-> P1
+</div>
+
+<h2>Dependency diagram</h2>
+<div class="mermaid">
+flowchart TD
+  SG1["SG1: Edge domain entity + vocab"] --> SG2["SG2: edges schema + EdgeRepository + findByLabel"]
+  SG2 --> SG3["SG3: Edges API"]
+  SG3 --> SG4["SG4: MCP exposure"]
+  SG4 --> SG5["SG5: Docker end-to-end"]
+</div>
+
+<h2>Sub-goal detail</h2>
+
+<details id="d-SG1">
+<summary>SG1 — domain: Edge entity + EdgeType/EdgeStatus vocab <span class="badge badge-done">done</span></summary>
+<p><strong>Depends on:</strong> none</p>
+<p><strong>Objective:</strong> Model <code>Edge</code> as a validated domain entity with its closed type/status vocabularies, per IDEA-36/IDEA-37/IDEA-38.</p>
+<ul>
+<li><code>EdgeType</code> is a closed 8-value enum: <code>refines | depends-on | contradicts | derives-from | blocks | implements | constrains | feedback-on</code> (matches the authoritative schema's CHECK constraint verbatim).</li>
+<li><code>EdgeStatus</code> is a closed 3-value enum: <code>active | superseded | deactivated</code>. This goal's write path only ever produces <code>active</code> (mirrors <code>ChunkStatus</code>/<code>BranchStatus</code> precedent from G01/G02: model the full vocab, only produce one value for now).</li>
+<li><code>Edge</code> entity fields (all camelCase in domain/API; snake_case is DB-column-only, per SG2): <code>id</code>, <code>fromChunkLabel</code>, <code>toChunkLabel</code>, <code>type: EdgeType</code>, <code>status: EdgeStatus</code> (defaults <code>'active'</code>), <code>discipline: Discipline</code> (reuses existing vocab), <code>branchId?</code>, <code>originBranchId?</code>, <code>supersededByEdgeId?</code> (always undefined this goal — reserved for a future supersede goal), <code>createdByStakeholderId</code>, <code>updatedByStakeholderId</code>, <code>createdAt</code>, <code>updatedAt</code>.</li>
+<li>Constructor rejects: blank <code>fromChunkLabel</code>/<code>toChunkLabel</code>, <code>fromChunkLabel === toChunkLabel</code> (self-referential edges are invalid), invalid <code>type</code>, invalid <code>discipline</code>, blank <code>createdByStakeholderId</code> — by throwing, mirroring <code>Chunk</code>/<code>Branch</code> constructor style.</li>
+<li>On initial creation, <code>updatedByStakeholderId</code> defaults to the same value as <code>createdByStakeholderId</code> (the incoming <code>stakeholderId</code>) — mirroring <code>Chunk</code>'s existing creation behavior; there is no separate "updater" concept until a future edit/supersede goal.</li>
+<li>Unit tests cover valid construction and each rejection case.</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:store</code> (unit tests for the new domain module).</p>
+</details>
+
+<details id="d-SG2">
+<summary>SG2 — persistence/infra: edges schema + EdgeRepository + label lookup <span class="badge badge-done">done</span></summary>
+<p><strong>Depends on:</strong> SG1</p>
+<p><strong>Objective:</strong> Add the authoritative <code>edges</code> table and the minimal persistence needed to create and read edges, plus a narrow chunk-label-existence check.</p>
+<ul>
+<li>Migration creates <code>edges(id, from_chunk_label, to_chunk_label, type, status, discipline, branch_id, origin_branch_id, superseded_by_edge_id, created_by_stakeholder_id, updated_by_stakeholder_id, created_at, updated_at)</code> exactly per the authoritative schema (<code>type</code>/<code>status</code> CHECK constraints matching SG1's vocab; <code>branch_id REFERENCES branches(id) ON DELETE CASCADE</code>; <code>origin_branch_id REFERENCES branches(id)</code>; <code>superseded_by_edge_id REFERENCES edges(id)</code>, nullable, unused this goal).</li>
+<li>Indexes created per the authoritative schema: <code>idx_edges_branch_lookup (branch_id, from_chunk_label, to_chunk_label)</code>; <code>idx_edges_mainline</code> unique on <code>(from_chunk_label, to_chunk_label, type) WHERE branch_id IS NULL AND status = 'active'</code>; <code>idx_edges_branch_active</code> unique on <code>(from_chunk_label, to_chunk_label, type, branch_id) WHERE status = 'active'</code> — these two unique indexes are what enforce the "at most one active edge of a given type between two chunks" invariant (IDEA-38) at the database level.</li>
+<li><code>EdgeRepository</code> (mirrors <code>ChunkRepository</code>/<code>BranchRepository</code> pattern, parameterized queries only): <code>create(edge): Promise&lt;Edge&gt;</code>, <code>findById(id): Promise&lt;Edge | undefined&gt;</code>. No generic <code>list</code>/overlay-read method (out of scope per the goal-level scope note).</li>
+<li><code>ChunkRepository</code> gains <code>findByLabel(label: string, branchId: string | undefined): Promise&lt;Chunk | undefined&gt;</code> — looks up a chunk by <code>label</code> scoped to the given <code>branchId</code> (or <code>branch_id IS NULL</code> when <code>branchId</code> is undefined). Used only for edge-endpoint-existence validation in SG3, not exposed over any route in this goal.</li>
+<li>Integration tests (containerized Postgres, per repo convention) cover: migration applies cleanly; <code>EdgeRepository.create</code>/<code>findById</code> round-trip; the two unique active-edge indexes reject a duplicate active edge (same from/to/type/branch) at the DB level; <code>ChunkRepository.findByLabel</code> resolves branch-scoped and branchless chunks correctly and returns <code>undefined</code> when not found.</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:store</code> (migration + repository e2e tests against containerized Postgres).</p>
+</details>
+
+<details id="d-SG3">
+<summary>SG3 — API: Edges controller/service <span class="badge badge-done">done</span></summary>
+<p><strong>Depends on:</strong> SG2</p>
+<p><strong>Objective:</strong> Expose <code>POST /edges</code> and <code>GET /edges/:id</code>, enforcing branch-local endpoint-existence and the single-active-edge invariant.</p>
+<ul>
+<li><code>POST /edges</code> accepts <code>{ fromChunkLabel, toChunkLabel, type, discipline, stakeholderId, branchId? }</code> (mirrors <code>CreateChunkRequest</code>'s shape/convention: <code>discipline</code> is an explicit required input, not derived, exactly as chunk creation already works).</li>
+<li>Returns 400 for missing/blank <code>fromChunkLabel</code>/<code>toChunkLabel</code>/<code>stakeholderId</code>, invalid <code>type</code>, invalid <code>discipline</code>, or <code>fromChunkLabel === toChunkLabel</code> — mirroring <code>parseCreateChunkRequest</code>'s IO-boundary-guard style.</li>
+<li>When <code>branchId</code> is present: 404 if the branch does not exist; 409 if <code>branch.discipline !== request.discipline</code> (mirrors chunk-authoring's discipline-bound check from G02 SG3); 409 if <code>branch.status !== 'draft'</code> (write-lock, same as G02 SG3).</li>
+<li>Endpoint existence check (branch-local only, per goal-level scope note): both <code>fromChunkLabel</code> and <code>toChunkLabel</code> must resolve via <code>ChunkRepository.findByLabel(label, branchId)</code> to an existing chunk in the same scope (same <code>branchId</code>, or both branchless when <code>branchId</code> is omitted); 404 if either does not resolve.</li>
+<li>Single-active-edge enforcement: a duplicate active edge (same <code>fromChunkLabel</code>/<code>toChunkLabel</code>/<code>type</code>/<code>branchId</code> scope) is rejected with 409, by catching the unique-index violation from SG2 (same pattern as <code>isForeignKeyViolation</code> in <code>chunks.service.ts</code>, adapted for the unique-violation Postgres error code).</li>
+<li><code>GET /edges/:id</code> returns the created edge's full shape (id, fromChunkLabel, toChunkLabel, type, status, discipline, branchId, originBranchId, supersededByEdgeId, createdByStakeholderId, updatedByStakeholderId, createdAt, updatedAt) — <code>supersededByEdgeId</code> is always <code>null</code> this goal but is included now so the response shape doesn't drift when a future supersede goal populates it; 404 if not found.</li>
+<li>e2e tests cover: successful branch-scoped creation, successful branchless creation, each 400/404/409 case above.</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:store</code> (controller/service unit tests + new e2e spec against containerized Postgres).</p>
+</details>
+
+<details id="d-SG4">
+<summary>SG4 — MCP exposure <span class="badge badge-done">done</span></summary>
+<p><strong>Depends on:</strong> SG3</p>
+<p><strong>Objective:</strong> Let an ideation assistant create a typed edge between two existing chunks, per IDEA-9.</p>
+<ul>
+<li>New <code>create-edge</code> MCP tool mirrors <code>create-branch</code>'s conventions exactly: validates untrusted input shape only (<code>fromChunkLabel</code>/<code>toChunkLabel</code>/<code>type</code>/<code>discipline</code>/<code>stakeholderId</code> as non-empty strings, <code>branchId</code> optional non-empty string), forwards to <code>POST /edges</code>, never invents a stakeholder identity, surfaces the store's 4xx errors as a typed validation error (e.g. <code>CreateEdgeValidationError</code>).</li>
+<li>Vocabulary/invariant validation (closed <code>type</code> set, discipline match, endpoint existence, single-active-edge) remains the store's responsibility — not re-validated in the tool, per the existing tools' documented convention.</li>
+<li>Unit tests cover: valid input parsing, missing-field rejection, and successful/error forwarding (mocked fetch) — same test shape as <code>create-branch.spec.ts</code>.</li>
+</ul>
+<p><strong>Verification:</strong> <code>pnpm test:mcp</code>.</p>
+</details>
+
+<details id="d-SG5">
+<summary>SG5 — Docker end-to-end verification <span class="badge badge-done">done</span></summary>
+<p><strong>Depends on:</strong> SG4</p>
+<p><strong>Objective:</strong> Prove the full four-layer slice (MCP → API → domain → persistence) works against the real containerized system, not just in-process tests.</p>
+<ul>
+<li><code>docker compose up --build spoolstore</code> brings up the store against real Postgres.</li>
+<li>Over real HTTP: create a branch (<code>POST /branches</code>), create two chunks scoped to that branch (<code>POST /chunks</code> with <code>branchId</code>), then <code>POST /edges</code> referencing both chunks' labels and that <code>branchId</code> succeeds; <code>GET /edges/:id</code> reflects the created edge.</li>
+<li>A negative case is exercised over HTTP: repeating the same <code>POST /edges</code> (same from/to/type/branch) is rejected with 409 (single-active-edge invariant).</li>
+<li>A second negative case is exercised over HTTP: <code>POST /edges</code> referencing a <code>toChunkLabel</code> that does not exist in that branch's scope is rejected with 404.</li>
+<li>The MCP layer is exercised too: with <code>spoolstore</code> running via compose, separately start <code>apps/mcp</code> (e.g. <code>node apps/mcp/dist/main.js</code>) configured with <code>HARNESS_URL</code> pointed at the running store; invoke the <code>create-edge</code> tool to create an edge between two chunks created via the existing <code>capture-chunk</code> tool, confirmed via HTTP readback (<code>GET /edges/:id</code>) against the store. Both HTTP and MCP paths must be proven — not "either/or".</li>
+</ul>
+<p><strong>Verification:</strong> manual/scripted HTTP exercise (curl or equivalent) against <code>spoolstore</code> plus an MCP tool invocation (via a running <code>apps/mcp</code> process pointed at that same container, per above) with HTTP readback (not satisfied by unit/in-process tests alone).</p>
+</details>
+
+<h2>Open Questions</h2>
+<p>None. All four layers (API, domain, persistence, MCP) are backed by promoted Meridian chunks or direct precedent from G01/G02; the three scope narrowings above (no generic overlay read, branch-local-only resolution, no supersede command) are explicit phasing decisions, not unresolved Meridian ambiguity, and mirror the scope-deviation style already used in G01/G02's migrations.</p>
+
+<h2>Definition of Done</h2>
+<ul>
+<li>SG1–SG4 all pass their named verification commands.</li>
+<li>SG5's Docker end-to-end exercise passes against the real containerized store, over real HTTP (including both negative cases) and via MCP tool invocation with HTTP readback.</li>
+<li><code>docs/goals/README.md</code> updated with G03's row once complete.</li>
+</ul>
+
+<script type="application/json" id="goal-data">
+{
+  "goalId": "G03",
+  "slug": "typed-edge-creation",
+  "title": "Typed Edge Creation Between Chunks",
+  "status": "done",
+  "size": 4,
+  "sizeJustification": "Touches every layer (API, domain, persistence, MCP) and introduces one new domain concept (Edge + 8-value EdgeType vocab) plus a new schema/migration, but scopes out generic branch-overlay graph reads and the supersede/deactivate lifecycle to future goals.",
+  "meridianChunks": [
+    {"label": "IDEA-19", "status": "promoted", "layer": "functional"},
+    {"label": "IDEA-26", "status": "promoted", "layer": "functional"},
+    {"label": "IDEA-36", "status": "promoted", "layer": "domain"},
+    {"label": "IDEA-37", "status": "promoted", "layer": "domain"},
+    {"label": "IDEA-38", "status": "promoted", "layer": "domain"},
+    {"label": "IDEA-9", "status": "promoted", "layer": "MCP"},
+    {"label": "IDEA-52", "status": "promoted", "layer": "API"},
+    {"label": "IDEA-34", "status": "promoted", "layer": "API"},
+    {"label": "IDEA-31", "status": "promoted", "layer": "persistence"},
+    {"label": "IDEA-32", "status": "promoted", "layer": "persistence"},
+    {"label": "IDEA-33", "status": "promoted", "layer": "persistence"},
+    {"label": "IDEA-44", "status": "promoted", "layer": "persistence"}
+  ],
+  "scopeNotes": [
+    "No generic branch-overlay/UNION graph read this goal; only a narrow ChunkRepository.findByLabel(label, branchId) for edge-endpoint existence validation.",
+    "No 'or mainline' resolution: endpoint validation is branch-local only (same branchId, or both branchless-draft when branchId is omitted). The no-branchId path is temporary, resolves only the current branchless-draft scope, and has no draft-vs-promoted precedence logic; must be revisited once a real promotion pipeline exists.",
+    "No supersede/deactivate command this goal: schema/domain model EdgeStatus and supersededByEdgeId for future readiness, but only 'active' edges are ever created; supersededByEdgeId is always null in responses this goal."
+  ],
+  "subGoals": [
+    {
+      "id": "SG1",
+      "layer": "domain",
+      "dependsOn": [],
+      "objective": "Implement Edge entity with EdgeType (8-value) and EdgeStatus (3-value) closed vocabularies and validation invariants.",
+      "acceptanceCriteria": [
+        "EdgeType is a closed enum: refines, depends-on, contradicts, derives-from, blocks, implements, constrains, feedback-on.",
+        "EdgeStatus is a closed enum: active, superseded, deactivated; this goal's write path only ever produces active.",
+        "Edge entity fields (all camelCase): id, fromChunkLabel, toChunkLabel, type, status (defaults 'active'), discipline, branchId?, originBranchId?, supersededByEdgeId? (always undefined this goal), createdByStakeholderId, updatedByStakeholderId, createdAt, updatedAt.",
+        "Edge entity rejects blank fromChunkLabel/toChunkLabel, fromChunkLabel === toChunkLabel, invalid type, invalid discipline, and blank createdByStakeholderId by throwing.",
+        "On initial creation, updatedByStakeholderId defaults to the same value as createdByStakeholderId (the incoming stakeholderId), mirroring Chunk's existing creation behavior.",
+        "Unit tests cover valid construction and each rejection case."
+      ],
+      "verification": "pnpm test:store",
+      "status": "done"
+    },
+    {
+      "id": "SG2",
+      "layer": "persistence/infra",
+      "dependsOn": ["SG1"],
+      "objective": "Add authoritative edges table with supersede-ready schema/indexes, EdgeRepository, and a narrow ChunkRepository.findByLabel for endpoint validation.",
+      "acceptanceCriteria": [
+        "Migration creates edges(id, from_chunk_label, to_chunk_label, type, status, discipline, branch_id, origin_branch_id, superseded_by_edge_id, created_by_stakeholder_id, updated_by_stakeholder_id, created_at, updated_at) per the authoritative schema.",
+        "idx_edges_branch_lookup, idx_edges_mainline (unique), and idx_edges_branch_active (unique) indexes are created exactly per the authoritative schema.",
+        "EdgeRepository implements create(edge) and findById(id) only; no generic list/overlay-read method.",
+        "ChunkRepository gains findByLabel(label, branchId) scoped to branch_id (or IS NULL when branchId is undefined), returning undefined when not found.",
+        "Integration tests against containerized Postgres cover migration apply, create/findById round-trip, unique-index rejection of a duplicate active edge, and findByLabel branch-scoped/branchless/not-found cases."
+      ],
+      "verification": "pnpm test:store",
+      "status": "done"
+    },
+    {
+      "id": "SG3",
+      "layer": "API",
+      "dependsOn": ["SG2"],
+      "objective": "Expose POST /edges and GET /edges/:id enforcing branch-local endpoint existence and the single-active-edge invariant.",
+      "acceptanceCriteria": [
+        "POST /edges accepts { fromChunkLabel, toChunkLabel, type, discipline, stakeholderId, branchId? }.",
+        "Returns 400 for missing/blank required fields, invalid type/discipline, or fromChunkLabel === toChunkLabel.",
+        "When branchId is present: 404 if branch missing, 409 if branch.discipline !== request.discipline, 409 if branch.status !== 'draft'.",
+        "Both fromChunkLabel and toChunkLabel must resolve via ChunkRepository.findByLabel in the same scope (same branchId, or both branchless); 404 if either does not resolve.",
+        "A duplicate active edge (same from/to/type/branch scope) is rejected with 409.",
+        "GET /edges/:id returns the full edge shape including supersededByEdgeId (always null this goal); 404 if not found.",
+        "e2e tests cover successful branch-scoped creation, successful branchless creation, and each 400/404/409 case."
+      ],
+      "verification": "pnpm test:store",
+      "status": "done"
+    },
+    {
+      "id": "SG4",
+      "layer": "MCP",
+      "dependsOn": ["SG3"],
+      "objective": "Add create-edge MCP tool mirroring create-branch's fetch-and-forward pattern.",
+      "acceptanceCriteria": [
+        "create-edge tool validates fromChunkLabel/toChunkLabel/type/discipline/stakeholderId as non-empty strings (branchId optional), forwards to POST /edges, never invents a stakeholder identity.",
+        "Store 4xx errors are surfaced as a typed validation error (e.g. CreateEdgeValidationError), not swallowed.",
+        "Vocabulary/invariant validation is not duplicated in the tool.",
+        "Unit tests cover valid parsing, missing-field rejection, and mocked success/error forwarding."
+      ],
+      "verification": "pnpm test:mcp",
+      "status": "done"
+    },
+    {
+      "id": "SG5",
+      "layer": "docker-e2e",
+      "dependsOn": ["SG4"],
+      "objective": "Exercise typed edge creation (HTTP and MCP) against the real containerized store.",
+      "acceptanceCriteria": [
+        "docker compose up --build spoolstore succeeds.",
+        "Over real HTTP: create a branch, create two chunks scoped to it, then POST /edges referencing both labels and that branchId succeeds; GET /edges/:id reflects it.",
+        "Negative case: repeating the same POST /edges is rejected with 409.",
+        "Negative case: POST /edges referencing a non-existent toChunkLabel in that branch scope is rejected with 404.",
+        "With spoolstore running via compose, a separately-started apps/mcp process (pointed at that store via HARNESS_URL) runs the create-edge MCP tool to create an edge between two chunks created via the capture-chunk MCP tool, confirmed via HTTP readback."
+      ],
+      "verification": "manual/scripted HTTP exercise (curl or equivalent) plus MCP tool invocation against the running spoolstore container (not satisfied by unit/in-process tests alone)",
+      "status": "done"
+    }
+  ]
+}
+</script>
+
+<script>
+  mermaid.initialize({ startOnLoad: true, theme: 'neutral' });
+  (function () {
+    var data = JSON.parse(document.getElementById('goal-data').textContent);
+    var statusClass = { open: 'badge-open', 'in-progress': 'badge-in-progress', done: 'badge-done', blocked: 'badge-blocked' };
+    var goalBadge = document.getElementById('goal-status-badge');
+    goalBadge.textContent = data.status;
+    goalBadge.className = 'badge ' + (statusClass[data.status] || 'badge-open');
+    data.subGoals.forEach(function (sg) {
+      var el = document.getElementById('d-' + sg.id);
+      if (!el) return;
+      var badge = el.querySelector('.badge');
+      if (badge) {
+        badge.textContent = sg.status;
+        badge.className = 'badge ' + (statusClass[sg.status] || 'badge-open');
+      }
+    });
+  })();
+</script>
+
+</body>
+</html>
