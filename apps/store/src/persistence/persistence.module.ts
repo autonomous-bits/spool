@@ -5,6 +5,7 @@ import { ARTIFACT_BLOB_STORE } from './artifact-blob-store.token.js';
 import { BranchRepository } from './branch.repository.js';
 import { ChunkArtifactRepository } from './chunk-artifact.repository.js';
 import { ChunkRepository } from './chunk.repository.js';
+import { DeliveryAttemptRepository } from './delivery-attempt.repository.js';
 import { DeliverySubscriptionRepository } from './delivery-subscription.repository.js';
 import { EdgeRepository } from './edge.repository.js';
 import { FeedbackNotificationRepository } from './feedback-notification.repository.js';
@@ -55,6 +56,7 @@ class PgPoolProvider implements OnApplicationShutdown {
     SuggestionRepository,
     ArtifactRepository,
     ChunkArtifactRepository,
+    DeliveryAttemptRepository,
     VerificationSignalRepository,
     FeedbackNotificationRepository,
     WorkspaceRepository,
@@ -70,6 +72,7 @@ class PgPoolProvider implements OnApplicationShutdown {
     SuggestionRepository,
     ArtifactRepository,
     ChunkArtifactRepository,
+    DeliveryAttemptRepository,
     VerificationSignalRepository,
     FeedbackNotificationRepository,
     WorkspaceRepository,

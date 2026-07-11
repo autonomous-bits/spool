@@ -1,7 +1,9 @@
+import { randomUUID } from 'node:crypto';
 import type { Pool, QueryResult, QueryResultRow } from 'pg';
 import { Inject, Injectable } from '@nestjs/common';
 import { Branch } from '../domain/branch.js';
 import { DivergencePoint } from '../domain/divergence-point.js';
+import { DeliveryAttemptRepository } from './delivery-attempt.repository.js';
 import { PG_POOL } from './pg-pool.token.js';
 
 export interface BranchRow extends QueryResultRow {
@@ -38,6 +40,10 @@ interface EdgeIdentityRow extends QueryResultRow {
 interface ChunkArtifactIdentityRow extends QueryResultRow {
   chunk_label: string;
   artifact_id: string;
+}
+
+interface DeliverySubscriptionIdRow extends QueryResultRow {
+  id: string;
 }
 
 /**
@@ -87,7 +93,12 @@ export function toBranch(row: BranchRow): Branch {
  */
 @Injectable()
 export class BranchRepository {
-  constructor(@Inject(PG_POOL) private readonly pool: Pool) {}
+  constructor(
+    @Inject(PG_POOL) private readonly pool: Pool,
+    private readonly deliveryAttemptRepository: DeliveryAttemptRepository = new DeliveryAttemptRepository(
+      pool,
+    ),
+  ) {}
 
   /**
    * Persists a newly-constructed Branch as a draft and returns the persisted entity
@@ -464,6 +475,31 @@ export class BranchRepository {
       const mergedRow = mergedResult.rows[0];
       if (mergedRow === undefined) {
         throw new Error('BranchRepository.merge: UPDATE ... RETURNING * produced no row');
+      }
+      if (mergedRow.merged_at === null) {
+        throw new Error('BranchRepository.merge: merged row had null merged_at after merge update');
+      }
+
+      const matchingSubscriptions: QueryResult<DeliverySubscriptionIdRow> =
+        await client.query<DeliverySubscriptionIdRow>(
+          `SELECT id
+             FROM delivery_subscriptions
+            WHERE workspace_id = $1
+              AND is_active = true
+              AND (discipline_filter IS NULL OR discipline_filter ? $2)`,
+          [workspaceId, branchRow.discipline],
+        );
+      const mergeEventId = randomUUID();
+      for (const subscriptionRow of matchingSubscriptions.rows) {
+        await this.deliveryAttemptRepository.createPending(
+          {
+            subscriptionId: subscriptionRow.id,
+            mergeEventId,
+            branchId,
+            mergedAt: mergedRow.merged_at,
+          },
+          client,
+        );
       }
 
       await client.query('COMMIT');

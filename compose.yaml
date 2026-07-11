@@ -18,6 +18,11 @@ services:
       # (github-oauth-stub) below instead of live github.com, per G04.SG5's Docker e2e scope note.
       GITHUB_OAUTH_TOKEN_URL: http://github-oauth-stub:4001/login/oauth/access_token
       GITHUB_USER_API_URL: http://github-oauth-stub:4001/user
+      # Trusts the webhook-receiver-stub's self-signed cert (below) so DeliveryWorkerService's
+      # outbound fetch (G14.SG3) can complete a genuine TLS handshake against it; the same cert
+      # is baked into this image too since apps/store/docker/ is inside the Dockerfile's COPY . .
+      # context (see apps/store/docker/webhook-receiver-stub/cert.pem).
+      NODE_EXTRA_CA_CERTS: /usr/src/app/docker/webhook-receiver-stub/cert.pem
     ports:
       - 3002:3000
     volumes:
@@ -26,6 +31,8 @@ services:
       postgres:
         condition: service_healthy
       github-oauth-stub:
+        condition: service_started
+      webhook-receiver-stub:
         condition: service_started
 
   # Stands in for github.com's OAuth token-exchange endpoint and api.github.com's /user endpoint
@@ -40,6 +47,19 @@ services:
       OAUTH_STUB_GITHUB_LOGIN: spool-e2e-oauth-fixture
     ports:
       - 4001:4001
+
+  # TLS-terminating stand-in for a real downstream consumer's HTTPS webhook endpoint, used only
+  # by G14.SG4's Docker end-to-end exercise (DeliverySubscription.url requires https://, so
+  # DeliveryWorkerService's outbound fetch needs a genuine TLS handshake to exercise). See
+  # apps/store/docker/webhook-receiver-stub/server.mjs.
+  webhook-receiver-stub:
+    image: spool-webhook-receiver-stub
+    build:
+      context: apps/store/docker/webhook-receiver-stub
+    environment:
+      PORT: "4443"
+    ports:
+      - 4443:4443
 
   postgres:
     image: postgres:16-alpine

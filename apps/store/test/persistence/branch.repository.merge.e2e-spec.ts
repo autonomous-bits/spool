@@ -7,21 +7,25 @@ import type { Artifact } from '../../src/domain/artifact.js';
 import { Branch } from '../../src/domain/branch.js';
 import { Chunk } from '../../src/domain/chunk.js';
 import { ChunkArtifactAssociation } from '../../src/domain/chunk-artifact-association.js';
+import { DeliverySubscription } from '../../src/domain/delivery-subscription.js';
 import { Edge } from '../../src/domain/edge.js';
+import { Workspace } from '../../src/domain/workspace.js';
 import { ArtifactRepository } from '../../src/persistence/artifact.repository.js';
 import { BranchRepository } from '../../src/persistence/branch.repository.js';
 import { ChunkArtifactRepository } from '../../src/persistence/chunk-artifact.repository.js';
 import { ChunkRepository } from '../../src/persistence/chunk.repository.js';
+import { DeliverySubscriptionRepository } from '../../src/persistence/delivery-subscription.repository.js';
 import { EdgeRepository } from '../../src/persistence/edge.repository.js';
 import { BOOTSTRAP_STAKEHOLDER_ID } from '../../src/persistence/bootstrap-stakeholder.js';
 import { LocalFileBlobStore } from '../../src/persistence/local-file-blob-store.js';
+import { WorkspaceRepository } from '../../src/persistence/workspace.repository.js';
 import { setUpTestDatabase, type TestDatabase } from '../support/test-database.js';
 
-const WORKSPACE_ID = '00000000-0000-0000-0000-00000000d0fa';
+let workspaceId = '';
 
 function buildBranch(overrides: Partial<ConstructorParameters<typeof Branch>[0]> = {}): Branch {
   return new Branch({
-    workspaceId: WORKSPACE_ID,
+    workspaceId,
     name: `branch-${Math.random().toString(36).slice(2, 10)}`,
     discipline: 'engineering',
     createdByStakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
@@ -31,7 +35,7 @@ function buildBranch(overrides: Partial<ConstructorParameters<typeof Branch>[0]>
 
 function buildChunk(overrides: Partial<ConstructorParameters<typeof Chunk>[0]> = {}): Chunk {
   return new Chunk({
-    workspaceId: WORKSPACE_ID,
+    workspaceId,
     label: `chunk-${Math.random().toString(36).slice(2, 10)}`,
     content: 'Some atomic idea content.',
     discipline: 'engineering',
@@ -44,7 +48,7 @@ function buildChunk(overrides: Partial<ConstructorParameters<typeof Chunk>[0]> =
 
 function buildEdge(overrides: Partial<ConstructorParameters<typeof Edge>[0]> = {}): Edge {
   return new Edge({
-    workspaceId: WORKSPACE_ID,
+    workspaceId,
     fromChunkLabel: `from-${Math.random().toString(36).slice(2, 10)}`,
     toChunkLabel: `to-${Math.random().toString(36).slice(2, 10)}`,
     type: 'depends-on',
@@ -59,7 +63,18 @@ function buildAssociation(
     Pick<ConstructorParameters<typeof ChunkArtifactAssociation>[0], 'chunkLabel' | 'artifactId'>,
 ): ChunkArtifactAssociation {
   return new ChunkArtifactAssociation({
-    workspaceId: WORKSPACE_ID,
+    workspaceId,
+    createdByStakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
+    ...overrides,
+  });
+}
+
+function buildSubscription(
+  overrides: Partial<ConstructorParameters<typeof DeliverySubscription>[0]> = {},
+): DeliverySubscription {
+  return new DeliverySubscription({
+    workspaceId,
+    url: 'https://example.com/webhook',
     createdByStakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
     ...overrides,
   });
@@ -72,6 +87,8 @@ describe('BranchRepository.merge (containerized Postgres)', () => {
   let chunkRepository: ChunkRepository;
   let edgeRepository: EdgeRepository;
   let chunkArtifactRepository: ChunkArtifactRepository;
+  let deliverySubscriptionRepository: DeliverySubscriptionRepository;
+  let workspaceRepository: WorkspaceRepository;
   let basePath: string;
   let artifactRepository: ArtifactRepository;
   let artifactA: Artifact;
@@ -83,6 +100,8 @@ describe('BranchRepository.merge (containerized Postgres)', () => {
     chunkRepository = new ChunkRepository(pool);
     edgeRepository = new EdgeRepository(pool);
     chunkArtifactRepository = new ChunkArtifactRepository(pool);
+    deliverySubscriptionRepository = new DeliverySubscriptionRepository(pool);
+    workspaceRepository = new WorkspaceRepository(pool);
   });
 
   afterAll(async () => {
@@ -90,10 +109,17 @@ describe('BranchRepository.merge (containerized Postgres)', () => {
   });
 
   beforeEach(async () => {
+    const workspace = await workspaceRepository.createWithFirstMember(
+      new Workspace({
+        name: `branch-merge-workspace-${Math.random().toString(36).slice(2, 10)}`,
+        createdByStakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
+      }),
+    );
+    workspaceId = workspace.id;
     basePath = await mkdtemp(join(tmpdir(), 'spool-branch-merge-artifacts-test-'));
     artifactRepository = new ArtifactRepository(pool, new LocalFileBlobStore({ basePath }));
     artifactA = await artifactRepository.create({
-      workspaceId: WORKSPACE_ID,
+      workspaceId,
       content: Buffer.from('artifact A'),
       mimeType: 'text/plain',
       createdByStakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
@@ -111,12 +137,25 @@ describe('BranchRepository.merge (containerized Postgres)', () => {
   }
 
   async function verifyBranch(branchId: string): Promise<Branch> {
-    await branchRepository.submit(branchId, WORKSPACE_ID);
-    const verified = await branchRepository.verify(branchId, WORKSPACE_ID);
+    await branchRepository.submit(branchId, workspaceId);
+    const verified = await branchRepository.verify(branchId, workspaceId);
     if (verified === undefined) {
       throw new Error('verifyBranch: verify unexpectedly returned undefined');
     }
     return verified;
+  }
+
+  async function listDeliveryAttempts(branchId: string): Promise<
+    Array<{ subscription_id: string; merge_event_id: string }>
+  > {
+    const result = await pool.query<{ subscription_id: string; merge_event_id: string }>(
+      `SELECT subscription_id, merge_event_id
+         FROM delivery_attempts
+        WHERE branch_id = $1
+        ORDER BY subscription_id ASC`,
+      [branchId],
+    );
+    return result.rows;
   }
 
   it('merges a verified branch with no mainline collisions: promotes chunks/edges and marks branch merged', async () => {
@@ -134,7 +173,7 @@ describe('BranchRepository.merge (containerized Postgres)', () => {
     );
     const branch = await verifyBranch(draftBranch.id);
 
-    const result = await branchRepository.merge(branch.id, WORKSPACE_ID, BOOTSTRAP_STAKEHOLDER_ID);
+    const result = await branchRepository.merge(branch.id, workspaceId, BOOTSTRAP_STAKEHOLDER_ID);
 
     expect(result?.kind).toBe('merged');
     if (result?.kind !== 'merged') {
@@ -170,6 +209,56 @@ describe('BranchRepository.merge (containerized Postgres)', () => {
     expect(branchRow.rows[0]?.merged_by_stakeholder_id).toBe(BOOTSTRAP_STAKEHOLDER_ID);
   });
 
+  it('fans out one merge event id across all matching subscriptions', async () => {
+    const draftBranch = await createDraftBranch();
+    await chunkRepository.create(
+      buildChunk({ branchId: draftBranch.id, originBranchId: draftBranch.id }),
+    );
+    const matchingA = await deliverySubscriptionRepository.create(buildSubscription());
+    const matchingB = await deliverySubscriptionRepository.create(
+      buildSubscription({ disciplineFilter: ['engineering', 'security'] }),
+    );
+    const branch = await verifyBranch(draftBranch.id);
+
+    const result = await branchRepository.merge(branch.id, workspaceId, BOOTSTRAP_STAKEHOLDER_ID);
+
+    expect(result?.kind).toBe('merged');
+
+    const attempts = await listDeliveryAttempts(branch.id);
+    expect(attempts.map((attempt) => attempt.subscription_id)).toEqual(
+      [matchingA.id, matchingB.id].sort(),
+    );
+    expect(new Set(attempts.map((attempt) => attempt.merge_event_id)).size).toBe(1);
+  });
+
+  it('matches only active subscriptions whose discipline filter is absent or contains the branch discipline', async () => {
+    const draftBranch = await createDraftBranch({ discipline: 'security' });
+    await chunkRepository.create(
+      buildChunk({ branchId: draftBranch.id, originBranchId: draftBranch.id }),
+    );
+    const noFilter = await deliverySubscriptionRepository.create(buildSubscription());
+    const matchingFilter = await deliverySubscriptionRepository.create(
+      buildSubscription({ disciplineFilter: ['engineering', 'security'] }),
+    );
+    await deliverySubscriptionRepository.create(
+      buildSubscription({ disciplineFilter: ['product', 'design'] }),
+    );
+    await deliverySubscriptionRepository.create(
+      buildSubscription({ disciplineFilter: ['security'], isActive: false }),
+    );
+    const branch = await verifyBranch(draftBranch.id);
+
+    const result = await branchRepository.merge(branch.id, workspaceId, BOOTSTRAP_STAKEHOLDER_ID);
+
+    expect(result?.kind).toBe('merged');
+
+    const attempts = await listDeliveryAttempts(branch.id);
+    expect(attempts.map((attempt) => attempt.subscription_id)).toEqual([
+      matchingFilter.id,
+      noFilter.id,
+    ].sort());
+  });
+
   it('rejects a merge in full when a branch chunk label collides with a promoted mainline chunk', async () => {
     const collidingLabel = `collide-chunk-${Math.random().toString(36).slice(2, 10)}`;
     await chunkRepository.create(
@@ -182,7 +271,7 @@ describe('BranchRepository.merge (containerized Postgres)', () => {
     );
     const branch = await verifyBranch(draftBranch.id);
 
-    const result = await branchRepository.merge(branch.id, WORKSPACE_ID, BOOTSTRAP_STAKEHOLDER_ID);
+    const result = await branchRepository.merge(branch.id, workspaceId, BOOTSTRAP_STAKEHOLDER_ID);
 
     expect(result?.kind).toBe('conflict');
 
@@ -220,7 +309,7 @@ describe('BranchRepository.merge (containerized Postgres)', () => {
     );
     const branch = await verifyBranch(draftBranch.id);
 
-    const result = await branchRepository.merge(branch.id, WORKSPACE_ID, BOOTSTRAP_STAKEHOLDER_ID);
+    const result = await branchRepository.merge(branch.id, workspaceId, BOOTSTRAP_STAKEHOLDER_ID);
 
     expect(result?.kind).toBe('conflict');
 
@@ -244,7 +333,7 @@ describe('BranchRepository.merge (containerized Postgres)', () => {
       buildChunk({ branchId: branch.id, originBranchId: branch.id }),
     );
 
-    const result = await branchRepository.merge(branch.id, WORKSPACE_ID, BOOTSTRAP_STAKEHOLDER_ID);
+    const result = await branchRepository.merge(branch.id, workspaceId, BOOTSTRAP_STAKEHOLDER_ID);
 
     expect(result).toBeUndefined();
 
@@ -290,7 +379,7 @@ describe('BranchRepository.merge (containerized Postgres)', () => {
     );
     const branch = await verifyBranch(draftBranch.id);
 
-    const result = await branchRepository.merge(branch.id, WORKSPACE_ID, BOOTSTRAP_STAKEHOLDER_ID);
+    const result = await branchRepository.merge(branch.id, workspaceId, BOOTSTRAP_STAKEHOLDER_ID);
 
     expect(result?.kind).toBe('merged');
 
@@ -324,7 +413,7 @@ describe('BranchRepository.merge (containerized Postgres)', () => {
     );
     const branch = await verifyBranch(draftBranch.id);
 
-    const result = await branchRepository.merge(branch.id, WORKSPACE_ID, BOOTSTRAP_STAKEHOLDER_ID);
+    const result = await branchRepository.merge(branch.id, workspaceId, BOOTSTRAP_STAKEHOLDER_ID);
 
     expect(result?.kind).toBe('merged');
 
@@ -351,7 +440,7 @@ describe('BranchRepository.merge (containerized Postgres)', () => {
     );
     const branch = await verifyBranch(draftBranch.id);
 
-    const result = await branchRepository.merge(branch.id, WORKSPACE_ID, BOOTSTRAP_STAKEHOLDER_ID);
+    const result = await branchRepository.merge(branch.id, workspaceId, BOOTSTRAP_STAKEHOLDER_ID);
 
     expect(result?.kind).toBe('conflict');
 
@@ -369,7 +458,7 @@ describe('BranchRepository.merge (containerized Postgres)', () => {
     expect(branchRow.rows[0]?.merged_at).toBeNull();
   });
 
-  it('a simulated mid-transaction failure leaves the database in its pre-merge state', async () => {
+  it('a delivery-attempt fan-out failure rolls back the whole merge transaction', async () => {
     const draftBranch = await createDraftBranch();
     const chunk = await chunkRepository.create(
       buildChunk({ branchId: draftBranch.id, originBranchId: draftBranch.id }),
@@ -382,11 +471,11 @@ describe('BranchRepository.merge (containerized Postgres)', () => {
         originBranchId: draftBranch.id,
       }),
     );
+    await deliverySubscriptionRepository.create(buildSubscription());
     const branch = await verifyBranch(draftBranch.id);
 
-    // Wrap the real pool so the finalizing "mark branch merged" UPDATE fails after chunks/edges
-    // have already been promoted within the same transaction — a genuine mid-transaction failure
-    // distinct from the pre-checked conflict path, proving the whole merge rolls back atomically.
+    // Wrap the real pool so the fan-out insert fails after the branch/chunk/edge updates have run
+    // within the same transaction, proving the whole merge still rolls back atomically.
     const poisonedPool: Pick<Pool, 'connect'> = {
       connect: async (): Promise<PoolClient> => {
         const client = await pool.connect();
@@ -401,8 +490,8 @@ describe('BranchRepository.merge (containerized Postgres)', () => {
           ...args: Parameters<PoolClient['query']>
         ): Promise<QueryResult> => {
           const sql = typeof args[0] === 'string' ? args[0] : undefined;
-          if (sql?.includes("SET status = 'merged'")) {
-            return Promise.reject(new Error('Simulated mid-transaction failure'));
+          if (sql?.includes('INSERT INTO delivery_attempts')) {
+            return Promise.reject(new Error('Simulated fan-out failure'));
           }
           return originalQuery(...args);
         };
@@ -413,8 +502,8 @@ describe('BranchRepository.merge (containerized Postgres)', () => {
     const poisonedBranchRepository = new BranchRepository(poisonedPool as Pool);
 
     await expect(
-      poisonedBranchRepository.merge(branch.id, WORKSPACE_ID, BOOTSTRAP_STAKEHOLDER_ID),
-    ).rejects.toThrow('Simulated mid-transaction failure');
+      poisonedBranchRepository.merge(branch.id, workspaceId, BOOTSTRAP_STAKEHOLDER_ID),
+    ).rejects.toThrow('Simulated fan-out failure');
 
     const branchRow = await pool.query<{ status: string; merged_at: Date | null }>(
       'SELECT status, merged_at FROM branches WHERE id = $1',
@@ -435,5 +524,20 @@ describe('BranchRepository.merge (containerized Postgres)', () => {
       [edge.id],
     );
     expect(edgeRow.rows[0]?.branch_id).toBe(branch.id);
+
+    expect(await listDeliveryAttempts(branch.id)).toEqual([]);
+  });
+
+  it('treats zero matching subscriptions as a successful no-op fan-out', async () => {
+    const draftBranch = await createDraftBranch({ discipline: 'governance' });
+    await chunkRepository.create(
+      buildChunk({ branchId: draftBranch.id, originBranchId: draftBranch.id }),
+    );
+    const branch = await verifyBranch(draftBranch.id);
+
+    const result = await branchRepository.merge(branch.id, workspaceId, BOOTSTRAP_STAKEHOLDER_ID);
+
+    expect(result?.kind).toBe('merged');
+    expect(await listDeliveryAttempts(branch.id)).toEqual([]);
   });
 });

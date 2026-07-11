@@ -10,8 +10,6 @@ import { VerificationSignalRepository } from '../../src/persistence/verification
 import { WorkspaceRepository } from '../../src/persistence/workspace.repository.js';
 import { setUpTestDatabase, type TestDatabase } from '../support/test-database.js';
 
-const WORKSPACE_ID = '00000000-0000-0000-0000-00000000d0fa';
-
 async function seedStakeholder(
   pool: Pool,
   overrides: Partial<Pick<StakeholderRecord, 'discipline'>> = {},
@@ -38,7 +36,7 @@ async function addWorkspaceMember(pool: Pool, workspaceId: string, stakeholderId
   );
 }
 
-function buildBranch(workspaceId: string = WORKSPACE_ID): Branch {
+function buildBranch(workspaceId: string): Branch {
   return new Branch({
     workspaceId,
     name: `signal-branch-${Math.random().toString(36).slice(2, 10)}`,
@@ -66,7 +64,16 @@ describe('VerificationSignalRepository (containerized Postgres)', () => {
     await database.close();
   });
 
-  async function createSubmittedBranch(workspaceId: string = WORKSPACE_ID): Promise<Branch> {
+  async function createWorkspace(namePrefix: string): Promise<Workspace> {
+    return workspaceRepository.createWithFirstMember(
+      new Workspace({
+        name: `${namePrefix}-${Math.random().toString(36).slice(2, 10)}`,
+        createdByStakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
+      }),
+    );
+  }
+
+  async function createSubmittedBranch(workspaceId: string): Promise<Branch> {
     const created = await branchRepository.create(buildBranch(workspaceId));
     const submitted = await branchRepository.submit(created.id, workspaceId);
     if (submitted === undefined) {
@@ -77,15 +84,16 @@ describe('VerificationSignalRepository (containerized Postgres)', () => {
   }
 
   it('create fans out one unread notification to every member of the branch workspace at signal time', async () => {
+    const workspace = await createWorkspace('signal-workspace');
     const additionalStakeholderA = await seedStakeholder(pool);
     const additionalStakeholderB = await seedStakeholder(pool, { discipline: null });
-    await addWorkspaceMember(pool, WORKSPACE_ID, additionalStakeholderA.id);
-    await addWorkspaceMember(pool, WORKSPACE_ID, additionalStakeholderB.id);
-    const branch = await createSubmittedBranch();
+    await addWorkspaceMember(pool, workspace.id, additionalStakeholderA.id);
+    await addWorkspaceMember(pool, workspace.id, additionalStakeholderB.id);
+    const branch = await createSubmittedBranch(workspace.id);
 
     const result = await verificationSignalRepository.create({
       branchId: branch.id,
-      workspaceId: WORKSPACE_ID,
+      workspaceId: workspace.id,
       verifierName: 'ci-evaluator',
       status: 'pass',
       reason: 'all checks green',
@@ -95,7 +103,7 @@ describe('VerificationSignalRepository (containerized Postgres)', () => {
     if (result.kind !== 'created') {
       throw new Error('expected created result');
     }
-    expect(result.signal.workspaceId).toBe(WORKSPACE_ID);
+    expect(result.signal.workspaceId).toBe(workspace.id);
 
     const notifications = await pool.query<{
       branch_id: string;
@@ -114,14 +122,14 @@ describe('VerificationSignalRepository (containerized Postgres)', () => {
     const memberIds = (
       await pool.query<{ stakeholder_id: string }>(
         'SELECT stakeholder_id FROM workspace_memberships WHERE workspace_id = $1 ORDER BY stakeholder_id ASC',
-        [WORKSPACE_ID],
+        [workspace.id],
       )
     ).rows.map((row) => row.stakeholder_id);
 
     expect(notifications.rows).toHaveLength(memberIds.length);
     expect(notifications.rows.map((row) => row.stakeholder_id)).toEqual(memberIds);
     expect(notifications.rows.every((row) => row.branch_id === branch.id)).toBe(true);
-    expect(notifications.rows.every((row) => row.workspace_id === WORKSPACE_ID)).toBe(true);
+    expect(notifications.rows.every((row) => row.workspace_id === workspace.id)).toBe(true);
     expect(notifications.rows.every((row) => row.signal_id === result.signal.id)).toBe(true);
     expect(notifications.rows.every((row) => row.status === 'unread')).toBe(true);
     expect(memberIds).toContain(additionalStakeholderA.id);
@@ -129,19 +137,15 @@ describe('VerificationSignalRepository (containerized Postgres)', () => {
   });
 
   it('create does not notify stakeholders that belong to a different workspace', async () => {
-    const outsideWorkspace = await workspaceRepository.createWithFirstMember(
-      new Workspace({
-        name: `signal-outside-workspace-${Date.now()}`,
-        createdByStakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
-      }),
-    );
+    const branchWorkspace = await createWorkspace('signal-branch-workspace');
+    const outsideWorkspace = await createWorkspace('signal-outside-workspace');
     const outsideStakeholder = await seedStakeholder(pool);
     await addWorkspaceMember(pool, outsideWorkspace.id, outsideStakeholder.id);
-    const branch = await createSubmittedBranch();
+    const branch = await createSubmittedBranch(branchWorkspace.id);
 
     const result = await verificationSignalRepository.create({
       branchId: branch.id,
-      workspaceId: WORKSPACE_ID,
+      workspaceId: branchWorkspace.id,
       verifierName: 'human-reviewer',
       status: 'fail',
       reason: 'needs rework',
@@ -161,13 +165,9 @@ describe('VerificationSignalRepository (containerized Postgres)', () => {
   });
 
   it('returns not_found and inserts nothing when the workspace does not match the branch', async () => {
-    const otherWorkspace = await workspaceRepository.createWithFirstMember(
-      new Workspace({
-        name: `signal-mismatch-workspace-${Date.now()}`,
-        createdByStakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
-      }),
-    );
-    const branch = await createSubmittedBranch(WORKSPACE_ID);
+    const branchWorkspace = await createWorkspace('signal-branch-workspace');
+    const otherWorkspace = await createWorkspace('signal-mismatch-workspace');
+    const branch = await createSubmittedBranch(branchWorkspace.id);
 
     const result = await verificationSignalRepository.create({
       branchId: branch.id,
@@ -185,9 +185,10 @@ describe('VerificationSignalRepository (containerized Postgres)', () => {
   });
 
   it('returns not_found for an unknown branch id', async () => {
+    const workspace = await createWorkspace('signal-missing-branch-workspace');
     const result = await verificationSignalRepository.create({
       branchId: '00000000-0000-0000-0000-00000000dead',
-      workspaceId: WORKSPACE_ID,
+      workspaceId: workspace.id,
       verifierName: 'ci-evaluator',
       status: 'pass',
     });
@@ -196,13 +197,14 @@ describe('VerificationSignalRepository (containerized Postgres)', () => {
   });
 
   it('rolls back the entire transaction when the insert violates a database constraint', async () => {
-    const branch = await createSubmittedBranch();
+    const workspace = await createWorkspace('signal-rollback-workspace');
+    const branch = await createSubmittedBranch(workspace.id);
     const tooLongVerifierName = 'x'.repeat(300);
 
     await expect(
       verificationSignalRepository.create({
         branchId: branch.id,
-        workspaceId: WORKSPACE_ID,
+        workspaceId: workspace.id,
         verifierName: tooLongVerifierName,
         status: 'pass',
       }),
@@ -221,10 +223,11 @@ describe('VerificationSignalRepository (containerized Postgres)', () => {
   });
 
   it('findByBranchId is scoped by workspaceId', async () => {
-    const branch = await createSubmittedBranch();
+    const workspace = await createWorkspace('signal-find-branch-workspace');
+    const branch = await createSubmittedBranch(workspace.id);
     const created = await verificationSignalRepository.create({
       branchId: branch.id,
-      workspaceId: WORKSPACE_ID,
+      workspaceId: workspace.id,
       verifierName: 'ci-evaluator',
       status: 'pass',
     });
@@ -232,15 +235,10 @@ describe('VerificationSignalRepository (containerized Postgres)', () => {
       throw new Error('expected created result');
     }
 
-    const foundInWorkspace = await verificationSignalRepository.findByBranchId(branch.id, WORKSPACE_ID);
+    const foundInWorkspace = await verificationSignalRepository.findByBranchId(branch.id, workspace.id);
     expect(foundInWorkspace.map((signal) => signal.id)).toContain(created.signal.id);
 
-    const otherWorkspace = await workspaceRepository.createWithFirstMember(
-      new Workspace({
-        name: `signal-find-workspace-${Date.now()}`,
-        createdByStakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
-      }),
-    );
+    const otherWorkspace = await createWorkspace('signal-find-workspace');
     const foundInOtherWorkspace = await verificationSignalRepository.findByBranchId(
       branch.id,
       otherWorkspace.id,

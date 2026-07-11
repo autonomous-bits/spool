@@ -1,18 +1,20 @@
 ---
 name: select-next-goal
 description: >
-  Decides the single next Spool goal to implement by reconciling the current
-  repository implementation state with Meridian's product and architecture
-  direction. Always selects exactly one vertical-slice goal. Rates the goal's
-  size 1-5 and only decomposes it into an ordered, dependency-tracked list of
-  sub-goals when size is 3 or higher; smaller goals stay a single
-  implementation step. The goal always ends in a mandatory Docker end-to-end
+  Decides the single next Spool goal to implement by reconciling repository
+  implementation state with Meridian's product and architecture direction.
+  Always selects exactly one vertical-slice goal. Rates its size 1-5 and
+  decomposes it into an ordered, dependency-tracked sub-goal list only when
+  size is 3 or higher; smaller goals stay a single step. Inspects Meridian's
+  typed edges between candidate chunks as part of the fidelity check,
+  creating, retyping, or removing an edge when a relationship is missing,
+  mistyped, or stale. Always ends in a mandatory Docker end-to-end
   verification step. Renders the goal as a concise, interactive HTML artifact
-  with diagrams plus an embedded machine-readable data block, rubber-duck
-  rated for fidelity and clarity (1-5 each) and remediated until both score at
-  least 4. Surfaces and escalates any point where Meridian direction is
-  missing, draft-only, or conflicting instead of guessing, and stops to flag
-  the user if a sufficiently faithful and clear artifact cannot be produced.
+  with diagrams and an embedded machine-readable data block, rubber-duck
+  rated for fidelity and clarity (1-5 each) and remediated until both score
+  at least 4. Escalates when Meridian direction is missing, draft-only, or
+  conflicting instead of guessing, and stops if a sufficiently faithful and
+  clear artifact cannot be produced.
 tools:
   - view
   - grep
@@ -35,6 +37,9 @@ tools:
   - meridian-list-suggestions
   - meridian-inspect-suggestion
   - meridian-submit-feedback
+  - meridian-create-edge
+  - meridian-update-edge-type
+  - meridian-remove-edge
 ---
 
 # Select Next Goal
@@ -72,10 +77,12 @@ Then, for that workspace:
 
 1. `meridian-list-lanes` — understand the current structure of work lanes.
 2. `meridian-get-ready-queue` — this is the primary signal for "what's next"; it reflects Meridian's own prioritization.
-3. `meridian-search-chunks` / `meridian-get-neighbourhood` — expand around top ready-queue candidates to see related chunks (domain rules, API contracts, infra/persistence notes, edges to other concepts) that a vertical slice would need.
+3. `meridian-search-chunks` / `meridian-get-neighbourhood` — expand around top ready-queue candidates to see related chunks (domain rules, API contracts, infra/persistence notes, edges to other concepts) that a vertical slice would need. `meridian-get-neighbourhood` returns the typed edges themselves (not just the neighbouring chunks) — record each edge's type and direction, since Spool's core domain model is chunks plus typed relationships, and a vertical slice is only "coverable end to end" (Phase 3, criterion 4) if the relationships it depends on are actually present and correctly typed in Meridian.
 4. `meridian-get-chunk` — pull full detail (status, discipline, context kind) for every candidate chunk before relying on it.
 5. `meridian-get-context-package` — pull the compiled context bundle for the leading candidate feature; this is the fastest way to see whether Meridian already has a coherent, cross-layer story for it.
 6. `meridian-list-signals` / `meridian-inspect-signal` and `meridian-list-suggestions` / `meridian-inspect-suggestion` — check for open signals or suggestions that indicate unresolved tension, pending revisions, or known gaps touching your candidates. Do not ignore these to keep the search moving.
+
+Record, alongside each candidate chunk, the edges (type, direction, target chunk id) that connect it to other candidates — this feeds the Phase 4 fidelity check for the relationship layer and the Phase 3 "unlocking"/"coverable end to end" criteria.
 
 Record, per candidate chunk: id, status (`draft`/`approved`/`promoted`), discipline/context kind, and which architectural layer(s) it informs (API surface, domain, persistence/infra, MCP exposure).
 
@@ -98,16 +105,18 @@ Do not select a candidate purely because it is the only one with complete docume
 
 ## Phase 4 — Fidelity check: surface ambiguity before committing
 
-For the selected candidate, explicitly check each layer it would touch (API/URL surface, domain rules, persistence/infra, MCP exposure) against the chunks gathered in Phase 2. For each layer, classify it as:
+For the selected candidate, explicitly check each layer it would touch (API/URL surface, domain rules, persistence/infra, MCP exposure) plus the **relationship layer** (the typed edges, from Phase 2, that connect the candidate's chunks to the rest of the graph) against the chunks and edges gathered in Phase 2. For each layer, classify it as:
 
-- **Clear and ratified** — an `approved`/`promoted` chunk directly answers it.
+- **Clear and ratified** — an `approved`/`promoted` chunk (or, for the relationship layer, an existing correctly-typed edge) directly answers it.
 - **Clear but draft-only** — only a `draft` chunk answers it. Usable, but the eventual goal file MUST label it explicitly as unratified per the constitution's Meridian-authority clarification.
-- **Ambiguous or missing** — no chunk answers it, or chunks conflict.
+- **Ambiguous or missing** — no chunk answers it, chunks conflict, or (for the relationship layer) the edge connecting two chunks the slice depends on is absent, or is present but mistyped/misdirected.
 
 If any layer is **ambiguous or missing** for the selected candidate:
 
 1. Do not silently fill the gap with invented design. Do not fall back to a different candidate without saying so.
-2. Take an actual outgoing Meridian action per the constitution's escalation rule: use `meridian-submit-feedback` (or note a suggested chunk revision) describing precisely what is missing or conflicting and why it blocks this goal.
+2. Take an actual outgoing Meridian action per the constitution's escalation rule:
+   - For a missing or conflicting chunk: use `meridian-submit-feedback` (or note a suggested chunk revision) describing precisely what is missing or conflicting and why it blocks this goal.
+   - For a missing, mistyped, or misdirected edge between chunks the slice depends on: use `meridian-create-edge` to add the missing relationship, `meridian-update-edge-type` to correct a mistyped one, or `meridian-remove-edge` to retract an edge that no longer reflects Meridian's direction — each of these is itself the outgoing Meridian action; do not additionally file feedback for the same gap unless the correct edge type/direction is itself ambiguous, in which case escalate via `meridian-submit-feedback` instead of guessing.
 3. Use `ask_user` to present the specific ambiguity, the Meridian action you took, and ask whether to (a) wait for Meridian resolution, (b) proceed with an explicitly labeled open question in the goal file, or (c) pick a different candidate instead.
 4. Do not proceed to Phase 5 for that layer until the user has chosen a path. If the user chooses (b), the open question must be carried into the goal file's **Open Questions** section verbatim, not silently resolved.
 

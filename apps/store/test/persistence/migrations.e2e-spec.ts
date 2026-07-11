@@ -99,7 +99,7 @@ describe('store migrations (containerized Postgres)', () => {
     const migrationRows = await pool.query<{ count: string }>(
       'SELECT COUNT(*)::text AS count FROM schema_migrations',
     );
-    expect(migrationRows.rows[0]?.count).toBe('14');
+    expect(migrationRows.rows[0]?.count).toBe('15');
   });
 
   it('creates the suggestions table with the expected columns', async () => {

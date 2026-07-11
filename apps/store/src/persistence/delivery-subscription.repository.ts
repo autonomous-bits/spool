@@ -106,6 +106,22 @@ export class DeliverySubscriptionRepository {
   }
 
   /**
+   * Internal-only lookup by subscription id with NO workspace filter. This intentionally bypasses
+   * the normal tenant-scoped read path and exists only for trusted in-process infrastructure code
+   * (the delivery worker) that already obtained the id from a delivery_attempts row created by the
+   * tenant-scoped merge fan-out. Never expose this through controllers or MCP tools.
+   */
+  async findByIdUnscoped(id: string): Promise<DeliverySubscription | undefined> {
+    const result: QueryResult<DeliverySubscriptionRow> = await this.pool.query<DeliverySubscriptionRow>(
+      'SELECT * FROM delivery_subscriptions WHERE id = $1',
+      [id],
+    );
+
+    const row = result.rows[0];
+    return row === undefined ? undefined : toDeliverySubscription(row);
+  }
+
+  /**
    * Soft-deletes (`is_active = false`) a subscription, scoped to the given workspace. Returns the
    * updated subscription, or `undefined` if the id is unknown or belongs to a different workspace
    * (same indistinguishable-by-design behavior as `findById`).
