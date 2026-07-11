@@ -1,4 +1,6 @@
 import { BadRequestException, Body, Controller, Get, Headers, Param, Post, Query } from '@nestjs/common';
+import { SessionTokenService } from '../auth/session-token.service.js';
+import { verifySessionClaims } from '../auth/session-claims.helper.js';
 import type { ChunkResponse } from './chunk-response.dto.js';
 import { parseCreateChunkRequest } from './create-chunk-request.dto.js';
 import { ChunksService } from './chunks.service.js';
@@ -12,7 +14,42 @@ function requireStakeholderId(value: string | undefined): string {
 
 @Controller('chunks')
 export class ChunksController {
-  constructor(private readonly chunks: ChunksService) {}
+  constructor(
+    private readonly chunks: ChunksService,
+    private readonly sessionTokenService: SessionTokenService,
+  ) {}
+
+  @Get()
+  async search(
+    @Headers('authorization') authorizationHeader: unknown,
+    @Headers('x-workspace-id') headerWorkspaceId: string | undefined,
+    @Query('discipline') discipline?: string,
+    @Query('type') chunkType?: string,
+    @Query('status') status?: string,
+    @Query('contextKind') contextKind?: string,
+    @Query('branchId') branchId?: string,
+    @Query('q') q?: string,
+    @Query('limit') limitStr?: string,
+    @Query('cursor') cursor?: string,
+  ): Promise<{ chunks: ChunkResponse[]; nextCursor: string | null }> {
+    const claims = verifySessionClaims(authorizationHeader, this.sessionTokenService);
+    const limit = limitStr !== undefined ? parseInt(limitStr, 10) : 20;
+
+    return this.chunks.search(
+      {
+        discipline,
+        chunkType,
+        status,
+        contextKind,
+        branchId,
+        q,
+        workspaceId: headerWorkspaceId,
+      },
+      isNaN(limit) ? 20 : limit,
+      claims,
+      cursor,
+    );
+  }
 
   @Post()
   async create(

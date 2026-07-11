@@ -3,6 +3,7 @@ import { ConflictException, Inject, Injectable } from '@nestjs/common';
 import { Chunk } from '../domain/chunk.js';
 import type { ChunkStatus } from '../domain/chunk.js';
 import { PG_POOL } from './pg-pool.token.js';
+import { Buffer } from 'node:buffer';
 
 interface ChunkRow extends QueryResultRow {
   id: string;
@@ -38,6 +39,43 @@ function toChunk(row: ChunkRow): Chunk {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   });
+}
+
+export interface SearchChunksFilters {
+  discipline?: string;
+  chunkType?: string;
+  status?: string;
+  contextKind?: string;
+  branchId?: string;
+  q?: string;
+  workspaceId: string;
+}
+
+export interface ChunkSearchCursor {
+  tieBreakDate: string;
+  tieBreakId: string;
+  tieBreakRank?: number;
+}
+
+export function encodeCursor(cursor: ChunkSearchCursor): string {
+  return Buffer.from(JSON.stringify(cursor)).toString('base64url');
+}
+
+export function decodeCursor(cursorStr: string): ChunkSearchCursor | undefined {
+  try {
+    const parsed = JSON.parse(Buffer.from(cursorStr, 'base64url').toString('utf8'));
+    if (typeof parsed.tieBreakDate === 'string' && typeof parsed.tieBreakId === 'string') {
+      return parsed;
+    }
+  } catch {
+    // ignore
+  }
+  return undefined;
+}
+
+export interface SearchChunksResult {
+  chunks: Chunk[];
+  nextCursor: string | null;
 }
 
 type Queryable = Pick<Pool, 'query'>;
@@ -194,5 +232,105 @@ export class ChunkRepository {
 
     const row = result.rows[0];
     return row === undefined ? undefined : toChunk(row);
+  }
+
+  async search(
+    filters: SearchChunksFilters,
+    limit: number,
+    cursorStr?: string,
+  ): Promise<SearchChunksResult> {
+    const conditions = ['workspace_id = $1'];
+    const params: unknown[] = [filters.workspaceId];
+
+    if (filters.discipline !== undefined) {
+      params.push(filters.discipline);
+      conditions.push(`discipline = $${params.length}`);
+    }
+    if (filters.chunkType !== undefined) {
+      params.push(filters.chunkType);
+      conditions.push(`chunk_type = $${params.length}`);
+    }
+    if (filters.status !== undefined) {
+      params.push(filters.status);
+      conditions.push(`status = $${params.length}`);
+    }
+    if (filters.contextKind !== undefined) {
+      params.push(filters.contextKind);
+      conditions.push(`context_kind = $${params.length}`);
+    }
+    if (filters.branchId !== undefined) {
+      params.push(filters.branchId);
+      conditions.push(`branch_id = $${params.length}`);
+    } else {
+      conditions.push('branch_id IS NULL');
+    }
+
+    let selectCols = 'id, workspace_id, label, content, discipline, chunk_type, context_kind, status, branch_id, origin_branch_id, created_by_stakeholder_id, updated_by_stakeholder_id, created_at, updated_at';
+    let qIdx: number | undefined;
+
+    if (filters.q !== undefined && filters.q.trim().length > 0) {
+      params.push(filters.q);
+      qIdx = params.length;
+      const tsExp = `to_tsvector('english', label || ' ' || content)`;
+      const qExp = `plainto_tsquery('english', $${qIdx})`;
+      selectCols += `, ts_rank(${tsExp}, ${qExp}) AS rank`;
+      conditions.push(`${tsExp} @@ ${qExp}`);
+    }
+
+    if (cursorStr !== undefined) {
+      const cursor = decodeCursor(cursorStr);
+      if (cursor !== undefined) {
+        if (qIdx !== undefined && cursor.tieBreakRank !== undefined) {
+          params.push(cursor.tieBreakRank, cursor.tieBreakDate, cursor.tieBreakId);
+          const rIdx = params.length - 2;
+          const dIdx = params.length - 1;
+          const iIdx = params.length;
+          const tsExp = `to_tsvector('english', label || ' ' || content)`;
+          const qExp = `plainto_tsquery('english', $${qIdx})`;
+          const rankExp = `ts_rank(${tsExp}, ${qExp})`;
+          conditions.push(`(
+            ${rankExp} < $${rIdx}
+            OR (${rankExp} = $${rIdx} AND created_at < $${dIdx})
+            OR (${rankExp} = $${rIdx} AND created_at = $${dIdx} AND id < $${iIdx})
+          )`);
+        } else {
+          params.push(cursor.tieBreakDate, cursor.tieBreakId);
+          const dIdx = params.length - 1;
+          const iIdx = params.length;
+          conditions.push(`(created_at < $${dIdx} OR (created_at = $${dIdx} AND id < $${iIdx}))`);
+        }
+      }
+    }
+
+    const orderClause = qIdx !== undefined
+      ? `ORDER BY rank DESC, created_at DESC, id DESC`
+      : `ORDER BY created_at DESC, id DESC`;
+
+    const actualLimit = Math.min(Math.max(1, limit), 100);
+    params.push(actualLimit + 1);
+    const limitIdx = params.length;
+
+    const query = `SELECT ${selectCols} FROM chunks WHERE ${conditions.join(' AND ')} ${orderClause} LIMIT $${limitIdx}`;
+
+    const result = await this.pool.query<ChunkRow & { rank?: number }>(query, params);
+    const hasNext = result.rows.length > actualLimit;
+    const rows = hasNext ? result.rows.slice(0, actualLimit) : result.rows;
+
+    let nextCursor: string | null = null;
+    if (hasNext) {
+      const last = rows[rows.length - 1];
+      if (last) {
+        nextCursor = encodeCursor({
+          tieBreakDate: last.created_at.toISOString(),
+          tieBreakId: last.id,
+          tieBreakRank: last.rank,
+        });
+      }
+    }
+
+    return {
+      chunks: rows.map(toChunk),
+      nextCursor,
+    };
   }
 }

@@ -269,4 +269,135 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
       .query({ stakeholderId: BOOTSTRAP_STAKEHOLDER_ID });
     expect(crossWorkspaceGet.status).toBe(404);
   });
+
+  describe('GET /chunks (Search & Pagination)', () => {
+    let validToken: string;
+
+    beforeAll(() => {
+      validToken = sessionTokenService.sign({
+        stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
+        discipline: 'engineering',
+        authTime: Math.floor(Date.now() / 1000),
+        workspaceId: WORKSPACE_ID,
+      });
+    });
+
+    it('returns 401 when Authorization header is missing', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/chunks')
+        .set('X-Workspace-Id', WORKSPACE_ID);
+
+      expect(response.status).toBe(401);
+    });
+
+    it('returns 403 when X-Workspace-Id header is missing', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/chunks')
+        .set('Authorization', `Bearer ${validToken}`);
+
+      expect(response.status).toBe(403);
+    });
+
+    it('returns 403 when token workspaceId does not match X-Workspace-Id', async () => {
+      const mismatchedToken = sessionTokenService.sign({
+        stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
+        discipline: 'engineering',
+        authTime: Math.floor(Date.now() / 1000),
+        workspaceId: '00000000-0000-0000-0000-0000000000ff',
+      });
+      const response = await request(app.getHttpServer())
+        .get('/chunks')
+        .set('Authorization', `Bearer ${mismatchedToken}`)
+        .set('X-Workspace-Id', WORKSPACE_ID);
+
+      expect(response.status).toBe(403);
+    });
+
+    it('returns 400 when filtering by branchId but token has no discipline claim', async () => {
+      const branchResponse = await request(app.getHttpServer())
+        .post('/branches')
+        .set('X-Workspace-Id', WORKSPACE_ID)
+        .send({
+          name: `e2e-branch-${Math.random().toString(36).slice(2, 10)}`,
+          discipline: 'engineering',
+          stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
+        });
+      const branchId = branchResponse.body.id as string;
+
+      const noDisciplineToken = sessionTokenService.sign({
+        stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
+        discipline: null,
+        authTime: Math.floor(Date.now() / 1000),
+        workspaceId: WORKSPACE_ID,
+      });
+
+      const response = await request(app.getHttpServer())
+        .get('/chunks')
+        .set('Authorization', `Bearer ${noDisciplineToken}`)
+        .set('X-Workspace-Id', WORKSPACE_ID)
+        .query({ branchId });
+
+      expect(response.status).toBe(400);
+    });
+
+    it('returns 403 when filtering by branchId and token discipline does not match branch discipline', async () => {
+      const branchResponse = await request(app.getHttpServer())
+        .post('/branches')
+        .set('X-Workspace-Id', WORKSPACE_ID)
+        .send({
+          name: `e2e-branch-${Math.random().toString(36).slice(2, 10)}`,
+          discipline: 'design',
+          stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
+        });
+      const branchId = branchResponse.body.id as string;
+
+      const response = await request(app.getHttpServer())
+        .get('/chunks')
+        .set('Authorization', `Bearer ${validToken}`) // discipline is 'engineering'
+        .set('X-Workspace-Id', WORKSPACE_ID)
+        .query({ branchId });
+
+      expect(response.status).toBe(403);
+    });
+
+    it('successfully searches and paginates chunks', async () => {
+      // Create some chunks for searching
+      const uniqueSuffix = Math.random().toString(36).slice(2, 10);
+      for (let i = 0; i < 3; i++) {
+        await request(app.getHttpServer())
+          .post('/chunks')
+          .set('X-Workspace-Id', WORKSPACE_ID)
+          .send({
+            label: `e2e-search-${uniqueSuffix}-${i}`,
+            content: `Searchable content ${uniqueSuffix} number ${i}`,
+            discipline: 'engineering',
+            chunkType: 'feature',
+            contextKind: 'permanent',
+            stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
+          });
+      }
+
+      // 1. Search with full text 'q'
+      const searchRes = await request(app.getHttpServer())
+        .get('/chunks')
+        .set('Authorization', `Bearer ${validToken}`)
+        .set('X-Workspace-Id', WORKSPACE_ID)
+        .query({ q: uniqueSuffix, limit: 2 });
+
+      expect(searchRes.status).toBe(200);
+      expect(searchRes.body.chunks).toHaveLength(2);
+      expect(searchRes.body.nextCursor).toBeTruthy();
+
+      // 2. Fetch next page
+      const nextRes = await request(app.getHttpServer())
+        .get('/chunks')
+        .set('Authorization', `Bearer ${validToken}`)
+        .set('X-Workspace-Id', WORKSPACE_ID)
+        .query({ q: uniqueSuffix, limit: 2, cursor: searchRes.body.nextCursor });
+
+      expect(nextRes.status).toBe(200);
+      expect(nextRes.body.chunks).toHaveLength(1); // 3 total, got 2, 1 left
+      expect(nextRes.body.nextCursor).toBeNull();
+    });
+  });
 });
