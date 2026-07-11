@@ -3,6 +3,7 @@ import { ArtifactsModule } from './artifacts/artifacts.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { BranchesModule } from './branches/branches.module.js';
 import { ChunksModule } from './chunks/chunks.module.js';
+import { DeliverySubscriptionsModule } from './delivery-subscriptions/delivery-subscriptions.module.js';
 import { EdgesModule } from './edges/edges.module.js';
 import { HealthController } from './health.controller.js';
 import { NotificationsModule } from './notifications/notifications.module.js';
@@ -23,6 +24,7 @@ import { WorkspacesModule } from './workspaces/workspaces.module.js';
     VerificationSignalsModule,
     NotificationsModule,
     WorkspacesModule,
+    DeliverySubscriptionsModule,
   ],
   controllers: [HealthController],
 })
