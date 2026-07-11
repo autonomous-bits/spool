@@ -19,6 +19,7 @@
     "test:store": "vitest run --project store",
     "test:mcp": "vitest run --project mcp",
     "test:coverage": "vitest run --coverage",
+    "dev:session-token": "node tools/dev-session-token/get-dev-session-token.mjs",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",

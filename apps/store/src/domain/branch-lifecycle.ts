@@ -1,0 +1,66 @@
+import type { Branch } from './branch.js';
+import type { ActorContext, HumanActorContext } from './types/actor/actor-context.js';
+
+export class BranchLifecycleError extends Error {
+  constructor(reason: string) {
+    super(`Invalid branch lifecycle operation: ${reason}`);
+    this.name = 'BranchLifecycleError';
+  }
+}
+
+export function assertIsHumanActor(actor: ActorContext): asserts actor is HumanActorContext {
+  if (actor.kind !== 'human') {
+    throw new BranchLifecycleError(`expected human actor, received ${actor.kind}`);
+  }
+}
+
+export function assertSubmitDiscipline(
+  actor: ActorContext,
+  branch: Pick<Branch, 'discipline'>,
+): void {
+  if (actor.discipline !== branch.discipline) {
+    throw new BranchLifecycleError(
+      `actor discipline ${String(actor.discipline)} does not match branch discipline ${branch.discipline}`,
+    );
+  }
+}
+
+export function assertDraftStatus(branch: Pick<Branch, 'status'>): void {
+  if (branch.status !== 'draft') {
+    throw new BranchLifecycleError(`expected draft branch, received ${branch.status}`);
+  }
+}
+
+export function assertSubmittedStatus(branch: Pick<Branch, 'status'>): void {
+  if (branch.status !== 'submitted') {
+    throw new BranchLifecycleError(`expected submitted branch, received ${branch.status}`);
+  }
+}
+
+export function assertRejectableStatus(branch: Pick<Branch, 'status'>): void {
+  if (branch.status !== 'submitted' && branch.status !== 'verified') {
+    throw new BranchLifecycleError(
+      `expected submitted or verified branch, received ${branch.status}`,
+    );
+  }
+}
+
+export function assertMergeableStatus(branch: Pick<Branch, 'status'>): void {
+  if (branch.status !== 'verified') {
+    throw new BranchLifecycleError(`expected verified branch, received ${branch.status}`);
+  }
+}
+
+/**
+ * Meridian IDEA-20/IDEA-43: a branch's current state is locked for verification once submitted,
+ * and stays reviewable through the 'verified' state (multiple rounds of feedback are allowed
+ * before a human decides to merge or send it back to draft). Signal submission is rejected for
+ * 'draft' (nothing has been submitted yet) and 'merged' (review is over) branches.
+ */
+export function assertReviewableStatus(branch: Pick<Branch, 'status'>): void {
+  if (branch.status !== 'submitted' && branch.status !== 'verified') {
+    throw new BranchLifecycleError(
+      `expected submitted or verified branch, received ${branch.status}`,
+    );
+  }
+}

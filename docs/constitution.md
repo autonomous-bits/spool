@@ -131,6 +131,37 @@ This constitution supersedes ad-hoc convention where they conflict. Exceptions r
 approval from maintainers and MUST document the tradeoff, affected principles, and a follow-up
 plan when the exception is temporary.
 
+### Meridian authority
+
+Spool has no local functional or technical specifications. A linked Meridian workspace is the
+sole authoritative source for product and architecture direction: "if Meridian and this repo
+disagree, Meridian wins." Repo-local artifacts under `docs/goals/` record *decisions made from*
+Meridian direction — which vertical slice was selected, in what order, and why — they do not
+restate or substitute for Meridian's authority. That rule carries one clarification and one
+enforcement mechanism, both added after a rubber-duck review of early feature work found repo
+code and specs silently diverging from an unresolved Meridian chunk without ever raising the
+disagreement back to Meridian:
+
+- **Draft chunks are not automatically binding.** A Meridian chunk's own `status` field
+  distinguishes `draft` (proposed direction, not yet ratified) from `approved`/`promoted`
+  (ratified). Only `approved`/`promoted` chunks are binding on repo goals and code by default. A
+  goal file under `docs/goals/` that depends on a still-`draft` chunk MUST say so explicitly (e.g.
+  "per Meridian `IDEA-NN`, currently `draft`") so implementers know the constraint may still
+  change upstream, and MUST NOT treat that draft text as settled simply because it is the only
+  available source.
+- **An unresolved Meridian-vs-repo conflict MUST be escalated, not just noted.** If a goal file
+  records an unresolved disagreement between Meridian and repo code/goals, that note MUST be
+  paired with an actual outgoing Meridian action — feedback, a suggested chunk revision, or an
+  equivalent Meridian-side artifact — not left as prose in this repository alone. A conflict note
+  with no corresponding Meridian-side action is treated as incomplete work, not as a resolved
+  decision, even if the repo has already implemented one side of the disagreement for practical
+  reasons.
+- **Goal selection and implementation are Meridian-gated.** The `select-next-goal` skill chooses
+  the next vertical slice from Meridian's ready queue and lanes and records it under
+  `docs/goals/`; the `implement-next-goal` skill executes a goal's sub-goals against that same Meridian
+  context. Neither skill may invent product or architecture direction that Meridian does not
+  support; ambiguity is surfaced and escalated, not resolved by guessing.
+
 Amendments require:
 
 1. A documented proposal describing the changed principle or governance rule.
@@ -138,6 +169,6 @@ Amendments require:
 3. Updates to affected documentation, templates, tests, or workflow gates.
 4. A constitution version bump using semantic versioning.
 
-**Version:** 1.0.0  
+**Version:** 1.2.0  
 **Ratified:** 2026-06-27  
-**Last Amended:** 2026-06-27
+**Last Amended:** 2026-07-05

@@ -54,3 +54,5 @@ docker compose -f compose.debug.yaml up --build spoolstore
 ```
 
 Do not run the store directly on the host for local development unless explicitly requested.
+
+

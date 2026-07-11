@@ -6,7 +6,52 @@ services:
       dockerfile: ./Dockerfile
     environment:
       NODE_ENV: development
+      STORE_DB_HOST: postgres
+      STORE_DB_PORT: "5432"
+      STORE_DB_USER: spool
+      STORE_DB_PASSWORD: spool_dev
+      STORE_DB_NAME: spool
+      ARTIFACT_BLOB_STORE_PATH: /usr/src/app/artifact-data
+      GITHUB_OAUTH_TOKEN_URL: http://github-oauth-stub:4001/login/oauth/access_token
+      GITHUB_USER_API_URL: http://github-oauth-stub:4001/user
     ports:
       - 3000:3000
       - 9229:9229
     command: ["node", "--inspect=0.0.0.0:9229", "./dist/main.js"]
+    volumes:
+      - spoolstore-artifact-data:/usr/src/app/artifact-data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      github-oauth-stub:
+        condition: service_started
+
+  github-oauth-stub:
+    image: spool-github-oauth-stub
+    build:
+      context: apps/store/docker/github-oauth-stub
+    environment:
+      PORT: "4001"
+      OAUTH_STUB_GITHUB_LOGIN: spool-e2e-oauth-fixture
+    ports:
+      - 4001:4001
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: spool
+      POSTGRES_PASSWORD: spool_dev
+      POSTGRES_DB: spool
+    ports:
+      - 5433:5432
+    volumes:
+      - spoolstore-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U spool -d spool"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  spoolstore-postgres-data:
+  spoolstore-artifact-data:

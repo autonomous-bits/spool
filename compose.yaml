@@ -6,5 +6,59 @@ services:
       dockerfile: ./Dockerfile
     environment:
       NODE_ENV: production
+      STORE_DB_HOST: postgres
+      STORE_DB_PORT: "5432"
+      STORE_DB_USER: spool
+      STORE_DB_PASSWORD: spool_dev
+      STORE_DB_NAME: spool
+      # Meridian IDEA-85: local-filesystem artifact blob storage on a Docker-named-volume,
+      # accessed exclusively through the ArtifactBlobStore port (G08).
+      ARTIFACT_BLOB_STORE_PATH: /usr/src/app/artifact-data
+      # Points HttpGithubOAuthClient's token-exchange/user-lookup calls at the local stub
+      # (github-oauth-stub) below instead of live github.com, per G04.SG5's Docker e2e scope note.
+      GITHUB_OAUTH_TOKEN_URL: http://github-oauth-stub:4001/login/oauth/access_token
+      GITHUB_USER_API_URL: http://github-oauth-stub:4001/user
     ports:
       - 3000:3000
+    volumes:
+      - spoolstore-artifact-data:/usr/src/app/artifact-data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      github-oauth-stub:
+        condition: service_started
+
+  # Stands in for github.com's OAuth token-exchange endpoint and api.github.com's /user endpoint
+  # for G04.SG5's Docker end-to-end exercise; a live interactive GitHub consent screen cannot be
+  # automated here. See apps/store/docker/github-oauth-stub/server.mjs.
+  github-oauth-stub:
+    image: spool-github-oauth-stub
+    build:
+      context: apps/store/docker/github-oauth-stub
+    environment:
+      PORT: "4001"
+      OAUTH_STUB_GITHUB_LOGIN: spool-e2e-oauth-fixture
+    ports:
+      - 4001:4001
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: spool
+      POSTGRES_PASSWORD: spool_dev
+      POSTGRES_DB: spool
+    ports:
+      # Host-side integration tests connect via localhost:5433; the store
+      # container connects over the compose network at postgres:5432.
+      - 5433:5432
+    volumes:
+      - spoolstore-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U spool -d spool"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  spoolstore-postgres-data:
+  spoolstore-artifact-data:
