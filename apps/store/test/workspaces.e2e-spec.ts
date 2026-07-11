@@ -155,7 +155,7 @@ describe('Workspaces HTTP API (containerized Postgres)', () => {
     expect(response.status).toBe(401);
   });
 
-  it('POST /workspaces/:id/members returns 404 for an unknown workspace id', async () => {
+  it('POST /workspaces/:id/members returns 403 for an unknown workspace id (caller can never be a member of a workspace that does not exist)', async () => {
     const token = mintSessionToken(creatorStakeholderId, 'engineering', '00000000-0000-0000-0000-00000000dead');
 
     const response = await request(app.getHttpServer())
@@ -164,7 +164,7 @@ describe('Workspaces HTTP API (containerized Postgres)', () => {
       .set('X-Workspace-Id', '00000000-0000-0000-0000-00000000dead')
       .send({ stakeholderId: otherStakeholderId });
 
-    expect(response.status).toBe(404);
+    expect(response.status).toBe(403);
   });
 
   it('POST /workspaces/:id/members returns 403 when the caller is not a member', async () => {

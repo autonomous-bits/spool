@@ -69,9 +69,11 @@ describe('Verification Signals HTTP API (containerized Postgres)', () => {
   }
 
   async function createBranch(): Promise<string> {
+    const token = mintSessionToken(engineeringStakeholderId, 'engineering');
     const createResponse = await request(app.getHttpServer())
       .post('/branches')
       .set('X-Workspace-Id', WORKSPACE_ID)
+      .set('Authorization', authHeader(token))
       .send({
         name: uniqueName('e2e-signal-branch'),
         discipline: 'engineering',
@@ -135,9 +137,11 @@ describe('Verification Signals HTTP API (containerized Postgres)', () => {
       reason: 'all checks green',
     });
 
+    const token = mintSessionToken(engineeringStakeholderId, 'engineering');
     const branchResponse = await request(app.getHttpServer())
       .get(`/branches/${branchId}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
+      .set('Authorization', authHeader(token))
       .query({ stakeholderId: engineeringStakeholderId });
     expect(branchResponse.body.status).toBe('submitted');
   });
@@ -153,9 +157,11 @@ describe('Verification Signals HTTP API (containerized Postgres)', () => {
     expect(response.status).toBe(201);
     expect(response.body.status).toBe('fail');
 
+    const token = mintSessionToken(engineeringStakeholderId, 'engineering');
     const branchResponse = await request(app.getHttpServer())
       .get(`/branches/${branchId}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
+      .set('Authorization', authHeader(token))
       .query({ stakeholderId: engineeringStakeholderId });
     expect(branchResponse.body.status).toBe('verified');
   });

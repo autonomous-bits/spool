@@ -78,12 +78,17 @@ export class WorkspacesService {
     headerWorkspaceId: string | null | undefined,
     claims: SessionTokenClaims,
   ): Promise<WorkspaceMembershipResponse> {
-    // G11 SG4 (Meridian IDEA-98/IDEA-100): this route is already token-gated, so X-Workspace-Id
-    // must both match the token's workspaceId claim (the token tier) AND name the same workspace
+    // G16 SG2 (Meridian IDEA-139, single-tier auth): this route is already token-gated, so
+    // X-Workspace-Id must both match the token's workspaceId claim AND name the same workspace
     // as the :id route param — otherwise a caller with a token bound to workspace A could target
-    // /workspaces/B/members while merely asserting X-Workspace-Id: A.
+    // /workspaces/B/members while merely asserting X-Workspace-Id: A. The token's stakeholder
+    // must also currently be a live member of that workspace.
+    const isMember =
+      headerWorkspaceId === null || headerWorkspaceId === undefined || headerWorkspaceId.trim().length === 0
+        ? false
+        : await this.workspaceRepository.isMember(headerWorkspaceId, claims.stakeholderId);
     try {
-      assertWorkspaceScope(headerWorkspaceId, { tier: 'token', workspaceIdClaim: claims.workspaceId });
+      assertWorkspaceScope(headerWorkspaceId, { workspaceIdClaim: claims.workspaceId, isMember });
     } catch (error) {
       if (error instanceof WorkspaceScopeViolationError) {
         throw new ForbiddenException(error.message);

@@ -7,10 +7,22 @@ import type { BranchRepository } from '../persistence/branch.repository.js';
 import type { ChunkRepository } from '../persistence/chunk.repository.js';
 import type { EdgeRepository } from '../persistence/edge.repository.js';
 import type { WorkspaceRepository } from '../persistence/workspace.repository.js';
+import type { SessionTokenClaims } from '../auth/session-token.service.js';
 import { EdgesService } from './edges.service.js';
 import type { CreateEdgeRequest } from './create-edge-request.dto.js';
 
 const WORKSPACE_ID = '00000000-0000-0000-0000-00000000d0fa';
+const STAKEHOLDER_ID = '00000000-0000-0000-0000-000000000001';
+
+function validClaims(overrides: Partial<SessionTokenClaims> = {}): SessionTokenClaims {
+  return {
+    stakeholderId: STAKEHOLDER_ID,
+    workspaceId: WORKSPACE_ID,
+    discipline: 'product',
+    authTime: 1_752_000_000,
+    ...overrides,
+  };
+}
 
 function validRequest(overrides: Partial<CreateEdgeRequest> = {}): CreateEdgeRequest {
   return {
@@ -67,7 +79,7 @@ describe('EdgesService', () => {
     );
     vi.mocked(edgeRepository.create).mockImplementation((edge) => edge);
 
-    const result = await service.create(request, WORKSPACE_ID);
+    const result = await service.create(request, WORKSPACE_ID, validClaims());
 
     expect(result.fromChunkLabel).toBe(request.fromChunkLabel);
     expect(result.toChunkLabel).toBe(request.toChunkLabel);
@@ -81,7 +93,7 @@ describe('EdgesService', () => {
   it('throws ForbiddenException when the X-Workspace-Id header is missing', async () => {
     const { edgeRepository, service } = setUp();
 
-    await expect(service.create(validRequest(), undefined)).rejects.toThrow(ForbiddenException);
+    await expect(service.create(validRequest(), undefined, validClaims())).rejects.toThrow(ForbiddenException);
     expect(edgeRepository.create).not.toHaveBeenCalled();
   });
 
@@ -89,7 +101,7 @@ describe('EdgesService', () => {
     const { edgeRepository, workspaceRepository, service } = setUp();
     vi.mocked(workspaceRepository.isMember).mockResolvedValue(false);
 
-    await expect(service.create(validRequest(), WORKSPACE_ID)).rejects.toThrow(ForbiddenException);
+    await expect(service.create(validRequest(), WORKSPACE_ID, validClaims())).rejects.toThrow(ForbiddenException);
     expect(edgeRepository.create).not.toHaveBeenCalled();
   });
 
@@ -97,7 +109,7 @@ describe('EdgesService', () => {
     const { chunkRepository, edgeRepository, service } = setUp();
     vi.mocked(chunkRepository.findByLabel).mockResolvedValue(undefined);
 
-    await expect(service.create(validRequest(), WORKSPACE_ID)).rejects.toThrow(NotFoundException);
+    await expect(service.create(validRequest(), WORKSPACE_ID, validClaims())).rejects.toThrow(NotFoundException);
     expect(edgeRepository.create).not.toHaveBeenCalled();
   });
 
@@ -107,7 +119,7 @@ describe('EdgesService', () => {
       label === 'ATOMIC-1' ? chunkWithLabel(label) : undefined,
     );
 
-    await expect(service.create(validRequest(), WORKSPACE_ID)).rejects.toThrow(NotFoundException);
+    await expect(service.create(validRequest(), WORKSPACE_ID, validClaims())).rejects.toThrow(NotFoundException);
     expect(edgeRepository.create).not.toHaveBeenCalled();
   });
 
@@ -116,7 +128,7 @@ describe('EdgesService', () => {
     vi.mocked(branchRepository.findById).mockResolvedValue(undefined);
 
     await expect(
-      service.create(validRequest({ branchId: '00000000-0000-0000-0000-0000000000b1' }), WORKSPACE_ID),
+      service.create(validRequest({ branchId: '00000000-0000-0000-0000-0000000000b1' }), WORKSPACE_ID, validClaims()),
     ).rejects.toThrow(NotFoundException);
     expect(chunkRepository.findByLabel).not.toHaveBeenCalled();
     expect(edgeRepository.create).not.toHaveBeenCalled();
@@ -133,7 +145,7 @@ describe('EdgesService', () => {
     vi.mocked(branchRepository.findById).mockResolvedValue(branch);
 
     await expect(
-      service.create(validRequest({ branchId: branch.id, discipline: 'product' }), WORKSPACE_ID),
+      service.create(validRequest({ branchId: branch.id, discipline: 'product' }), WORKSPACE_ID, validClaims()),
     ).rejects.toThrow(ConflictException);
     expect(edgeRepository.create).not.toHaveBeenCalled();
   });
@@ -150,7 +162,7 @@ describe('EdgesService', () => {
     vi.mocked(branchRepository.findById).mockResolvedValue(branch);
 
     await expect(
-      service.create(validRequest({ branchId: branch.id }), WORKSPACE_ID),
+      service.create(validRequest({ branchId: branch.id }), WORKSPACE_ID, validClaims()),
     ).rejects.toThrow(ConflictException);
     expect(edgeRepository.create).not.toHaveBeenCalled();
   });
@@ -169,7 +181,7 @@ describe('EdgesService', () => {
     );
     vi.mocked(edgeRepository.create).mockImplementation((edge) => edge);
 
-    const result = await service.create(validRequest({ branchId: branch.id }), WORKSPACE_ID);
+    const result = await service.create(validRequest({ branchId: branch.id }), WORKSPACE_ID, validClaims());
 
     expect(result.branchId).toBe(branch.id);
     expect(result.originBranchId).toBe(branch.id);
@@ -186,7 +198,7 @@ describe('EdgesService', () => {
       Object.assign(new Error('violates foreign key constraint'), { code: '23503' }),
     );
 
-    await expect(service.create(validRequest(), WORKSPACE_ID)).rejects.toThrow(BadRequestException);
+    await expect(service.create(validRequest(), WORKSPACE_ID, validClaims())).rejects.toThrow(BadRequestException);
   });
 
   it('translates a unique violation on a duplicate active edge into a ConflictException', async () => {
@@ -200,7 +212,7 @@ describe('EdgesService', () => {
       }),
     );
 
-    await expect(service.create(validRequest(), WORKSPACE_ID)).rejects.toThrow(ConflictException);
+    await expect(service.create(validRequest(), WORKSPACE_ID, validClaims())).rejects.toThrow(ConflictException);
   });
 
   it('rethrows unrelated repository errors', async () => {
@@ -210,7 +222,7 @@ describe('EdgesService', () => {
     );
     vi.mocked(edgeRepository.create).mockRejectedValue(new Error('connection lost'));
 
-    await expect(service.create(validRequest(), WORKSPACE_ID)).rejects.toThrow('connection lost');
+    await expect(service.create(validRequest(), WORKSPACE_ID, validClaims())).rejects.toThrow('connection lost');
   });
 
   it('returns the edge from findById', async () => {
@@ -225,7 +237,7 @@ describe('EdgesService', () => {
     });
     vi.mocked(edgeRepository.findById).mockResolvedValue(persisted);
 
-    const result = await service.findById(persisted.id, WORKSPACE_ID, '00000000-0000-0000-0000-000000000001');
+    const result = await service.findById(persisted.id, WORKSPACE_ID, validClaims());
 
     expect(result.id).toBe(persisted.id);
     expect(result.supersededByEdgeId).toBeNull();
@@ -235,7 +247,7 @@ describe('EdgesService', () => {
     const { edgeRepository, service } = setUp();
 
     await expect(
-      service.findById('some-id', undefined, '00000000-0000-0000-0000-000000000001'),
+      service.findById('some-id', undefined, validClaims()),
     ).rejects.toThrow(ForbiddenException);
     expect(edgeRepository.findById).not.toHaveBeenCalled();
   });
@@ -245,7 +257,7 @@ describe('EdgesService', () => {
     vi.mocked(edgeRepository.findById).mockResolvedValue(undefined);
 
     await expect(
-      service.findById('missing', WORKSPACE_ID, '00000000-0000-0000-0000-000000000001'),
+      service.findById('missing', WORKSPACE_ID, validClaims()),
     ).rejects.toThrow(NotFoundException);
   });
 });

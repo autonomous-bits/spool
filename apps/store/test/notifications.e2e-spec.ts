@@ -89,9 +89,11 @@ describe('Notifications HTTP API (containerized Postgres)', () => {
    * that is a member of `WORKSPACE_ID`.
    */
   async function createSignal(): Promise<void> {
+    const token = mintSessionToken(engineeringStakeholderId, 'engineering');
     const createResponse = await request(app.getHttpServer())
       .post('/branches')
       .set('X-Workspace-Id', WORKSPACE_ID)
+      .set('Authorization', authHeader(token))
       .send({
         name: uniqueName('e2e-notification-branch'),
         discipline: 'engineering',
@@ -100,7 +102,6 @@ describe('Notifications HTTP API (containerized Postgres)', () => {
     expect(createResponse.status).toBe(201);
     const branchId = createResponse.body.id as string;
 
-    const token = mintSessionToken(engineeringStakeholderId, 'engineering');
     const submitResponse = await request(app.getHttpServer())
       .post(`/branches/${branchId}/submit`)
       .set('X-Workspace-Id', WORKSPACE_ID)

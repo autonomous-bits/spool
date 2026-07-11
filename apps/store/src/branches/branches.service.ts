@@ -61,30 +61,17 @@ export class BranchesService {
     private readonly workspaceRepository: WorkspaceRepository,
   ) {}
 
-  private async assertDelegatedScope(
+  private async assertScope(
     headerWorkspaceId: string | null | undefined,
-    stakeholderId: string,
+    claims: SessionTokenClaims,
   ): Promise<string> {
     const isMember =
       headerWorkspaceId === null || headerWorkspaceId === undefined || headerWorkspaceId.trim().length === 0
         ? false
-        : await this.workspaceRepository.isMember(headerWorkspaceId, stakeholderId);
+        : await this.workspaceRepository.isMember(headerWorkspaceId, claims.stakeholderId);
 
     try {
-      assertWorkspaceScope(headerWorkspaceId, { tier: 'delegated', isMember });
-    } catch (error) {
-      if (error instanceof WorkspaceScopeViolationError) {
-        throw new ForbiddenException(error.message);
-      }
-      throw error;
-    }
-
-    return headerWorkspaceId;
-  }
-
-  private assertTokenScope(headerWorkspaceId: string | null | undefined, claims: SessionTokenClaims): string {
-    try {
-      assertWorkspaceScope(headerWorkspaceId, { tier: 'token', workspaceIdClaim: claims.workspaceId });
+      assertWorkspaceScope(headerWorkspaceId, { workspaceIdClaim: claims.workspaceId, isMember });
     } catch (error) {
       if (error instanceof WorkspaceScopeViolationError) {
         throw new ForbiddenException(error.message);
@@ -98,8 +85,9 @@ export class BranchesService {
   async create(
     request: CreateBranchRequest,
     headerWorkspaceId: string | null | undefined,
+    claims: SessionTokenClaims,
   ): Promise<BranchResponse> {
-    const workspaceId = await this.assertDelegatedScope(headerWorkspaceId, request.stakeholderId);
+    const workspaceId = await this.assertScope(headerWorkspaceId, claims);
 
     let branch: Branch;
     try {
@@ -134,7 +122,7 @@ export class BranchesService {
     headerWorkspaceId: string | null | undefined,
     claims: SessionTokenClaims,
   ): Promise<BranchResponse> {
-    const workspaceId = this.assertTokenScope(headerWorkspaceId, claims);
+    const workspaceId = await this.assertScope(headerWorkspaceId, claims);
 
     const stakeholder = await this.stakeholderRepository.findById(claims.stakeholderId);
     if (stakeholder === undefined || !isDiscipline(stakeholder.discipline)) {
@@ -178,7 +166,7 @@ export class BranchesService {
     headerWorkspaceId: string | null | undefined,
     claims: SessionTokenClaims,
   ): Promise<BranchResponse> {
-    const workspaceId = this.assertTokenScope(headerWorkspaceId, claims);
+    const workspaceId = await this.assertScope(headerWorkspaceId, claims);
     const actor = await this.resolveActorForVerification(branchId, workspaceId, claims);
 
     try {
@@ -206,7 +194,7 @@ export class BranchesService {
     headerWorkspaceId: string | null | undefined,
     claims: SessionTokenClaims,
   ): Promise<BranchResponse> {
-    const workspaceId = this.assertTokenScope(headerWorkspaceId, claims);
+    const workspaceId = await this.assertScope(headerWorkspaceId, claims);
     const actor = await this.resolveActorForVerification(branchId, workspaceId, claims);
 
     try {
@@ -241,7 +229,7 @@ export class BranchesService {
     headerWorkspaceId: string | null | undefined,
     claims: SessionTokenClaims,
   ): Promise<BranchResponse> {
-    const workspaceId = this.assertTokenScope(headerWorkspaceId, claims);
+    const workspaceId = await this.assertScope(headerWorkspaceId, claims);
     const actor = await this.resolveActorForVerification(branchId, workspaceId, claims);
 
     try {
@@ -302,9 +290,9 @@ export class BranchesService {
   async findById(
     id: string,
     headerWorkspaceId: string | null | undefined,
-    stakeholderId: string,
+    claims: SessionTokenClaims,
   ): Promise<BranchResponse> {
-    const workspaceId = await this.assertDelegatedScope(headerWorkspaceId, stakeholderId);
+    const workspaceId = await this.assertScope(headerWorkspaceId, claims);
 
     const branch = await this.branchRepository.findById(id, workspaceId);
     if (branch === undefined) {

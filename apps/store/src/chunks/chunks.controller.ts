@@ -6,13 +6,6 @@ import { parseCreateChunkRequest } from './create-chunk-request.dto.js';
 import { ChunksService } from './chunks.service.js';
 import type { SearchChunksFilters } from '../persistence/chunk.repository.js';
 
-function requireStakeholderId(value: string | undefined): string {
-  if (typeof value !== 'string' || value.trim().length === 0) {
-    throw new BadRequestException('stakeholderId query parameter must be a non-empty string');
-  }
-  return value;
-}
-
 @Controller('chunks')
 export class ChunksController {
   constructor(
@@ -58,19 +51,22 @@ export class ChunksController {
   @Post()
   async create(
     @Body() body: unknown,
+    @Headers('authorization') authorizationHeader: unknown,
     @Headers('x-workspace-id') workspaceId: string | undefined,
   ): Promise<ChunkResponse> {
+    const claims = verifySessionClaims(authorizationHeader, this.sessionTokenService);
     const request = parseCreateChunkRequest(body);
-    return this.chunks.create(request, workspaceId);
+    return this.chunks.create(request, workspaceId, claims);
   }
 
   @Get(':id')
   async findOne(
     @Param('id', ParseUUIDPipe) id: string,
+    @Headers('authorization') authorizationHeader: unknown,
     @Headers('x-workspace-id') workspaceId: string | undefined,
-    @Query('stakeholderId') stakeholderId: string | undefined,
   ): Promise<ChunkResponse> {
-    return this.chunks.findById(id, workspaceId, requireStakeholderId(stakeholderId));
+    const claims = verifySessionClaims(authorizationHeader, this.sessionTokenService);
+    return this.chunks.findById(id, workspaceId, claims);
   }
 
   @Get(':id/neighbourhood')

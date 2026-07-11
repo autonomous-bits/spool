@@ -45,7 +45,7 @@ describe('WorkspacesService', () => {
             createWithFirstMember: vi.fn(),
             addMember: vi.fn(),
             findById: vi.fn(),
-            isMember: vi.fn(),
+            isMember: vi.fn().mockResolvedValue(true),
           } satisfies Pick<
             WorkspaceRepository,
             'createWithFirstMember' | 'addMember' | 'findById' | 'isMember'

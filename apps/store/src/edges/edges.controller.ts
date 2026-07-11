@@ -1,34 +1,35 @@
-import { BadRequestException, Body, Controller, Get, Headers, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Post } from '@nestjs/common';
+import { SessionTokenService } from '../auth/session-token.service.js';
+import { verifySessionClaims } from '../auth/session-claims.helper.js';
 import type { EdgeResponse } from './edge-response.dto.js';
 import { parseCreateEdgeRequest } from './create-edge-request.dto.js';
 import { EdgesService } from './edges.service.js';
 
-function requireStakeholderId(value: string | undefined): string {
-  if (typeof value !== 'string' || value.trim().length === 0) {
-    throw new BadRequestException('stakeholderId query parameter must be a non-empty string');
-  }
-  return value;
-}
-
 @Controller('edges')
 export class EdgesController {
-  constructor(private readonly edges: EdgesService) {}
+  constructor(
+    private readonly edges: EdgesService,
+    private readonly sessionTokenService: SessionTokenService,
+  ) {}
 
   @Post()
   async create(
     @Body() body: unknown,
+    @Headers('authorization') authorizationHeader: unknown,
     @Headers('x-workspace-id') workspaceId: string | undefined,
   ): Promise<EdgeResponse> {
+    const claims = verifySessionClaims(authorizationHeader, this.sessionTokenService);
     const request = parseCreateEdgeRequest(body);
-    return this.edges.create(request, workspaceId);
+    return this.edges.create(request, workspaceId, claims);
   }
 
   @Get(':id')
   async findOne(
     @Param('id') id: string,
+    @Headers('authorization') authorizationHeader: unknown,
     @Headers('x-workspace-id') workspaceId: string | undefined,
-    @Query('stakeholderId') stakeholderId: string | undefined,
   ): Promise<EdgeResponse> {
-    return this.edges.findById(id, workspaceId, requireStakeholderId(stakeholderId));
+    const claims = verifySessionClaims(authorizationHeader, this.sessionTokenService);
+    return this.edges.findById(id, workspaceId, claims);
   }
 }

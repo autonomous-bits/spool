@@ -2,14 +2,22 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChunksController } from './chunks.controller.js';
 import { ChunksService } from './chunks.service.js';
-import { SessionTokenService } from '../auth/session-token.service.js';
+import { SessionTokenService, type SessionTokenClaims } from '../auth/session-token.service.js';
 import type { ChunkResponse } from './chunk-response.dto.js';
 
 const WORKSPACE_ID = '00000000-0000-0000-0000-00000000d0fa';
 
+const claims = {
+  stakeholderId: 'stakeholder-1',
+  workspaceId: WORKSPACE_ID,
+  discipline: 'product',
+  authTime: 1_752_000_000,
+} satisfies SessionTokenClaims;
+
 describe('ChunksController', () => {
   let controller: ChunksController;
   let service: Pick<ChunksService, 'create' | 'findById'>;
+  let sessionTokenService: Pick<SessionTokenService, 'verify'>;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -35,6 +43,7 @@ describe('ChunksController', () => {
 
     controller = module.get(ChunksController);
     service = module.get(ChunksService);
+    sessionTokenService = module.get(SessionTokenService);
   });
 
   it('parses the body and delegates creation to ChunksService', async () => {
@@ -54,6 +63,7 @@ describe('ChunksController', () => {
       createdAt: new Date(),
       updatedAt: new Date(),
     } satisfies ChunkResponse;
+    vi.mocked(sessionTokenService.verify).mockReturnValue(claims);
     vi.mocked(service.create).mockResolvedValue(expected);
 
     const result = await controller.create({
@@ -63,7 +73,7 @@ describe('ChunksController', () => {
       chunkType: 'feature',
       contextKind: 'permanent',
       stakeholderId: 'stakeholder-1',
-    }, WORKSPACE_ID);
+    }, 'Bearer signed-token', WORKSPACE_ID);
 
     expect(result).toEqual(expected);
     expect(service.create).toHaveBeenCalledWith({
@@ -73,16 +83,17 @@ describe('ChunksController', () => {
       chunkType: 'feature',
       contextKind: 'permanent',
       stakeholderId: 'stakeholder-1',
-    }, WORKSPACE_ID);
+    }, WORKSPACE_ID, claims);
   });
 
   it('delegates retrieval to ChunksService', async () => {
     const expected = { id: 'abc' } as ChunkResponse;
+    vi.mocked(sessionTokenService.verify).mockReturnValue(claims);
     vi.mocked(service.findById).mockResolvedValue(expected);
 
-    const result = await controller.findOne('abc', WORKSPACE_ID, 'stakeholder-1');
+    const result = await controller.findOne('abc', 'Bearer signed-token', WORKSPACE_ID);
 
     expect(result).toEqual(expected);
-    expect(service.findById).toHaveBeenCalledWith('abc', WORKSPACE_ID, 'stakeholder-1');
+    expect(service.findById).toHaveBeenCalledWith('abc', WORKSPACE_ID, claims);
   });
 });

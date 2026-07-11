@@ -3,6 +3,7 @@ import type { SessionTokenClaims } from '../auth/session-token.service.js';
 import { isNotificationStatus } from '../domain/types/vocabulary/notification-status.js';
 import { assertWorkspaceScope, WorkspaceScopeViolationError } from '../domain/workspace-scope.js';
 import { FeedbackNotificationRepository } from '../persistence/feedback-notification.repository.js';
+import { WorkspaceRepository } from '../persistence/workspace.repository.js';
 import { toNotificationResponse, type NotificationResponse } from './notification-response.dto.js';
 
 /**
@@ -11,20 +12,28 @@ import { toNotificationResponse, type NotificationResponse } from './notificatio
  * session token -- never a client-supplied id -- so one stakeholder can never read or mark read
  * another stakeholder's notifications.
  *
- * G11 SG5 (Meridian IDEA-98/IDEA-100): both routes are already token-gated, so they sit on the
- * token auth tier -- `X-Workspace-Id` is validated against the token's `workspaceId` claim
- * (no async membership lookup needed), mirroring `SuggestionsService.accept`/`reject`.
+ * G16 SG2 (Meridian IDEA-139, single-tier auth): `X-Workspace-Id` must match the token's
+ * `workspaceId` claim *and* the token's stakeholder must currently be a live member of that
+ * workspace.
  */
 @Injectable()
 export class NotificationsService {
-  constructor(private readonly notificationRepository: FeedbackNotificationRepository) {}
+  constructor(
+    private readonly notificationRepository: FeedbackNotificationRepository,
+    private readonly workspaceRepository: WorkspaceRepository,
+  ) {}
 
-  private assertTokenScope(
+  private async assertScope(
     headerWorkspaceId: string | null | undefined,
     claims: SessionTokenClaims,
-  ): string {
+  ): Promise<string> {
+    const isMember =
+      headerWorkspaceId === null || headerWorkspaceId === undefined || headerWorkspaceId.trim().length === 0
+        ? false
+        : await this.workspaceRepository.isMember(headerWorkspaceId, claims.stakeholderId);
+
     try {
-      assertWorkspaceScope(headerWorkspaceId, { tier: 'token', workspaceIdClaim: claims.workspaceId });
+      assertWorkspaceScope(headerWorkspaceId, { workspaceIdClaim: claims.workspaceId, isMember });
     } catch (error) {
       if (error instanceof WorkspaceScopeViolationError) {
         throw new ForbiddenException(error.message);
@@ -43,7 +52,7 @@ export class NotificationsService {
     headerWorkspaceId: string | null | undefined,
     status?: string,
   ): Promise<NotificationResponse[]> {
-    const workspaceId = this.assertTokenScope(headerWorkspaceId, claims);
+    const workspaceId = await this.assertScope(headerWorkspaceId, claims);
 
     if (status !== undefined && !isNotificationStatus(status)) {
       throw new BadRequestException(`Invalid status filter: ${status}`);
@@ -67,7 +76,7 @@ export class NotificationsService {
     claims: SessionTokenClaims,
     headerWorkspaceId: string | null | undefined,
   ): Promise<NotificationResponse> {
-    const workspaceId = this.assertTokenScope(headerWorkspaceId, claims);
+    const workspaceId = await this.assertScope(headerWorkspaceId, claims);
 
     const notification = await this.notificationRepository.markAsRead(
       id,

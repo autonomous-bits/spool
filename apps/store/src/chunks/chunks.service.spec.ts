@@ -5,10 +5,12 @@ import { Chunk } from '../domain/chunk.js';
 import type { BranchRepository } from '../persistence/branch.repository.js';
 import type { ChunkRepository } from '../persistence/chunk.repository.js';
 import type { WorkspaceRepository } from '../persistence/workspace.repository.js';
+import type { SessionTokenClaims } from '../auth/session-token.service.js';
 import { ChunksService } from './chunks.service.js';
 import type { CreateChunkRequest } from './create-chunk-request.dto.js';
 
 const WORKSPACE_ID = '00000000-0000-0000-0000-00000000d0fa';
+const STAKEHOLDER_ID = '00000000-0000-0000-0000-000000000001';
 
 function validRequest(overrides: Partial<CreateChunkRequest> = {}): CreateChunkRequest {
   return {
@@ -17,7 +19,17 @@ function validRequest(overrides: Partial<CreateChunkRequest> = {}): CreateChunkR
     discipline: 'product',
     chunkType: 'feature',
     contextKind: 'permanent',
-    stakeholderId: '00000000-0000-0000-0000-000000000001',
+    stakeholderId: STAKEHOLDER_ID,
+    ...overrides,
+  };
+}
+
+function validClaims(overrides: Partial<SessionTokenClaims> = {}): SessionTokenClaims {
+  return {
+    stakeholderId: STAKEHOLDER_ID,
+    workspaceId: WORKSPACE_ID,
+    discipline: 'product',
+    authTime: 1_752_000_000,
     ...overrides,
   };
 }
@@ -60,7 +72,7 @@ describe('ChunksService', () => {
     });
     vi.mocked(chunkRepository.create).mockResolvedValue(persisted);
 
-    const result = await service.create(request, WORKSPACE_ID);
+    const result = await service.create(request, WORKSPACE_ID, validClaims());
 
     expect(result.id).toBe(persisted.id);
     expect(result.status).toBe('draft');
@@ -73,7 +85,7 @@ describe('ChunksService', () => {
   it('throws ForbiddenException when the X-Workspace-Id header is missing', async () => {
     const request = validRequest();
 
-    await expect(service.create(request, undefined)).rejects.toThrow(ForbiddenException);
+    await expect(service.create(request, undefined, validClaims())).rejects.toThrow(ForbiddenException);
     expect(chunkRepository.create).not.toHaveBeenCalled();
   });
 
@@ -81,7 +93,7 @@ describe('ChunksService', () => {
     const request = validRequest();
     vi.mocked(workspaceRepository.isMember).mockResolvedValue(false);
 
-    await expect(service.create(request, WORKSPACE_ID)).rejects.toThrow(ForbiddenException);
+    await expect(service.create(request, WORKSPACE_ID, validClaims())).rejects.toThrow(ForbiddenException);
     expect(chunkRepository.create).not.toHaveBeenCalled();
   });
 
@@ -91,14 +103,14 @@ describe('ChunksService', () => {
       Object.assign(new Error('violates foreign key constraint'), { code: '23503' }),
     );
 
-    await expect(service.create(request, WORKSPACE_ID)).rejects.toThrow(BadRequestException);
+    await expect(service.create(request, WORKSPACE_ID, validClaims())).rejects.toThrow(BadRequestException);
   });
 
   it('rethrows unrelated repository errors', async () => {
     const request = validRequest();
     vi.mocked(chunkRepository.create).mockRejectedValue(new Error('connection lost'));
 
-    await expect(service.create(request, WORKSPACE_ID)).rejects.toThrow('connection lost');
+    await expect(service.create(request, WORKSPACE_ID, validClaims())).rejects.toThrow('connection lost');
   });
 
   it('returns the chunk from findById', async () => {
@@ -110,14 +122,14 @@ describe('ChunksService', () => {
     });
     vi.mocked(chunkRepository.findById).mockResolvedValue(persisted);
 
-    const result = await service.findById(persisted.id, WORKSPACE_ID, request.stakeholderId);
+    const result = await service.findById(persisted.id, WORKSPACE_ID, validClaims());
 
     expect(result.id).toBe(persisted.id);
   });
 
   it('throws ForbiddenException from findById when the header is missing', async () => {
     await expect(
-      service.findById('some-id', undefined, '00000000-0000-0000-0000-000000000001'),
+      service.findById('some-id', undefined, validClaims()),
     ).rejects.toThrow(ForbiddenException);
     expect(chunkRepository.findById).not.toHaveBeenCalled();
   });
@@ -126,7 +138,7 @@ describe('ChunksService', () => {
     vi.mocked(chunkRepository.findById).mockResolvedValue(undefined);
 
     await expect(
-      service.findById('missing', WORKSPACE_ID, '00000000-0000-0000-0000-000000000001'),
+      service.findById('missing', WORKSPACE_ID, validClaims()),
     ).rejects.toThrow(NotFoundException);
   });
 
@@ -134,7 +146,7 @@ describe('ChunksService', () => {
     const request = validRequest({ branchId: '00000000-0000-0000-0000-0000000000b1' });
     vi.mocked(branchRepository.findById).mockResolvedValue(undefined);
 
-    await expect(service.create(request, WORKSPACE_ID)).rejects.toThrow(NotFoundException);
+    await expect(service.create(request, WORKSPACE_ID, validClaims())).rejects.toThrow(NotFoundException);
     expect(chunkRepository.create).not.toHaveBeenCalled();
   });
 
@@ -148,7 +160,7 @@ describe('ChunksService', () => {
     });
     vi.mocked(branchRepository.findById).mockResolvedValue(branch);
 
-    await expect(service.create(request, WORKSPACE_ID)).rejects.toThrow(ConflictException);
+    await expect(service.create(request, WORKSPACE_ID, validClaims())).rejects.toThrow(ConflictException);
     expect(chunkRepository.create).not.toHaveBeenCalled();
   });
 
@@ -163,7 +175,7 @@ describe('ChunksService', () => {
     });
     vi.mocked(branchRepository.findById).mockResolvedValue(branch);
 
-    await expect(service.create(request, WORKSPACE_ID)).rejects.toThrow(ConflictException);
+    await expect(service.create(request, WORKSPACE_ID, validClaims())).rejects.toThrow(ConflictException);
     expect(chunkRepository.create).not.toHaveBeenCalled();
   });
 
@@ -178,7 +190,7 @@ describe('ChunksService', () => {
     vi.mocked(branchRepository.findById).mockResolvedValue(branch);
     vi.mocked(chunkRepository.create).mockImplementation((chunk) => chunk);
 
-    const result = await service.create(request, WORKSPACE_ID);
+    const result = await service.create(request, WORKSPACE_ID, validClaims());
 
     expect(result.branchId).toBe(branch.id);
     expect(result.originBranchId).toBe(branch.id);

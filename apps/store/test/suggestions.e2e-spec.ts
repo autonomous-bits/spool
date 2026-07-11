@@ -47,6 +47,10 @@ describe('Suggestions HTTP API (containerized Postgres)', () => {
     return BEARER_PREFIX.concat(token);
   }
 
+  function bootstrapAuthHeader(discipline: string | null = 'engineering'): string {
+    return authHeader(mintSessionToken(BOOTSTRAP_STAKEHOLDER_ID, discipline));
+  }
+
   function uniqueLabel(prefix: string): string {
     return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
   }
@@ -94,6 +98,7 @@ describe('Suggestions HTTP API (containerized Postgres)', () => {
   it('POST /suggestions with a valid chunk-shaped body persists pending + one state log row', async () => {
     const response = await request(app.getHttpServer())
       .post('/suggestions')
+      .set('Authorization', bootstrapAuthHeader())
       .set('X-Workspace-Id', WORKSPACE_ID)
       .send({
         label: uniqueLabel('e2e-suggestion'),
@@ -121,6 +126,7 @@ describe('Suggestions HTTP API (containerized Postgres)', () => {
   it('POST /suggestions with a valid edge-shaped body persists pending + one state log row', async () => {
     const response = await request(app.getHttpServer())
       .post('/suggestions')
+      .set('Authorization', bootstrapAuthHeader())
       .set('X-Workspace-Id', WORKSPACE_ID)
       .send({
         fromChunkLabel: uniqueLabel('e2e-from'),
@@ -148,6 +154,7 @@ describe('Suggestions HTTP API (containerized Postgres)', () => {
   it('POST /suggestions returns 400 when the body mixes chunk and edge fields', async () => {
     const response = await request(app.getHttpServer())
       .post('/suggestions')
+      .set('Authorization', bootstrapAuthHeader())
       .set('X-Workspace-Id', WORKSPACE_ID)
       .send({
         label: uniqueLabel('e2e-mixed'),
@@ -165,6 +172,7 @@ describe('Suggestions HTTP API (containerized Postgres)', () => {
   it('POST /suggestions returns 400 when the body provides neither variant', async () => {
     const response = await request(app.getHttpServer())
       .post('/suggestions')
+      .set('Authorization', bootstrapAuthHeader())
       .set('X-Workspace-Id', WORKSPACE_ID)
       .send({
         discipline: 'engineering',
@@ -177,6 +185,7 @@ describe('Suggestions HTTP API (containerized Postgres)', () => {
   it('POST /suggestions returns 400 for a partial edge-shaped body', async () => {
     const response = await request(app.getHttpServer())
       .post('/suggestions')
+      .set('Authorization', bootstrapAuthHeader())
       .set('X-Workspace-Id', WORKSPACE_ID)
       .send({
         fromChunkLabel: uniqueLabel('e2e-partial-from'),
@@ -187,9 +196,10 @@ describe('Suggestions HTTP API (containerized Postgres)', () => {
     expect(response.status).toBe(400);
   });
 
-  it('POST /suggestions returns 403 for an unknown stakeholderId (not a workspace member)', async () => {
+  it('POST /suggestions returns 400 for an unknown stakeholderId in the request body', async () => {
     const response = await request(app.getHttpServer())
       .post('/suggestions')
+      .set('Authorization', bootstrapAuthHeader())
       .set('X-Workspace-Id', WORKSPACE_ID)
       .send({
         label: uniqueLabel('e2e-unknown-stakeholder'),
@@ -198,16 +208,19 @@ describe('Suggestions HTTP API (containerized Postgres)', () => {
         stakeholderId: '00000000-0000-0000-0000-00000000dead',
       });
 
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(400);
   });
 
   it('POST /suggestions returns 403 when the X-Workspace-Id header is missing', async () => {
-    const response = await request(app.getHttpServer()).post('/suggestions').send({
-      label: uniqueLabel('e2e-no-header'),
-      content: 'content',
-      discipline: 'engineering',
-      stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
-    });
+    const response = await request(app.getHttpServer())
+      .post('/suggestions')
+      .set('Authorization', bootstrapAuthHeader())
+      .send({
+        label: uniqueLabel('e2e-no-header'),
+        content: 'content',
+        discipline: 'engineering',
+        stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
+      });
 
     expect(response.status).toBe(403);
   });
@@ -215,6 +228,7 @@ describe('Suggestions HTTP API (containerized Postgres)', () => {
   async function createPendingSuggestion(): Promise<string> {
     const response = await request(app.getHttpServer())
       .post('/suggestions')
+      .set('Authorization', bootstrapAuthHeader('security'))
       .set('X-Workspace-Id', WORKSPACE_ID)
       .send({
         label: uniqueLabel('e2e-accept-suggestion'),
@@ -244,6 +258,7 @@ describe('Suggestions HTTP API (containerized Postgres)', () => {
 
     const branchGetResponse = await request(app.getHttpServer())
       .get(`/branches/${acceptResponse.body.id as string}`)
+      .set('Authorization', bootstrapAuthHeader())
       .set('X-Workspace-Id', WORKSPACE_ID)
       .query({ stakeholderId: BOOTSTRAP_STAKEHOLDER_ID });
     expect(branchGetResponse.status).toBe(200);
@@ -344,6 +359,7 @@ describe('Suggestions HTTP API (containerized Postgres)', () => {
     const existingBranchName = uniqueLabel('e2e-existing-branch');
     await request(app.getHttpServer())
       .post('/branches')
+      .set('Authorization', bootstrapAuthHeader('security'))
       .set('X-Workspace-Id', WORKSPACE_ID)
       .send({
         name: existingBranchName,
@@ -431,6 +447,7 @@ describe('Suggestions HTTP API (containerized Postgres)', () => {
 
     const response = await request(app.getHttpServer())
       .get(`/suggestions/${suggestionId}`)
+      .set('Authorization', bootstrapAuthHeader())
       .set('X-Workspace-Id', WORKSPACE_ID)
       .query({ stakeholderId: BOOTSTRAP_STAKEHOLDER_ID });
 
@@ -441,20 +458,23 @@ describe('Suggestions HTTP API (containerized Postgres)', () => {
   it('GET /suggestions/:id returns 404 for an unknown id', async () => {
     const response = await request(app.getHttpServer())
       .get('/suggestions/00000000-0000-0000-0000-00000000dead')
+      .set('Authorization', bootstrapAuthHeader())
       .set('X-Workspace-Id', WORKSPACE_ID)
       .query({ stakeholderId: BOOTSTRAP_STAKEHOLDER_ID });
 
     expect(response.status).toBe(404);
   });
 
-  it('GET /suggestions/:id returns 400 when the stakeholderId query param is missing', async () => {
+  it('GET /suggestions/:id returns the suggestion without any stakeholderId query param', async () => {
     const suggestionId = await createPendingSuggestion();
 
     const response = await request(app.getHttpServer())
       .get(`/suggestions/${suggestionId}`)
+      .set('Authorization', bootstrapAuthHeader())
       .set('X-Workspace-Id', WORKSPACE_ID);
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(200);
+    expect(response.body.id).toBe(suggestionId);
   });
 
   it('GET /suggestions/:id returns 403 when the X-Workspace-Id header is missing', async () => {
@@ -462,12 +482,13 @@ describe('Suggestions HTTP API (containerized Postgres)', () => {
 
     const response = await request(app.getHttpServer())
       .get(`/suggestions/${suggestionId}`)
+      .set('Authorization', bootstrapAuthHeader())
       .query({ stakeholderId: BOOTSTRAP_STAKEHOLDER_ID });
 
     expect(response.status).toBe(403);
   });
 
-  it('GET /suggestions?status=pending returns only pending suggestions ordered oldest first, given a valid stakeholderId and X-Workspace-Id header', async () => {
+  it('GET /suggestions?status=pending returns only pending suggestions ordered oldest first with Authorization and X-Workspace-Id', async () => {
     const firstId = await createPendingSuggestion();
     const secondId = await createPendingSuggestion();
     const token = mintSessionToken(BOOTSTRAP_STAKEHOLDER_ID, 'security');
@@ -478,6 +499,7 @@ describe('Suggestions HTTP API (containerized Postgres)', () => {
 
     const response = await request(app.getHttpServer())
       .get('/suggestions?status=pending')
+      .set('Authorization', bootstrapAuthHeader())
       .set('X-Workspace-Id', WORKSPACE_ID)
       .query({ stakeholderId: BOOTSTRAP_STAKEHOLDER_ID });
 
@@ -493,6 +515,7 @@ describe('Suggestions HTTP API (containerized Postgres)', () => {
   it('GET /suggestions returns 403 when the X-Workspace-Id header is missing', async () => {
     const response = await request(app.getHttpServer())
       .get('/suggestions?status=pending')
+      .set('Authorization', bootstrapAuthHeader())
       .query({ stakeholderId: BOOTSTRAP_STAKEHOLDER_ID });
 
     expect(response.status).toBe(403);

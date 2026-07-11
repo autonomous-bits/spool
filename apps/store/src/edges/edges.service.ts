@@ -5,6 +5,7 @@ import { BranchRepository } from '../persistence/branch.repository.js';
 import { ChunkRepository } from '../persistence/chunk.repository.js';
 import { EdgeRepository } from '../persistence/edge.repository.js';
 import { WorkspaceRepository } from '../persistence/workspace.repository.js';
+import type { SessionTokenClaims } from '../auth/session-token.service.js';
 import { toEdgeResponse, type EdgeResponse } from './edge-response.dto.js';
 import type { CreateEdgeRequest } from './create-edge-request.dto.js';
 
@@ -39,17 +40,17 @@ export class EdgesService {
     private readonly workspaceRepository: WorkspaceRepository,
   ) {}
 
-  private async assertDelegatedScope(
+  private async assertScope(
     headerWorkspaceId: string | null | undefined,
-    stakeholderId: string,
+    claims: SessionTokenClaims,
   ): Promise<string> {
     const isMember =
       headerWorkspaceId === null || headerWorkspaceId === undefined || headerWorkspaceId.trim().length === 0
         ? false
-        : await this.workspaceRepository.isMember(headerWorkspaceId, stakeholderId);
+        : await this.workspaceRepository.isMember(headerWorkspaceId, claims.stakeholderId);
 
     try {
-      assertWorkspaceScope(headerWorkspaceId, { tier: 'delegated', isMember });
+      assertWorkspaceScope(headerWorkspaceId, { workspaceIdClaim: claims.workspaceId, isMember });
     } catch (error) {
       if (error instanceof WorkspaceScopeViolationError) {
         throw new ForbiddenException(error.message);
@@ -60,8 +61,12 @@ export class EdgesService {
     return headerWorkspaceId;
   }
 
-  async create(request: CreateEdgeRequest, headerWorkspaceId: string | null | undefined): Promise<EdgeResponse> {
-    const workspaceId = await this.assertDelegatedScope(headerWorkspaceId, request.stakeholderId);
+  async create(
+    request: CreateEdgeRequest,
+    headerWorkspaceId: string | null | undefined,
+    claims: SessionTokenClaims,
+  ): Promise<EdgeResponse> {
+    const workspaceId = await this.assertScope(headerWorkspaceId, claims);
 
     let branchId: string | undefined;
 
@@ -131,9 +136,9 @@ export class EdgesService {
   async findById(
     id: string,
     headerWorkspaceId: string | null | undefined,
-    stakeholderId: string,
+    claims: SessionTokenClaims,
   ): Promise<EdgeResponse> {
-    const workspaceId = await this.assertDelegatedScope(headerWorkspaceId, stakeholderId);
+    const workspaceId = await this.assertScope(headerWorkspaceId, claims);
 
     const edge = await this.edgeRepository.findById(id, workspaceId);
     if (edge === undefined) {

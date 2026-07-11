@@ -94,19 +94,22 @@ export class DeliverySubscriptionsService {
   }
 
   /**
-   * Shared workspace-scope + membership guard for every route. `assertWorkspaceScope`'s `token`
-   * tier confirms the header matches the caller's own token claim; the header must additionally
-   * equal the `:workspaceId` route param (same double-check as `WorkspacesService.addMember`,
-   * Meridian IDEA-98/IDEA-100); finally the caller must actually be a member of the workspace
-   * (not merely hold a token bound to it), 403 otherwise.
+   * Shared workspace-scope + membership guard for every route (Meridian IDEA-139, single-tier
+   * auth): the header must match the caller's own token claim, must additionally equal the
+   * `:workspaceId` route param (same double-check as `WorkspacesService.addMember`), and the
+   * caller must actually be a member of the workspace (not merely hold a token bound to it).
    */
   private async assertCallerCanAct(
     workspaceId: string,
     headerWorkspaceId: string | null | undefined,
     claims: SessionTokenClaims,
   ): Promise<void> {
+    const isMember =
+      headerWorkspaceId === null || headerWorkspaceId === undefined || headerWorkspaceId.trim().length === 0
+        ? false
+        : await this.workspaces.isMember(headerWorkspaceId, claims.stakeholderId);
     try {
-      assertWorkspaceScope(headerWorkspaceId, { tier: 'token', workspaceIdClaim: claims.workspaceId });
+      assertWorkspaceScope(headerWorkspaceId, { workspaceIdClaim: claims.workspaceId, isMember });
     } catch (error) {
       if (error instanceof WorkspaceScopeViolationError) {
         throw new ForbiddenException(error.message);
@@ -117,13 +120,6 @@ export class DeliverySubscriptionsService {
     if (headerWorkspaceId !== workspaceId) {
       throw new ForbiddenException(
         `X-Workspace-Id ${headerWorkspaceId} does not match the target workspace ${workspaceId}`,
-      );
-    }
-
-    const isMember = await this.workspaces.isMember(workspaceId, claims.stakeholderId);
-    if (!isMember) {
-      throw new ForbiddenException(
-        `Stakeholder ${claims.stakeholderId} is not a member of workspace ${workspaceId}`,
       );
     }
   }

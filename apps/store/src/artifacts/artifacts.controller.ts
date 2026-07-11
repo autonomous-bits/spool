@@ -12,6 +12,8 @@ import {
   Query,
   StreamableFile,
 } from '@nestjs/common';
+import { SessionTokenService } from '../auth/session-token.service.js';
+import { verifySessionClaims } from '../auth/session-claims.helper.js';
 import type { ArtifactResponse } from './artifact-response.dto.js';
 import { ArtifactsService } from './artifacts.service.js';
 import type { ChunkArtifactResponse } from './chunk-artifact-response.dto.js';
@@ -36,25 +38,32 @@ function optionalQueryString(value: unknown, field: string): string | undefined 
 
 @Controller()
 export class ArtifactsController {
-  constructor(private readonly artifacts: ArtifactsService) {}
+  constructor(
+    private readonly artifacts: ArtifactsService,
+    private readonly sessionTokenService: SessionTokenService,
+  ) {}
 
   @Post('artifacts')
   async create(
     @Body() body: unknown,
+    @Headers('authorization') authorizationHeader: unknown,
     @Headers('x-workspace-id') workspaceId: string | undefined,
   ): Promise<ArtifactResponse> {
+    const claims = verifySessionClaims(authorizationHeader, this.sessionTokenService);
     const request = parseCreateArtifactRequest(body);
-    return this.artifacts.createArtifact(request, workspaceId);
+    return this.artifacts.createArtifact(request, workspaceId, claims);
   }
 
   @Post('chunks/:label/artifacts')
   async attach(
     @Param('label') label: string,
     @Body() body: unknown,
+    @Headers('authorization') authorizationHeader: unknown,
     @Headers('x-workspace-id') workspaceId: string | undefined,
   ): Promise<ChunkArtifactResponse> {
+    const claims = verifySessionClaims(authorizationHeader, this.sessionTokenService);
     const request = parseCreateChunkArtifactRequest(body);
-    return this.artifacts.attachArtifactToChunk(label, request, workspaceId);
+    return this.artifacts.attachArtifactToChunk(label, request, workspaceId, claims);
   }
 
   @Delete('chunks/:label/artifacts/:artifactId')
@@ -63,16 +72,16 @@ export class ArtifactsController {
     @Param('label') label: string,
     @Param('artifactId') artifactId: string,
     @Query('branchId') branchId: unknown,
-    @Query('stakeholderId') stakeholderId: unknown,
+    @Headers('authorization') authorizationHeader: unknown,
     @Headers('x-workspace-id') workspaceId: string | undefined,
   ): Promise<ChunkArtifactResponse> {
+    const claims = verifySessionClaims(authorizationHeader, this.sessionTokenService);
     const resolvedBranchId = requireQueryString(branchId, 'branchId');
-    const resolvedStakeholderId = requireQueryString(stakeholderId, 'stakeholderId');
     return this.artifacts.detachArtifactFromChunk(
       label,
       artifactId,
       resolvedBranchId,
-      resolvedStakeholderId,
+      claims,
       workspaceId,
     );
   }
@@ -81,15 +90,15 @@ export class ArtifactsController {
   async listEffective(
     @Param('label') label: string,
     @Query('branchId') branchId: unknown,
-    @Query('stakeholderId') stakeholderId: unknown,
+    @Headers('authorization') authorizationHeader: unknown,
     @Headers('x-workspace-id') workspaceId: string | undefined,
   ): Promise<EffectiveChunkArtifact[]> {
+    const claims = verifySessionClaims(authorizationHeader, this.sessionTokenService);
     const resolvedBranchId = optionalQueryString(branchId, 'branchId');
-    const resolvedStakeholderId = requireQueryString(stakeholderId, 'stakeholderId');
     return this.artifacts.getEffectiveArtifactsForChunk(
       label,
       resolvedBranchId,
-      resolvedStakeholderId,
+      claims,
       workspaceId,
     );
   }
@@ -97,11 +106,11 @@ export class ArtifactsController {
   @Get('artifacts/:id/download-token')
   async downloadToken(
     @Param('id') id: string,
-    @Query('stakeholderId') stakeholderId: unknown,
+    @Headers('authorization') authorizationHeader: unknown,
     @Headers('x-workspace-id') workspaceId: string | undefined,
   ): Promise<DownloadTokenResponse> {
-    const resolvedStakeholderId = requireQueryString(stakeholderId, 'stakeholderId');
-    const issued = await this.artifacts.issueDownloadToken(id, resolvedStakeholderId, workspaceId);
+    const claims = verifySessionClaims(authorizationHeader, this.sessionTokenService);
+    const issued = await this.artifacts.issueDownloadToken(id, claims, workspaceId);
     return toDownloadTokenResponse(issued);
   }
 

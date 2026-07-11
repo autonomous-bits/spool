@@ -88,7 +88,7 @@ describe('BranchesService', () => {
     });
     vi.mocked(branchRepository.create).mockResolvedValue(persisted);
 
-    const result = await service.create(request, WORKSPACE_ID);
+    const result = await service.create(request, WORKSPACE_ID, validClaims());
 
     expect(result.id).toBe(persisted.id);
     expect(result.status).toBe('draft');
@@ -97,19 +97,19 @@ describe('BranchesService', () => {
   });
 
   it('throws ForbiddenException when the X-Workspace-Id header is missing', async () => {
-    await expect(service.create(validRequest(), undefined)).rejects.toThrow(ForbiddenException);
+    await expect(service.create(validRequest(), undefined, validClaims())).rejects.toThrow(ForbiddenException);
     expect(branchRepository.create).not.toHaveBeenCalled();
   });
 
   it('throws ForbiddenException when the stakeholder is not a member of the header workspace', async () => {
     vi.mocked(workspaceRepository.isMember).mockResolvedValue(false);
 
-    await expect(service.create(validRequest(), WORKSPACE_ID)).rejects.toThrow(ForbiddenException);
+    await expect(service.create(validRequest(), WORKSPACE_ID, validClaims())).rejects.toThrow(ForbiddenException);
     expect(branchRepository.create).not.toHaveBeenCalled();
   });
 
   it('rejects a blank name via the domain entity as a BadRequestException', async () => {
-    await expect(service.create(validRequest({ name: '   ' }), WORKSPACE_ID)).rejects.toThrow(
+    await expect(service.create(validRequest({ name: '   ' }), WORKSPACE_ID, validClaims())).rejects.toThrow(
       BadRequestException,
     );
     expect(branchRepository.create).not.toHaveBeenCalled();
@@ -121,7 +121,7 @@ describe('BranchesService', () => {
       Object.assign(new Error('violates foreign key constraint'), { code: '23503' }),
     );
 
-    await expect(service.create(request, WORKSPACE_ID)).rejects.toThrow(BadRequestException);
+    await expect(service.create(request, WORKSPACE_ID, validClaims())).rejects.toThrow(BadRequestException);
   });
 
   it('translates a unique-name violation into a BadRequestException', async () => {
@@ -132,14 +132,14 @@ describe('BranchesService', () => {
       }),
     );
 
-    await expect(service.create(request, WORKSPACE_ID)).rejects.toThrow(BadRequestException);
+    await expect(service.create(request, WORKSPACE_ID, validClaims())).rejects.toThrow(BadRequestException);
   });
 
   it('rethrows unrelated repository errors', async () => {
     const request = validRequest();
     vi.mocked(branchRepository.create).mockRejectedValue(new Error('connection lost'));
 
-    await expect(service.create(request, WORKSPACE_ID)).rejects.toThrow('connection lost');
+    await expect(service.create(request, WORKSPACE_ID, validClaims())).rejects.toThrow('connection lost');
   });
 
   it('throws ForbiddenException from submit when the X-Workspace-Id header is missing', async () => {
@@ -717,7 +717,7 @@ describe('BranchesService', () => {
 
   it('throws ForbiddenException from findById when the header is missing', async () => {
     await expect(
-      service.findById('some-id', undefined, '00000000-0000-0000-0000-000000000001'),
+      service.findById('some-id', undefined, validClaims()),
     ).rejects.toThrow(ForbiddenException);
     expect(branchRepository.findById).not.toHaveBeenCalled();
   });
@@ -726,7 +726,7 @@ describe('BranchesService', () => {
     vi.mocked(workspaceRepository.isMember).mockResolvedValue(false);
 
     await expect(
-      service.findById('some-id', WORKSPACE_ID, '00000000-0000-0000-0000-000000000001'),
+      service.findById('some-id', WORKSPACE_ID, validClaims()),
     ).rejects.toThrow(ForbiddenException);
     expect(branchRepository.findById).not.toHaveBeenCalled();
   });
@@ -741,7 +741,7 @@ describe('BranchesService', () => {
     });
     vi.mocked(branchRepository.findById).mockResolvedValue(persisted);
 
-    const result = await service.findById(persisted.id, WORKSPACE_ID, request.stakeholderId);
+    const result = await service.findById(persisted.id, WORKSPACE_ID, validClaims());
 
     expect(result.id).toBe(persisted.id);
     expect(result.submittedAt).toBeNull();
@@ -750,6 +750,6 @@ describe('BranchesService', () => {
   it('throws NotFoundException for an unknown id', async () => {
     vi.mocked(branchRepository.findById).mockResolvedValue(undefined);
 
-    await expect(service.findById('missing', WORKSPACE_ID, '00000000-0000-0000-0000-000000000001')).rejects.toThrow(NotFoundException);
+    await expect(service.findById('missing', WORKSPACE_ID, validClaims())).rejects.toThrow(NotFoundException);
   });
 });

@@ -15,6 +15,7 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
   let app: INestApplication<Server>;
   let database: TestDatabase;
   let sessionTokenService: SessionTokenService;
+  let defaultToken: string;
 
   beforeAll(async () => {
     database = await setUpTestDatabase();
@@ -26,7 +27,22 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
     app = moduleRef.createNestApplication();
     await app.init();
     sessionTokenService = moduleRef.get(SessionTokenService);
+    defaultToken = sessionTokenService.sign({
+      stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
+      discipline: 'engineering',
+      authTime: Math.floor(Date.now() / 1000),
+      workspaceId: WORKSPACE_ID,
+    });
   });
+
+  function tokenFor(workspaceId: string): string {
+    return sessionTokenService.sign({
+      stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
+      discipline: 'engineering',
+      authTime: Math.floor(Date.now() / 1000),
+      workspaceId,
+    });
+  }
 
   afterAll(async () => {
     await app.close();
@@ -52,6 +68,7 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
   it('POST /chunks creates a chunk and GET /chunks/:id retrieves it', async () => {
     const createResponse = await request(app.getHttpServer())
       .post('/chunks')
+      .set('Authorization', `Bearer ${defaultToken}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .send({
         label: `e2e-${Math.random().toString(36).slice(2, 10)}`,
@@ -68,6 +85,7 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
 
     const getResponse = await request(app.getHttpServer())
       .get(`/chunks/${createResponse.body.id as string}`)
+      .set('Authorization', `Bearer ${defaultToken}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .query({ stakeholderId: BOOTSTRAP_STAKEHOLDER_ID });
 
@@ -83,6 +101,7 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
   it('POST /chunks returns 400 for an invalid vocab value', async () => {
     const response = await request(app.getHttpServer())
       .post('/chunks')
+      .set('Authorization', `Bearer ${defaultToken}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .send({
         label: 'bad-vocab',
@@ -97,7 +116,10 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
   });
 
   it('POST /chunks returns 400 for a missing required field', async () => {
-    const response = await request(app.getHttpServer()).post('/chunks').send({
+    const response = await request(app.getHttpServer())
+      .post('/chunks')
+      .set('Authorization', `Bearer ${defaultToken}`)
+      .send({
       content: 'content',
       discipline: 'engineering',
       chunkType: 'feature',
@@ -108,9 +130,10 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
     expect(response.status).toBe(400);
   });
 
-  it('POST /chunks returns 403 for an unknown stakeholderId', async () => {
+  it('POST /chunks returns 400 for an unknown stakeholderId (FK violation on authorship attribution)', async () => {
     const response = await request(app.getHttpServer())
       .post('/chunks')
+      .set('Authorization', `Bearer ${defaultToken}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .send({
         label: `e2e-unknown-stakeholder-${Math.random().toString(36).slice(2, 10)}`,
@@ -121,12 +144,13 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
         stakeholderId: '00000000-0000-0000-0000-0000000000ff',
       });
 
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(400);
   });
 
   it('GET /chunks/:id returns 404 for an unknown id', async () => {
     const response = await request(app.getHttpServer())
       .get('/chunks/00000000-0000-0000-0000-00000000dead')
+      .set('Authorization', `Bearer ${defaultToken}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .query({ stakeholderId: BOOTSTRAP_STAKEHOLDER_ID });
 
@@ -136,6 +160,7 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
   it('POST /chunks attaches a chunk to an existing draft branch', async () => {
     const branchResponse = await request(app.getHttpServer())
       .post('/branches')
+      .set('Authorization', `Bearer ${defaultToken}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .send({
         name: `e2e-branch-${Math.random().toString(36).slice(2, 10)}`,
@@ -147,6 +172,7 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
 
     const createResponse = await request(app.getHttpServer())
       .post('/chunks')
+      .set('Authorization', `Bearer ${defaultToken}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .send({
         label: `e2e-branch-scoped-${Math.random().toString(36).slice(2, 10)}`,
@@ -164,6 +190,7 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
 
     const getResponse = await request(app.getHttpServer())
       .get(`/chunks/${createResponse.body.id as string}`)
+      .set('Authorization', `Bearer ${defaultToken}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .query({ stakeholderId: BOOTSTRAP_STAKEHOLDER_ID });
 
@@ -175,6 +202,7 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
   it('POST /chunks returns 404 when branchId does not exist', async () => {
     const response = await request(app.getHttpServer())
       .post('/chunks')
+      .set('Authorization', `Bearer ${defaultToken}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .send({
         label: `e2e-missing-branch-${Math.random().toString(36).slice(2, 10)}`,
@@ -192,6 +220,7 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
   it('POST /chunks returns 409 when branch discipline does not match the request', async () => {
     const branchResponse = await request(app.getHttpServer())
       .post('/branches')
+      .set('Authorization', `Bearer ${defaultToken}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .send({
         name: `e2e-branch-${Math.random().toString(36).slice(2, 10)}`,
@@ -202,6 +231,7 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
 
     const response = await request(app.getHttpServer())
       .post('/chunks')
+      .set('Authorization', `Bearer ${defaultToken}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .send({
         label: `e2e-wrong-discipline-${Math.random().toString(36).slice(2, 10)}`,
@@ -222,6 +252,7 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
 
     const firstResponse = await request(app.getHttpServer())
       .post('/chunks')
+      .set('Authorization', `Bearer ${defaultToken}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .send({
         label,
@@ -235,6 +266,7 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
 
     const secondResponse = await request(app.getHttpServer())
       .post('/chunks')
+      .set('Authorization', `Bearer ${tokenFor(otherWorkspaceId)}`)
       .set('X-Workspace-Id', otherWorkspaceId)
       .send({
         label,
@@ -249,6 +281,7 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
 
     const firstGet = await request(app.getHttpServer())
       .get(`/chunks/${firstResponse.body.id as string}`)
+      .set('Authorization', `Bearer ${defaultToken}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .query({ stakeholderId: BOOTSTRAP_STAKEHOLDER_ID });
     expect(firstGet.status).toBe(200);
@@ -256,6 +289,7 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
 
     const secondGet = await request(app.getHttpServer())
       .get(`/chunks/${secondResponse.body.id as string}`)
+      .set('Authorization', `Bearer ${tokenFor(otherWorkspaceId)}`)
       .set('X-Workspace-Id', otherWorkspaceId)
       .query({ stakeholderId: BOOTSTRAP_STAKEHOLDER_ID });
     expect(secondGet.status).toBe(200);
@@ -265,6 +299,7 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
     // workspace's header is indistinguishable from "doesn't exist" (never leaks existence).
     const crossWorkspaceGet = await request(app.getHttpServer())
       .get(`/chunks/${secondResponse.body.id as string}`)
+      .set('Authorization', `Bearer ${defaultToken}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .query({ stakeholderId: BOOTSTRAP_STAKEHOLDER_ID });
     expect(crossWorkspaceGet.status).toBe(404);
@@ -316,6 +351,7 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
     it('returns 400 when filtering by branchId but token has no discipline claim', async () => {
       const branchResponse = await request(app.getHttpServer())
         .post('/branches')
+        .set('Authorization', `Bearer ${validToken}`)
         .set('X-Workspace-Id', WORKSPACE_ID)
         .send({
           name: `e2e-branch-${Math.random().toString(36).slice(2, 10)}`,
@@ -343,6 +379,7 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
     it('returns 403 when filtering by branchId and token discipline does not match branch discipline', async () => {
       const branchResponse = await request(app.getHttpServer())
         .post('/branches')
+        .set('Authorization', `Bearer ${validToken}`)
         .set('X-Workspace-Id', WORKSPACE_ID)
         .send({
           name: `e2e-branch-${Math.random().toString(36).slice(2, 10)}`,
@@ -366,6 +403,7 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
       for (let i = 0; i < 3; i++) {
         await request(app.getHttpServer())
           .post('/chunks')
+          .set('Authorization', `Bearer ${validToken}`)
           .set('X-Workspace-Id', WORKSPACE_ID)
           .send({
             label: `e2e-search-${uniqueSuffix}-${String(i)}`,

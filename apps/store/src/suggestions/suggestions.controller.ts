@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   Body,
   Controller,
   Get,
@@ -16,20 +15,13 @@ import type { SuggestionResponse } from './suggestion-response.dto.js';
 import { parseCreateSuggestionRequest } from './create-suggestion-request.dto.js';
 import { SuggestionsService } from './suggestions.service.js';
 
-function requireStakeholderId(value: string | undefined): string {
-  if (typeof value !== 'string' || value.trim().length === 0) {
-    throw new BadRequestException('stakeholderId query parameter must be a non-empty string');
-  }
-  return value;
-}
-
 /**
  * SG1 exposes submission only (Meridian IDEA-28); SG2 adds human-only acceptance (Meridian
  * IDEA-27/IDEA-75). SG3 adds human-only rejection plus GET /suggestions and GET /suggestions/:id
  * reads, matching this codebase's existing GET /branches, GET /chunks, GET /edges precedent
- * (Meridian IDEA-27). G11 SG5 (Meridian IDEA-98/IDEA-100) adds the `X-Workspace-Id` header to
- * every route and a required `stakeholderId` query param to the two GET reads (create/accept/
- * reject already carry a caller identity in their body/token).
+ * (Meridian IDEA-27). G16 SG2 (Meridian IDEA-139) requires every route — including
+ * create/findAll/findById — to present a verified session token: `X-Workspace-Id` must match the
+ * token's `workspaceId` claim and the token's stakeholder must currently be a workspace member.
  */
 @Controller('suggestions')
 export class SuggestionsController {
@@ -41,10 +33,12 @@ export class SuggestionsController {
   @Post()
   async create(
     @Body() body: unknown,
+    @Headers('authorization') authorizationHeader: unknown,
     @Headers('x-workspace-id') workspaceId: string | undefined,
   ): Promise<SuggestionResponse> {
+    const claims = verifySessionClaims(authorizationHeader, this.sessionTokenService);
     const request = parseCreateSuggestionRequest(body);
-    return this.suggestions.create(request, workspaceId);
+    return this.suggestions.create(request, workspaceId, claims);
   }
 
   @Post(':id/accept')
@@ -72,18 +66,20 @@ export class SuggestionsController {
   @Get()
   async findAll(
     @Query('status') status: string | undefined,
-    @Query('stakeholderId') stakeholderId: string | undefined,
+    @Headers('authorization') authorizationHeader: unknown,
     @Headers('x-workspace-id') workspaceId: string | undefined,
   ): Promise<SuggestionResponse[]> {
-    return this.suggestions.findAll(status, requireStakeholderId(stakeholderId), workspaceId);
+    const claims = verifySessionClaims(authorizationHeader, this.sessionTokenService);
+    return this.suggestions.findAll(status, claims, workspaceId);
   }
 
   @Get(':id')
   async findOne(
     @Param('id') id: string,
-    @Query('stakeholderId') stakeholderId: string | undefined,
+    @Headers('authorization') authorizationHeader: unknown,
     @Headers('x-workspace-id') workspaceId: string | undefined,
   ): Promise<SuggestionResponse> {
-    return this.suggestions.findById(id, requireStakeholderId(stakeholderId), workspaceId);
+    const claims = verifySessionClaims(authorizationHeader, this.sessionTokenService);
+    return this.suggestions.findById(id, claims, workspaceId);
   }
 }

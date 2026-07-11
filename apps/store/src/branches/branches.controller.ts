@@ -1,25 +1,16 @@
 import {
-  BadRequestException,
   Body,
   Controller,
   Get,
   Headers,
   Param,
   Post,
-  Query,
 } from '@nestjs/common';
 import { SessionTokenService } from '../auth/session-token.service.js';
 import { verifySessionClaims } from '../auth/session-claims.helper.js';
 import type { BranchResponse } from './branch-response.dto.js';
 import { parseCreateBranchRequest } from './create-branch-request.dto.js';
 import { BranchesService } from './branches.service.js';
-
-function requireStakeholderId(value: string | undefined): string {
-  if (typeof value !== 'string' || value.trim().length === 0) {
-    throw new BadRequestException('stakeholderId query parameter must be a non-empty string');
-  }
-  return value;
-}
 
 @Controller('branches')
 export class BranchesController {
@@ -31,10 +22,12 @@ export class BranchesController {
   @Post()
   async create(
     @Body() body: unknown,
+    @Headers('authorization') authorizationHeader: unknown,
     @Headers('x-workspace-id') workspaceId: string | undefined,
   ): Promise<BranchResponse> {
+    const claims = verifySessionClaims(authorizationHeader, this.sessionTokenService);
     const request = parseCreateBranchRequest(body);
-    return this.branches.create(request, workspaceId);
+    return this.branches.create(request, workspaceId, claims);
   }
 
   @Post(':id/submit')
@@ -80,9 +73,10 @@ export class BranchesController {
   @Get(':id')
   async findOne(
     @Param('id') id: string,
+    @Headers('authorization') authorizationHeader: unknown,
     @Headers('x-workspace-id') workspaceId: string | undefined,
-    @Query('stakeholderId') stakeholderId: string | undefined,
   ): Promise<BranchResponse> {
-    return this.branches.findById(id, workspaceId, requireStakeholderId(stakeholderId));
+    const claims = verifySessionClaims(authorizationHeader, this.sessionTokenService);
+    return this.branches.findById(id, workspaceId, claims);
   }
 }

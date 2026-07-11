@@ -4,6 +4,7 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../src/app.module.js';
+import { SessionTokenService } from '../src/auth/session-token.service.js';
 import { BOOTSTRAP_STAKEHOLDER_ID } from '../src/persistence/bootstrap-stakeholder.js';
 import { setUpTestDatabase, type TestDatabase } from './support/test-database.js';
 
@@ -12,6 +13,8 @@ const WORKSPACE_ID = '00000000-0000-0000-0000-00000000d0fa';
 describe('Edges HTTP API (containerized Postgres)', () => {
   let app: INestApplication<Server>;
   let database: TestDatabase;
+  let sessionTokenService: SessionTokenService;
+  let defaultToken: string;
 
   beforeAll(async () => {
     database = await setUpTestDatabase();
@@ -22,6 +25,8 @@ describe('Edges HTTP API (containerized Postgres)', () => {
 
     app = moduleRef.createNestApplication();
     await app.init();
+    sessionTokenService = moduleRef.get(SessionTokenService);
+    defaultToken = mintSessionToken(BOOTSTRAP_STAKEHOLDER_ID, 'engineering');
   });
 
   afterAll(async () => {
@@ -29,9 +34,19 @@ describe('Edges HTTP API (containerized Postgres)', () => {
     await database.close();
   });
 
+  function mintSessionToken(stakeholderId: string, discipline: string | null): string {
+    return sessionTokenService.sign({
+      stakeholderId,
+      discipline,
+      authTime: Math.floor(Date.now() / 1000),
+      workspaceId: WORKSPACE_ID,
+    });
+  }
+
   async function createChunk(label: string, discipline = 'engineering'): Promise<string> {
     const response = await request(app.getHttpServer())
       .post('/chunks')
+      .set('Authorization', `Bearer ${defaultToken}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .send({
         label,
@@ -52,6 +67,7 @@ describe('Edges HTTP API (containerized Postgres)', () => {
   ): Promise<string> {
     const response = await request(app.getHttpServer())
       .post('/chunks')
+      .set('Authorization', `Bearer ${defaultToken}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .send({
         label,
@@ -69,6 +85,7 @@ describe('Edges HTTP API (containerized Postgres)', () => {
   async function createBranch(discipline = 'engineering'): Promise<string> {
     const response = await request(app.getHttpServer())
       .post('/branches')
+      .set('Authorization', `Bearer ${defaultToken}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .send({
         name: `e2e-branch-${Math.random().toString(36).slice(2, 10)}`,
@@ -89,13 +106,17 @@ describe('Edges HTTP API (containerized Postgres)', () => {
     await createChunk(fromLabel);
     await createChunk(toLabel);
 
-    const createResponse = await request(app.getHttpServer()).post('/edges').set('X-Workspace-Id', WORKSPACE_ID).send({
-      fromChunkLabel: fromLabel,
-      toChunkLabel: toLabel,
-      type: 'refines',
-      discipline: 'engineering',
-      stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
-    });
+    const createResponse = await request(app.getHttpServer())
+      .post('/edges')
+      .set('Authorization', `Bearer ${defaultToken}`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
+      .send({
+        fromChunkLabel: fromLabel,
+        toChunkLabel: toLabel,
+        type: 'refines',
+        discipline: 'engineering',
+        stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
+      });
 
     expect(createResponse.status).toBe(201);
     expect(createResponse.body.status).toBe('active');
@@ -104,6 +125,7 @@ describe('Edges HTTP API (containerized Postgres)', () => {
 
     const getResponse = await request(app.getHttpServer())
       .get(`/edges/${createResponse.body.id as string}`)
+      .set('Authorization', `Bearer ${defaultToken}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .query({ stakeholderId: BOOTSTRAP_STAKEHOLDER_ID });
 
@@ -124,14 +146,18 @@ describe('Edges HTTP API (containerized Postgres)', () => {
     await createBranchScopedChunk(fromLabel, branchId);
     await createBranchScopedChunk(toLabel, branchId);
 
-    const createResponse = await request(app.getHttpServer()).post('/edges').set('X-Workspace-Id', WORKSPACE_ID).send({
-      fromChunkLabel: fromLabel,
-      toChunkLabel: toLabel,
-      type: 'depends-on',
-      discipline: 'engineering',
-      stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
-      branchId,
-    });
+    const createResponse = await request(app.getHttpServer())
+      .post('/edges')
+      .set('Authorization', `Bearer ${defaultToken}`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
+      .send({
+        fromChunkLabel: fromLabel,
+        toChunkLabel: toLabel,
+        type: 'depends-on',
+        discipline: 'engineering',
+        stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
+        branchId,
+      });
 
     expect(createResponse.status).toBe(201);
     expect(createResponse.body.branchId).toBe(branchId);
@@ -139,6 +165,7 @@ describe('Edges HTTP API (containerized Postgres)', () => {
 
     const getResponse = await request(app.getHttpServer())
       .get(`/edges/${createResponse.body.id as string}`)
+      .set('Authorization', `Bearer ${defaultToken}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .query({ stakeholderId: BOOTSTRAP_STAKEHOLDER_ID });
     expect(getResponse.status).toBe(200);
@@ -146,12 +173,16 @@ describe('Edges HTTP API (containerized Postgres)', () => {
   });
 
   it('POST /edges returns 400 for a missing required field', async () => {
-    const response = await request(app.getHttpServer()).post('/edges').set('X-Workspace-Id', WORKSPACE_ID).send({
-      toChunkLabel: 'x',
-      type: 'refines',
-      discipline: 'engineering',
-      stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
-    });
+    const response = await request(app.getHttpServer())
+      .post('/edges')
+      .set('Authorization', `Bearer ${defaultToken}`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
+      .send({
+        toChunkLabel: 'x',
+        type: 'refines',
+        discipline: 'engineering',
+        stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
+      });
 
     expect(response.status).toBe(400);
   });
@@ -162,13 +193,17 @@ describe('Edges HTTP API (containerized Postgres)', () => {
     await createChunk(fromLabel);
     await createChunk(toLabel);
 
-    const response = await request(app.getHttpServer()).post('/edges').set('X-Workspace-Id', WORKSPACE_ID).send({
-      fromChunkLabel: fromLabel,
-      toChunkLabel: toLabel,
-      type: 'bogus',
-      discipline: 'engineering',
-      stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
-    });
+    const response = await request(app.getHttpServer())
+      .post('/edges')
+      .set('Authorization', `Bearer ${defaultToken}`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
+      .send({
+        fromChunkLabel: fromLabel,
+        toChunkLabel: toLabel,
+        type: 'bogus',
+        discipline: 'engineering',
+        stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
+      });
 
     expect(response.status).toBe(400);
   });
@@ -177,13 +212,17 @@ describe('Edges HTTP API (containerized Postgres)', () => {
     const label = uniqueLabel('e2e-same');
     await createChunk(label);
 
-    const response = await request(app.getHttpServer()).post('/edges').set('X-Workspace-Id', WORKSPACE_ID).send({
-      fromChunkLabel: label,
-      toChunkLabel: label,
-      type: 'refines',
-      discipline: 'engineering',
-      stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
-    });
+    const response = await request(app.getHttpServer())
+      .post('/edges')
+      .set('Authorization', `Bearer ${defaultToken}`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
+      .send({
+        fromChunkLabel: label,
+        toChunkLabel: label,
+        type: 'refines',
+        discipline: 'engineering',
+        stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
+      });
 
     expect(response.status).toBe(400);
   });
@@ -194,14 +233,18 @@ describe('Edges HTTP API (containerized Postgres)', () => {
     await createChunk(fromLabel);
     await createChunk(toLabel);
 
-    const response = await request(app.getHttpServer()).post('/edges').set('X-Workspace-Id', WORKSPACE_ID).send({
-      fromChunkLabel: fromLabel,
-      toChunkLabel: toLabel,
-      type: 'refines',
-      discipline: 'engineering',
-      stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
-      branchId: '00000000-0000-0000-0000-00000000dead',
-    });
+    const response = await request(app.getHttpServer())
+      .post('/edges')
+      .set('Authorization', `Bearer ${defaultToken}`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
+      .send({
+        fromChunkLabel: fromLabel,
+        toChunkLabel: toLabel,
+        type: 'refines',
+        discipline: 'engineering',
+        stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
+        branchId: '00000000-0000-0000-0000-00000000dead',
+      });
 
     expect(response.status).toBe(404);
   });
@@ -213,14 +256,18 @@ describe('Edges HTTP API (containerized Postgres)', () => {
     await createBranchScopedChunk(fromLabel, branchId, 'design');
     await createBranchScopedChunk(toLabel, branchId, 'design');
 
-    const response = await request(app.getHttpServer()).post('/edges').set('X-Workspace-Id', WORKSPACE_ID).send({
-      fromChunkLabel: fromLabel,
-      toChunkLabel: toLabel,
-      type: 'refines',
-      discipline: 'engineering',
-      stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
-      branchId,
-    });
+    const response = await request(app.getHttpServer())
+      .post('/edges')
+      .set('Authorization', `Bearer ${defaultToken}`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
+      .send({
+        fromChunkLabel: fromLabel,
+        toChunkLabel: toLabel,
+        type: 'refines',
+        discipline: 'engineering',
+        stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
+        branchId,
+      });
 
     expect(response.status).toBe(409);
   });
@@ -229,13 +276,17 @@ describe('Edges HTTP API (containerized Postgres)', () => {
     const fromLabel = uniqueLabel('e2e-unresolved-from');
     await createChunk(fromLabel);
 
-    const response = await request(app.getHttpServer()).post('/edges').set('X-Workspace-Id', WORKSPACE_ID).send({
-      fromChunkLabel: fromLabel,
-      toChunkLabel: uniqueLabel('e2e-nonexistent-to'),
-      type: 'refines',
-      discipline: 'engineering',
-      stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
-    });
+    const response = await request(app.getHttpServer())
+      .post('/edges')
+      .set('Authorization', `Bearer ${defaultToken}`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
+      .send({
+        fromChunkLabel: fromLabel,
+        toChunkLabel: uniqueLabel('e2e-nonexistent-to'),
+        type: 'refines',
+        discipline: 'engineering',
+        stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
+      });
 
     expect(response.status).toBe(404);
   });
@@ -254,16 +305,25 @@ describe('Edges HTTP API (containerized Postgres)', () => {
       stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
     };
 
-    const first = await request(app.getHttpServer()).post('/edges').set('X-Workspace-Id', WORKSPACE_ID).send(body);
+    const first = await request(app.getHttpServer())
+      .post('/edges')
+      .set('Authorization', `Bearer ${defaultToken}`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
+      .send(body);
     expect(first.status).toBe(201);
 
-    const second = await request(app.getHttpServer()).post('/edges').set('X-Workspace-Id', WORKSPACE_ID).send(body);
+    const second = await request(app.getHttpServer())
+      .post('/edges')
+      .set('Authorization', `Bearer ${defaultToken}`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
+      .send(body);
     expect(second.status).toBe(409);
   });
 
   it('GET /edges/:id returns 404 for an unknown id', async () => {
     const response = await request(app.getHttpServer())
       .get('/edges/00000000-0000-0000-0000-00000000dead')
+      .set('Authorization', `Bearer ${defaultToken}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .query({ stakeholderId: BOOTSTRAP_STAKEHOLDER_ID });
 

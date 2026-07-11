@@ -55,35 +55,19 @@ export class SuggestionsService {
     private readonly workspaceRepository: WorkspaceRepository,
   ) {}
 
-  private async assertDelegatedScope(
+  private async assertScope(
     headerWorkspaceId: string | null | undefined,
-    stakeholderId: string,
+    claims: SessionTokenClaims,
   ): Promise<string> {
     const isMember =
       headerWorkspaceId === null ||
       headerWorkspaceId === undefined ||
       headerWorkspaceId.trim().length === 0
         ? false
-        : await this.workspaceRepository.isMember(headerWorkspaceId, stakeholderId);
+        : await this.workspaceRepository.isMember(headerWorkspaceId, claims.stakeholderId);
 
     try {
-      assertWorkspaceScope(headerWorkspaceId, { tier: 'delegated', isMember });
-    } catch (error) {
-      if (error instanceof WorkspaceScopeViolationError) {
-        throw new ForbiddenException(error.message);
-      }
-      throw error;
-    }
-
-    return headerWorkspaceId;
-  }
-
-  private assertTokenScope(
-    headerWorkspaceId: string | null | undefined,
-    claims: SessionTokenClaims,
-  ): string {
-    try {
-      assertWorkspaceScope(headerWorkspaceId, { tier: 'token', workspaceIdClaim: claims.workspaceId });
+      assertWorkspaceScope(headerWorkspaceId, { workspaceIdClaim: claims.workspaceId, isMember });
     } catch (error) {
       if (error instanceof WorkspaceScopeViolationError) {
         throw new ForbiddenException(error.message);
@@ -97,8 +81,9 @@ export class SuggestionsService {
   async create(
     request: CreateSuggestionRequest,
     headerWorkspaceId: string | null | undefined,
+    claims: SessionTokenClaims,
   ): Promise<SuggestionResponse> {
-    const workspaceId = await this.assertDelegatedScope(headerWorkspaceId, request.stakeholderId);
+    const workspaceId = await this.assertScope(headerWorkspaceId, claims);
 
     let suggestion: Suggestion;
     try {
@@ -138,7 +123,7 @@ export class SuggestionsService {
     claims: SessionTokenClaims,
     headerWorkspaceId: string | null | undefined,
   ): Promise<BranchResponse> {
-    const workspaceId = this.assertTokenScope(headerWorkspaceId, claims);
+    const workspaceId = await this.assertScope(headerWorkspaceId, claims);
 
     const stakeholder = await this.stakeholderRepository.findById(claims.stakeholderId);
     if (stakeholder === undefined) {
@@ -191,7 +176,7 @@ export class SuggestionsService {
     claims: SessionTokenClaims,
     headerWorkspaceId: string | null | undefined,
   ): Promise<SuggestionResponse> {
-    const workspaceId = this.assertTokenScope(headerWorkspaceId, claims);
+    const workspaceId = await this.assertScope(headerWorkspaceId, claims);
 
     const stakeholder = await this.stakeholderRepository.findById(claims.stakeholderId);
     if (stakeholder === undefined) {
@@ -233,15 +218,15 @@ export class SuggestionsService {
   }
 
   /**
-   * Reads a single suggestion by id (G07 SG3). G11 SG5 moves this onto the delegated auth tier:
-   * the caller-declared `stakeholderId` must be a member of the header workspace.
+   * Reads a single suggestion by id (G07 SG3). G16 SG2 (Meridian IDEA-139) requires a verified
+   * session token whose claims are both workspace-claim-matched and currently a member.
    */
   async findById(
     suggestionId: string,
-    stakeholderId: string,
+    claims: SessionTokenClaims,
     headerWorkspaceId: string | null | undefined,
   ): Promise<SuggestionResponse> {
-    const workspaceId = await this.assertDelegatedScope(headerWorkspaceId, stakeholderId);
+    const workspaceId = await this.assertScope(headerWorkspaceId, claims);
 
     const suggestion = await this.suggestionRepository.findById(suggestionId, workspaceId);
     if (suggestion === undefined) {
@@ -252,15 +237,15 @@ export class SuggestionsService {
 
   /**
    * Lists suggestions, optionally filtered to a single status, ordered oldest-first (G07 SG3).
-   * G11 SG5 moves this onto the delegated auth tier: the caller-declared `stakeholderId` must be
-   * a member of the header workspace.
+   * G16 SG2 (Meridian IDEA-139) requires a verified session token whose claims are both
+   * workspace-claim-matched and currently a member.
    */
   async findAll(
     status: string | undefined,
-    stakeholderId: string,
+    claims: SessionTokenClaims,
     headerWorkspaceId: string | null | undefined,
   ): Promise<SuggestionResponse[]> {
-    const workspaceId = await this.assertDelegatedScope(headerWorkspaceId, stakeholderId);
+    const workspaceId = await this.assertScope(headerWorkspaceId, claims);
 
     if (status !== undefined && !isSuggestionStatus(status)) {
       throw new BadRequestException(`Invalid status filter: ${status}`);

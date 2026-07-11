@@ -4,11 +4,19 @@ import { StreamableFile } from '@nestjs/common';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ArtifactsController } from './artifacts.controller.js';
 import { ArtifactsService } from './artifacts.service.js';
+import { SessionTokenService, type SessionTokenClaims } from '../auth/session-token.service.js';
 import type { ArtifactResponse } from './artifact-response.dto.js';
 import type { ChunkArtifactResponse } from './chunk-artifact-response.dto.js';
 import type { EffectiveChunkArtifact } from '../persistence/chunk-artifact.repository.js';
 
 const WORKSPACE_ID = '00000000-0000-0000-0000-00000000d0fa';
+
+const claims = {
+  stakeholderId: 'stakeholder-1',
+  workspaceId: WORKSPACE_ID,
+  discipline: 'product',
+  authTime: 1_752_000_000,
+} satisfies SessionTokenClaims;
 
 describe('ArtifactsController', () => {
   let controller: ArtifactsController;
@@ -21,6 +29,7 @@ describe('ArtifactsController', () => {
     | 'issueDownloadToken'
     | 'streamArtifactContent'
   >;
+  let sessionTokenService: Pick<SessionTokenService, 'verify'>;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -45,11 +54,18 @@ describe('ArtifactsController', () => {
             | 'streamArtifactContent'
           >,
         },
+        {
+          provide: SessionTokenService,
+          useValue: {
+            verify: vi.fn(),
+          } satisfies Pick<SessionTokenService, 'verify'>,
+        },
       ],
     }).compile();
 
     controller = module.get(ArtifactsController);
     service = module.get(ArtifactsService);
+    sessionTokenService = module.get(SessionTokenService);
   });
 
   it('POST /artifacts parses the body and delegates to ArtifactsService.createArtifact', async () => {
@@ -60,6 +76,7 @@ describe('ArtifactsController', () => {
       createdByStakeholderId: 'stakeholder-1',
       createdAt: new Date(),
     } satisfies ArtifactResponse;
+    vi.mocked(sessionTokenService.verify).mockReturnValue(claims);
     vi.mocked(service.createArtifact).mockResolvedValue(expected);
 
     const result = await controller.create(
@@ -68,6 +85,7 @@ describe('ArtifactsController', () => {
         mimeType: 'text/plain',
         stakeholderId: 'stakeholder-1',
       },
+      'Bearer signed-token',
       WORKSPACE_ID,
     );
 
@@ -79,6 +97,7 @@ describe('ArtifactsController', () => {
         stakeholderId: 'stakeholder-1',
       },
       WORKSPACE_ID,
+      claims,
     );
   });
 
@@ -95,6 +114,7 @@ describe('ArtifactsController', () => {
       createdAt: new Date(),
       updatedAt: new Date(),
     } satisfies ChunkArtifactResponse;
+    vi.mocked(sessionTokenService.verify).mockReturnValue(claims);
     vi.mocked(service.attachArtifactToChunk).mockResolvedValue(expected);
 
     const result = await controller.attach(
@@ -103,6 +123,7 @@ describe('ArtifactsController', () => {
         artifactId: 'artifact-1',
         stakeholderId: 'stakeholder-1',
       },
+      'Bearer signed-token',
       WORKSPACE_ID,
     );
 
@@ -114,6 +135,7 @@ describe('ArtifactsController', () => {
         stakeholderId: 'stakeholder-1',
       },
       WORKSPACE_ID,
+      claims,
     );
   });
 
@@ -130,13 +152,14 @@ describe('ArtifactsController', () => {
       createdAt: new Date(),
       updatedAt: new Date(),
     } satisfies ChunkArtifactResponse;
+    vi.mocked(sessionTokenService.verify).mockReturnValue(claims);
     vi.mocked(service.detachArtifactFromChunk).mockResolvedValue(expected);
 
     const result = await controller.detach(
       'ATOMIC-1',
       'artifact-1',
       'branch-1',
-      'stakeholder-1',
+      'Bearer signed-token',
       WORKSPACE_ID,
     );
 
@@ -145,22 +168,23 @@ describe('ArtifactsController', () => {
       'ATOMIC-1',
       'artifact-1',
       'branch-1',
-      'stakeholder-1',
+      claims,
       WORKSPACE_ID,
     );
   });
 
   it('DELETE .../artifacts/:artifactId throws BadRequestException when branchId query param is missing', async () => {
+    vi.mocked(sessionTokenService.verify).mockReturnValue(claims);
     await expect(
-      controller.detach('ATOMIC-1', 'artifact-1', undefined, 'stakeholder-1', WORKSPACE_ID),
+      controller.detach('ATOMIC-1', 'artifact-1', undefined, 'Bearer signed-token', WORKSPACE_ID),
     ).rejects.toThrow('branchId');
     expect(service.detachArtifactFromChunk).not.toHaveBeenCalled();
   });
 
-  it('DELETE .../artifacts/:artifactId throws BadRequestException when stakeholderId query param is missing', async () => {
+  it('DELETE .../artifacts/:artifactId rejects a missing Authorization header', async () => {
     await expect(
       controller.detach('ATOMIC-1', 'artifact-1', 'branch-1', undefined, WORKSPACE_ID),
-    ).rejects.toThrow('stakeholderId');
+    ).rejects.toThrow();
     expect(service.detachArtifactFromChunk).not.toHaveBeenCalled();
   });
 
@@ -168,12 +192,13 @@ describe('ArtifactsController', () => {
     const expected: EffectiveChunkArtifact[] = [
       { artifactId: 'artifact-1', branchId: null, status: 'active' },
     ];
+    vi.mocked(sessionTokenService.verify).mockReturnValue(claims);
     vi.mocked(service.getEffectiveArtifactsForChunk).mockResolvedValue(expected);
 
     const result = await controller.listEffective(
       'ATOMIC-1',
       'branch-1',
-      'stakeholder-1',
+      'Bearer signed-token',
       WORKSPACE_ID,
     );
 
@@ -181,41 +206,43 @@ describe('ArtifactsController', () => {
     expect(service.getEffectiveArtifactsForChunk).toHaveBeenCalledWith(
       'ATOMIC-1',
       'branch-1',
-      'stakeholder-1',
+      claims,
       WORKSPACE_ID,
     );
   });
 
   it('GET chunks/:label/artifacts passes undefined branchId when the query param is omitted', async () => {
+    vi.mocked(sessionTokenService.verify).mockReturnValue(claims);
     vi.mocked(service.getEffectiveArtifactsForChunk).mockResolvedValue([]);
 
-    await controller.listEffective('ATOMIC-1', undefined, 'stakeholder-1', WORKSPACE_ID);
+    await controller.listEffective('ATOMIC-1', undefined, 'Bearer signed-token', WORKSPACE_ID);
 
     expect(service.getEffectiveArtifactsForChunk).toHaveBeenCalledWith(
       'ATOMIC-1',
       undefined,
-      'stakeholder-1',
+      claims,
       WORKSPACE_ID,
     );
   });
 
-  it('GET chunks/:label/artifacts throws BadRequestException when stakeholderId query param is missing', async () => {
+  it('GET chunks/:label/artifacts rejects a missing Authorization header', async () => {
     await expect(
       controller.listEffective('ATOMIC-1', undefined, undefined, WORKSPACE_ID),
-    ).rejects.toThrow('stakeholderId');
+    ).rejects.toThrow();
     expect(service.getEffectiveArtifactsForChunk).not.toHaveBeenCalled();
   });
 
   it('GET artifacts/:id/download-token delegates to ArtifactsService.issueDownloadToken', async () => {
     const issued = { token: 'signed-token', expiresAt: new Date('2026-01-01T00:00:00Z') };
+    vi.mocked(sessionTokenService.verify).mockReturnValue(claims);
     vi.mocked(service.issueDownloadToken).mockResolvedValue(issued);
 
-    const result = await controller.downloadToken('artifact-1', 'stakeholder-1', WORKSPACE_ID);
+    const result = await controller.downloadToken('artifact-1', 'Bearer signed-token', WORKSPACE_ID);
 
     expect(result).toEqual(issued);
     expect(service.issueDownloadToken).toHaveBeenCalledWith(
       'artifact-1',
-      'stakeholder-1',
+      claims,
       WORKSPACE_ID,
     );
   });

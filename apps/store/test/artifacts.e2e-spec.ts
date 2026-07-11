@@ -4,6 +4,7 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../src/app.module.js';
+import { SessionTokenService } from '../src/auth/session-token.service.js';
 import { BOOTSTRAP_STAKEHOLDER_ID } from '../src/persistence/bootstrap-stakeholder.js';
 import { setUpTestDatabase, type TestDatabase } from './support/test-database.js';
 
@@ -12,6 +13,7 @@ const WORKSPACE_ID = '00000000-0000-0000-0000-00000000d0fa';
 describe('Artifacts HTTP API (containerized Postgres)', () => {
   let app: INestApplication<Server>;
   let database: TestDatabase;
+  let sessionTokenService: SessionTokenService;
 
   beforeAll(async () => {
     database = await setUpTestDatabase();
@@ -22,6 +24,7 @@ describe('Artifacts HTTP API (containerized Postgres)', () => {
 
     app = moduleRef.createNestApplication();
     await app.init();
+    sessionTokenService = moduleRef.get(SessionTokenService);
   });
 
   afterAll(async () => {
@@ -33,9 +36,23 @@ describe('Artifacts HTTP API (containerized Postgres)', () => {
     return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
   }
 
+  function mintSessionToken(
+    stakeholderId = BOOTSTRAP_STAKEHOLDER_ID,
+    discipline: string | null = 'engineering',
+  ): string {
+    return sessionTokenService.sign({
+      stakeholderId,
+      discipline,
+      authTime: Math.floor(Date.now() / 1000),
+      workspaceId: WORKSPACE_ID,
+    });
+  }
+
   async function createChunk(label: string, branchId?: string): Promise<string> {
+    const token = mintSessionToken();
     const response = await request(app.getHttpServer())
       .post('/chunks')
+      .set('Authorization', `Bearer ${token}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .send({
         label,
@@ -51,8 +68,10 @@ describe('Artifacts HTTP API (containerized Postgres)', () => {
   }
 
   async function createBranch(): Promise<string> {
+    const token = mintSessionToken();
     const response = await request(app.getHttpServer())
       .post('/branches')
+      .set('Authorization', `Bearer ${token}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .send({
         name: `e2e-branch-${Math.random().toString(36).slice(2, 10)}`,
@@ -64,8 +83,10 @@ describe('Artifacts HTTP API (containerized Postgres)', () => {
   }
 
   async function createArtifact(content = 'hello artifact bytes'): Promise<string> {
+    const token = mintSessionToken();
     const response = await request(app.getHttpServer())
       .post('/artifacts')
+      .set('Authorization', `Bearer ${token}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .send({
         content: Buffer.from(content).toString('base64'),
@@ -77,8 +98,10 @@ describe('Artifacts HTTP API (containerized Postgres)', () => {
   }
 
   it('POST /artifacts returns 201 with artifact id + uri metadata only (no content echoed)', async () => {
+    const token = mintSessionToken();
     const response = await request(app.getHttpServer())
       .post('/artifacts')
+      .set('Authorization', `Bearer ${token}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .send({
         content: Buffer.from('sample bytes').toString('base64'),
@@ -97,8 +120,10 @@ describe('Artifacts HTTP API (containerized Postgres)', () => {
   });
 
   it('POST /artifacts returns 400 for malformed base64 content', async () => {
+    const token = mintSessionToken();
     const response = await request(app.getHttpServer())
       .post('/artifacts')
+      .set('Authorization', `Bearer ${token}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .send({
         content: 'not base64!!',
@@ -110,11 +135,15 @@ describe('Artifacts HTTP API (containerized Postgres)', () => {
   });
 
   it('POST /artifacts returns 403 when the X-Workspace-Id header is missing', async () => {
-    const response = await request(app.getHttpServer()).post('/artifacts').send({
-      content: Buffer.from('sample bytes').toString('base64'),
-      mimeType: 'text/plain',
-      stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
-    });
+    const token = mintSessionToken();
+    const response = await request(app.getHttpServer())
+      .post('/artifacts')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        content: Buffer.from('sample bytes').toString('base64'),
+        mimeType: 'text/plain',
+        stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
+      });
 
     expect(response.status).toBe(403);
   });
@@ -122,9 +151,11 @@ describe('Artifacts HTTP API (containerized Postgres)', () => {
   it('POST /chunks/:label/artifacts returns 201 with the created mainline association', async () => {
     const label = await createChunk(uniqueLabel('e2e-chunk'));
     const artifactId = await createArtifact();
+    const token = mintSessionToken();
 
     const response = await request(app.getHttpServer())
       .post(`/chunks/${label}/artifacts`)
+      .set('Authorization', `Bearer ${token}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .send({ artifactId, stakeholderId: BOOTSTRAP_STAKEHOLDER_ID });
 
@@ -139,9 +170,11 @@ describe('Artifacts HTTP API (containerized Postgres)', () => {
 
   it('POST /chunks/:label/artifacts returns 404 for an unknown chunk', async () => {
     const artifactId = await createArtifact();
+    const token = mintSessionToken();
 
     const response = await request(app.getHttpServer())
       .post(`/chunks/${uniqueLabel('e2e-nonexistent')}/artifacts`)
+      .set('Authorization', `Bearer ${token}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .send({ artifactId, stakeholderId: BOOTSTRAP_STAKEHOLDER_ID });
 
@@ -150,9 +183,11 @@ describe('Artifacts HTTP API (containerized Postgres)', () => {
 
   it('POST /chunks/:label/artifacts returns 404 for an unknown artifact', async () => {
     const label = await createChunk(uniqueLabel('e2e-chunk-unknown-artifact'));
+    const token = mintSessionToken();
 
     const response = await request(app.getHttpServer())
       .post(`/chunks/${label}/artifacts`)
+      .set('Authorization', `Bearer ${token}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .send({
         artifactId: '00000000-0000-0000-0000-00000000dead',
@@ -165,9 +200,11 @@ describe('Artifacts HTTP API (containerized Postgres)', () => {
   it('POST /chunks/:label/artifacts returns 403 when the X-Workspace-Id header is missing', async () => {
     const label = await createChunk(uniqueLabel('e2e-chunk-no-header'));
     const artifactId = await createArtifact();
+    const token = mintSessionToken();
 
     const response = await request(app.getHttpServer())
       .post(`/chunks/${label}/artifacts`)
+      .set('Authorization', `Bearer ${token}`)
       .send({ artifactId, stakeholderId: BOOTSTRAP_STAKEHOLDER_ID });
 
     expect(response.status).toBe(403);
@@ -177,9 +214,11 @@ describe('Artifacts HTTP API (containerized Postgres)', () => {
     const branchId = await createBranch();
     const label = await createChunk(uniqueLabel('e2e-branch-chunk'), branchId);
     const artifactId = await createArtifact();
+    const token = mintSessionToken();
 
     const response = await request(app.getHttpServer())
       .post(`/chunks/${label}/artifacts`)
+      .set('Authorization', `Bearer ${token}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .send({ artifactId, stakeholderId: BOOTSTRAP_STAKEHOLDER_ID, branchId });
 
@@ -197,15 +236,18 @@ describe('Artifacts HTTP API (containerized Postgres)', () => {
     const branchId = await createBranch();
     const label = await createChunk(uniqueLabel('e2e-detach-chunk'), branchId);
     const artifactId = await createArtifact();
+    const token = mintSessionToken();
 
     await request(app.getHttpServer())
       .post(`/chunks/${label}/artifacts`)
+      .set('Authorization', `Bearer ${token}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .send({ artifactId, stakeholderId: BOOTSTRAP_STAKEHOLDER_ID, branchId })
       .expect(201);
 
     const response = await request(app.getHttpServer())
       .delete(`/chunks/${label}/artifacts/${artifactId}`)
+      .set('Authorization', `Bearer ${token}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .query({ branchId, stakeholderId: BOOTSTRAP_STAKEHOLDER_ID });
 
@@ -221,9 +263,11 @@ describe('Artifacts HTTP API (containerized Postgres)', () => {
   it('DELETE .../artifacts/:artifactId returns 400 when branchId query parameter is omitted', async () => {
     const label = await createChunk(uniqueLabel('e2e-detach-missing-branch'));
     const artifactId = await createArtifact();
+    const token = mintSessionToken();
 
     const response = await request(app.getHttpServer())
       .delete(`/chunks/${label}/artifacts/${artifactId}`)
+      .set('Authorization', `Bearer ${token}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .query({ stakeholderId: BOOTSTRAP_STAKEHOLDER_ID });
 
@@ -234,14 +278,17 @@ describe('Artifacts HTTP API (containerized Postgres)', () => {
     const branchId = await createBranch();
     const label = await createChunk(uniqueLabel('e2e-detach-no-header'), branchId);
     const artifactId = await createArtifact();
+    const token = mintSessionToken();
     await request(app.getHttpServer())
       .post(`/chunks/${label}/artifacts`)
+      .set('Authorization', `Bearer ${token}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .send({ artifactId, stakeholderId: BOOTSTRAP_STAKEHOLDER_ID, branchId })
       .expect(201);
 
     const response = await request(app.getHttpServer())
       .delete(`/chunks/${label}/artifacts/${artifactId}`)
+      .set('Authorization', `Bearer ${token}`)
       .query({ branchId, stakeholderId: BOOTSTRAP_STAKEHOLDER_ID });
 
     expect(response.status).toBe(403);
@@ -250,14 +297,17 @@ describe('Artifacts HTTP API (containerized Postgres)', () => {
   it('GET /chunks/:label/artifacts?branchId= returns the mainline-effective tuple with no branch overlay', async () => {
     const label = await createChunk(uniqueLabel('e2e-effective-mainline'));
     const artifactId = await createArtifact();
+    const token = mintSessionToken();
     await request(app.getHttpServer())
       .post(`/chunks/${label}/artifacts`)
+      .set('Authorization', `Bearer ${token}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .send({ artifactId, stakeholderId: BOOTSTRAP_STAKEHOLDER_ID })
       .expect(201);
 
     const response = await request(app.getHttpServer())
       .get(`/chunks/${label}/artifacts`)
+      .set('Authorization', `Bearer ${token}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .query({ stakeholderId: BOOTSTRAP_STAKEHOLDER_ID });
 
@@ -269,14 +319,17 @@ describe('Artifacts HTTP API (containerized Postgres)', () => {
     const branchId = await createBranch();
     const label = await createChunk(uniqueLabel('e2e-effective-branch'), branchId);
     const artifactId = await createArtifact();
+    const token = mintSessionToken();
     await request(app.getHttpServer())
       .post(`/chunks/${label}/artifacts`)
+      .set('Authorization', `Bearer ${token}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .send({ artifactId, stakeholderId: BOOTSTRAP_STAKEHOLDER_ID, branchId })
       .expect(201);
 
     const response = await request(app.getHttpServer())
       .get(`/chunks/${label}/artifacts`)
+      .set('Authorization', `Bearer ${token}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .query({ branchId, stakeholderId: BOOTSTRAP_STAKEHOLDER_ID });
 
@@ -285,8 +338,10 @@ describe('Artifacts HTTP API (containerized Postgres)', () => {
   });
 
   it('GET /chunks/:label/artifacts returns 404 for an unknown chunk', async () => {
+    const token = mintSessionToken();
     const response = await request(app.getHttpServer())
       .get(`/chunks/${uniqueLabel('e2e-effective-nonexistent')}/artifacts`)
+      .set('Authorization', `Bearer ${token}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .query({ stakeholderId: BOOTSTRAP_STAKEHOLDER_ID });
 
@@ -295,9 +350,11 @@ describe('Artifacts HTTP API (containerized Postgres)', () => {
 
   it('GET /chunks/:label/artifacts returns 403 when the X-Workspace-Id header is missing', async () => {
     const label = await createChunk(uniqueLabel('e2e-effective-no-header'));
+    const token = mintSessionToken();
 
     const response = await request(app.getHttpServer())
       .get(`/chunks/${label}/artifacts`)
+      .set('Authorization', `Bearer ${token}`)
       .query({ stakeholderId: BOOTSTRAP_STAKEHOLDER_ID });
 
     expect(response.status).toBe(403);
@@ -305,9 +362,11 @@ describe('Artifacts HTTP API (containerized Postgres)', () => {
 
   it('GET /artifacts/:id/download-token issues a token that expires', async () => {
     const artifactId = await createArtifact();
+    const token = mintSessionToken();
 
     const response = await request(app.getHttpServer())
       .get(`/artifacts/${artifactId}/download-token`)
+      .set('Authorization', `Bearer ${token}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .query({ stakeholderId: BOOTSTRAP_STAKEHOLDER_ID });
 
@@ -317,8 +376,10 @@ describe('Artifacts HTTP API (containerized Postgres)', () => {
   });
 
   it('GET /artifacts/:id/download-token returns 404 for an unknown artifact', async () => {
+    const token = mintSessionToken();
     const response = await request(app.getHttpServer())
       .get('/artifacts/00000000-0000-0000-0000-00000000dead/download-token')
+      .set('Authorization', `Bearer ${token}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .query({ stakeholderId: BOOTSTRAP_STAKEHOLDER_ID });
 
@@ -327,9 +388,11 @@ describe('Artifacts HTTP API (containerized Postgres)', () => {
 
   it('GET /artifacts/:id/download-token returns 403 when the X-Workspace-Id header is missing', async () => {
     const artifactId = await createArtifact();
+    const token = mintSessionToken();
 
     const response = await request(app.getHttpServer())
       .get(`/artifacts/${artifactId}/download-token`)
+      .set('Authorization', `Bearer ${token}`)
       .query({ stakeholderId: BOOTSTRAP_STAKEHOLDER_ID });
 
     expect(response.status).toBe(403);
@@ -338,8 +401,10 @@ describe('Artifacts HTTP API (containerized Postgres)', () => {
   it('GET /artifacts/content/:token streams back the exact originally-uploaded bytes with the correct Content-Type', async () => {
     const content = 'exact original bytes for signed download';
     const artifactId = await createArtifact(content);
+    const token = mintSessionToken();
     const tokenResponse = await request(app.getHttpServer())
       .get(`/artifacts/${artifactId}/download-token`)
+      .set('Authorization', `Bearer ${token}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .query({ stakeholderId: BOOTSTRAP_STAKEHOLDER_ID })
       .expect(200);
@@ -355,8 +420,10 @@ describe('Artifacts HTTP API (containerized Postgres)', () => {
 
   it('GET /artifacts/content/:token rejects a tampered token', async () => {
     const artifactId = await createArtifact();
+    const token = mintSessionToken();
     const tokenResponse = await request(app.getHttpServer())
       .get(`/artifacts/${artifactId}/download-token`)
+      .set('Authorization', `Bearer ${token}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .query({ stakeholderId: BOOTSTRAP_STAKEHOLDER_ID })
       .expect(200);

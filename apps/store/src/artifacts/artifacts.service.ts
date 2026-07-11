@@ -16,6 +16,7 @@ import type { EffectiveChunkArtifact } from '../persistence/chunk-artifact.repos
 import { ChunkArtifactRepository } from '../persistence/chunk-artifact.repository.js';
 import { ChunkRepository } from '../persistence/chunk.repository.js';
 import { WorkspaceRepository } from '../persistence/workspace.repository.js';
+import type { SessionTokenClaims } from '../auth/session-token.service.js';
 import {
   ArtifactDownloadTokenService,
   InvalidArtifactDownloadTokenError,
@@ -65,19 +66,19 @@ export class ArtifactsService {
     @Inject(ARTIFACT_BLOB_STORE) private readonly blobStore: ArtifactBlobStore,
   ) {}
 
-  private async assertDelegatedScope(
+  private async assertScope(
     headerWorkspaceId: string | null | undefined,
-    stakeholderId: string,
+    claims: SessionTokenClaims,
   ): Promise<string> {
     const isMember =
       headerWorkspaceId === null ||
       headerWorkspaceId === undefined ||
       headerWorkspaceId.trim().length === 0
         ? false
-        : await this.workspaceRepository.isMember(headerWorkspaceId, stakeholderId);
+        : await this.workspaceRepository.isMember(headerWorkspaceId, claims.stakeholderId);
 
     try {
-      assertWorkspaceScope(headerWorkspaceId, { tier: 'delegated', isMember });
+      assertWorkspaceScope(headerWorkspaceId, { workspaceIdClaim: claims.workspaceId, isMember });
     } catch (error) {
       if (error instanceof WorkspaceScopeViolationError) {
         throw new ForbiddenException(error.message);
@@ -91,8 +92,9 @@ export class ArtifactsService {
   async createArtifact(
     request: CreateArtifactRequest,
     headerWorkspaceId: string | null | undefined,
+    claims: SessionTokenClaims,
   ): Promise<ArtifactResponse> {
-    const workspaceId = await this.assertDelegatedScope(headerWorkspaceId, request.stakeholderId);
+    const workspaceId = await this.assertScope(headerWorkspaceId, claims);
 
     try {
       const artifact = await this.artifactRepository.create({
@@ -114,8 +116,9 @@ export class ArtifactsService {
     chunkLabel: string,
     request: CreateChunkArtifactRequest,
     headerWorkspaceId: string | null | undefined,
+    claims: SessionTokenClaims,
   ): Promise<ChunkArtifactResponse> {
-    const workspaceId = await this.assertDelegatedScope(headerWorkspaceId, request.stakeholderId);
+    const workspaceId = await this.assertScope(headerWorkspaceId, claims);
 
     const chunk = await this.chunkRepository.findByLabel(chunkLabel, request.branchId, workspaceId);
     if (chunk === undefined) {
@@ -159,10 +162,10 @@ export class ArtifactsService {
     chunkLabel: string,
     artifactId: string,
     branchId: string,
-    stakeholderId: string,
+    claims: SessionTokenClaims,
     headerWorkspaceId: string | null | undefined,
   ): Promise<ChunkArtifactResponse> {
-    const workspaceId = await this.assertDelegatedScope(headerWorkspaceId, stakeholderId);
+    const workspaceId = await this.assertScope(headerWorkspaceId, claims);
 
     const chunk = await this.chunkRepository.findByLabel(chunkLabel, branchId, workspaceId);
     if (chunk === undefined) {
@@ -181,7 +184,7 @@ export class ArtifactsService {
         chunkLabel,
         artifactId,
         status: 'deactivated',
-        createdByStakeholderId: stakeholderId,
+        createdByStakeholderId: claims.stakeholderId,
         branchId,
         originBranchId: branchId,
       });
@@ -195,7 +198,7 @@ export class ArtifactsService {
       return toChunkArtifactResponse(created);
     } catch (error) {
       if (isForeignKeyViolation(error)) {
-        throw new BadRequestException(`Unknown stakeholderId: ${stakeholderId}`);
+        throw new BadRequestException(`Unknown stakeholderId: ${claims.stakeholderId}`);
       }
       throw error;
     }
@@ -209,10 +212,10 @@ export class ArtifactsService {
   async getEffectiveArtifactsForChunk(
     chunkLabel: string,
     branchId: string | undefined,
-    stakeholderId: string,
+    claims: SessionTokenClaims,
     headerWorkspaceId: string | null | undefined,
   ): Promise<EffectiveChunkArtifact[]> {
-    const workspaceId = await this.assertDelegatedScope(headerWorkspaceId, stakeholderId);
+    const workspaceId = await this.assertScope(headerWorkspaceId, claims);
 
     const chunk = await this.chunkRepository.findByLabel(chunkLabel, branchId, workspaceId);
     if (chunk === undefined) {
@@ -231,10 +234,10 @@ export class ArtifactsService {
    */
   async issueDownloadToken(
     artifactId: string,
-    stakeholderId: string,
+    claims: SessionTokenClaims,
     headerWorkspaceId: string | null | undefined,
   ): Promise<IssuedArtifactDownloadToken> {
-    const workspaceId = await this.assertDelegatedScope(headerWorkspaceId, stakeholderId);
+    const workspaceId = await this.assertScope(headerWorkspaceId, claims);
 
     const artifact = await this.artifactRepository.findById(artifactId, workspaceId);
     if (artifact === undefined) {

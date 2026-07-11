@@ -66,6 +66,7 @@ describe('SuggestionsController', () => {
       createdAt: new Date(),
       updatedAt: new Date(),
     } satisfies SuggestionResponse;
+    vi.mocked(sessionTokenService.verify).mockReturnValue(claims);
     vi.mocked(service.create).mockResolvedValue(expected);
 
     const result = await controller.create(
@@ -75,6 +76,7 @@ describe('SuggestionsController', () => {
         discipline: 'product',
         stakeholderId: 'stakeholder-1',
       },
+      'Bearer signed-token',
       WORKSPACE_ID,
     );
 
@@ -86,6 +88,7 @@ describe('SuggestionsController', () => {
         stakeholderId: 'stakeholder-1',
       },
       WORKSPACE_ID,
+      claims,
     );
   });
 
@@ -181,42 +184,45 @@ describe('SuggestionsController', () => {
   });
 
   it('delegates GET /suggestions/:id to SuggestionsService', async () => {
+    vi.mocked(sessionTokenService.verify).mockReturnValue(claims);
     vi.mocked(service.findById).mockResolvedValue(suggestionResponse);
 
-    const result = await controller.findOne('suggestion-1', 'stakeholder-1', WORKSPACE_ID);
+    const result = await controller.findOne('suggestion-1', 'Bearer signed-token', WORKSPACE_ID);
 
     expect(result).toEqual(suggestionResponse);
-    expect(service.findById).toHaveBeenCalledWith('suggestion-1', 'stakeholder-1', WORKSPACE_ID);
+    expect(service.findById).toHaveBeenCalledWith('suggestion-1', claims, WORKSPACE_ID);
   });
 
-  it('throws BadRequestException from GET /suggestions/:id when stakeholderId query param is missing', async () => {
+  it('rejects GET /suggestions/:id with a missing Authorization header', async () => {
     await expect(controller.findOne('suggestion-1', undefined, WORKSPACE_ID)).rejects.toThrow(
-      'stakeholderId',
+      UnauthorizedException,
     );
     expect(service.findById).not.toHaveBeenCalled();
   });
 
   it('delegates GET /suggestions with an optional status filter to SuggestionsService', async () => {
+    vi.mocked(sessionTokenService.verify).mockReturnValue(claims);
     vi.mocked(service.findAll).mockResolvedValue([suggestionResponse]);
 
-    const result = await controller.findAll('pending', 'stakeholder-1', WORKSPACE_ID);
+    const result = await controller.findAll('pending', 'Bearer signed-token', WORKSPACE_ID);
 
     expect(result).toEqual([suggestionResponse]);
-    expect(service.findAll).toHaveBeenCalledWith('pending', 'stakeholder-1', WORKSPACE_ID);
+    expect(service.findAll).toHaveBeenCalledWith('pending', claims, WORKSPACE_ID);
   });
 
   it('delegates GET /suggestions with no status filter to SuggestionsService', async () => {
+    vi.mocked(sessionTokenService.verify).mockReturnValue(claims);
     vi.mocked(service.findAll).mockResolvedValue([suggestionResponse]);
 
-    const result = await controller.findAll(undefined, 'stakeholder-1', WORKSPACE_ID);
+    const result = await controller.findAll(undefined, 'Bearer signed-token', WORKSPACE_ID);
 
     expect(result).toEqual([suggestionResponse]);
-    expect(service.findAll).toHaveBeenCalledWith(undefined, 'stakeholder-1', WORKSPACE_ID);
+    expect(service.findAll).toHaveBeenCalledWith(undefined, claims, WORKSPACE_ID);
   });
 
-  it('throws BadRequestException from GET /suggestions when stakeholderId query param is missing', async () => {
+  it('rejects GET /suggestions with a missing Authorization header', async () => {
     await expect(controller.findAll(undefined, undefined, WORKSPACE_ID)).rejects.toThrow(
-      'stakeholderId',
+      UnauthorizedException,
     );
     expect(service.findAll).not.toHaveBeenCalled();
   });

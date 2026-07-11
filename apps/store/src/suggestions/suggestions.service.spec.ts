@@ -80,7 +80,7 @@ describe('SuggestionsService', () => {
     const { suggestionRepository, service } = setUp();
     vi.mocked(suggestionRepository.create).mockImplementation((suggestion) => suggestion);
 
-    const result = await service.create(chunkRequest(), WORKSPACE_ID);
+    const result = await service.create(chunkRequest(), WORKSPACE_ID, claims);
 
     expect(result.label).toBe('ATOMIC-1');
     expect(result.content).toBe('Some proposed content.');
@@ -97,7 +97,7 @@ describe('SuggestionsService', () => {
     const { suggestionRepository, service } = setUp();
     vi.mocked(suggestionRepository.create).mockImplementation((suggestion) => suggestion);
 
-    const result = await service.create(edgeRequest(), WORKSPACE_ID);
+    const result = await service.create(edgeRequest(), WORKSPACE_ID, claims);
 
     expect(result.fromChunkLabel).toBe('ATOMIC-1');
     expect(result.toChunkLabel).toBe('ATOMIC-2');
@@ -108,7 +108,7 @@ describe('SuggestionsService', () => {
   it('throws ForbiddenException when the X-Workspace-Id header is missing', async () => {
     const { suggestionRepository, service } = setUp();
 
-    await expect(service.create(chunkRequest(), undefined)).rejects.toThrow(ForbiddenException);
+    await expect(service.create(chunkRequest(), undefined, claims)).rejects.toThrow(ForbiddenException);
     expect(suggestionRepository.create).not.toHaveBeenCalled();
   });
 
@@ -116,7 +116,7 @@ describe('SuggestionsService', () => {
     const { suggestionRepository, workspaceRepository, service } = setUp();
     vi.mocked(workspaceRepository.isMember).mockResolvedValue(false);
 
-    await expect(service.create(chunkRequest(), WORKSPACE_ID)).rejects.toThrow(
+    await expect(service.create(chunkRequest(), WORKSPACE_ID, claims)).rejects.toThrow(
       ForbiddenException,
     );
     expect(suggestionRepository.create).not.toHaveBeenCalled();
@@ -129,6 +129,7 @@ describe('SuggestionsService', () => {
       service.create(
         chunkRequest({ variant: { kind: 'chunk', label: '   ', content: 'content' } }),
         WORKSPACE_ID,
+        claims,
       ),
     ).rejects.toThrow(BadRequestException);
     expect(suggestionRepository.create).not.toHaveBeenCalled();
@@ -138,7 +139,7 @@ describe('SuggestionsService', () => {
     const { suggestionRepository, service } = setUp();
     vi.mocked(suggestionRepository.create).mockRejectedValue({ code: '23503' });
 
-    await expect(service.create(chunkRequest(), WORKSPACE_ID)).rejects.toThrow(
+    await expect(service.create(chunkRequest(), WORKSPACE_ID, claims)).rejects.toThrow(
       BadRequestException,
     );
   });
@@ -148,7 +149,7 @@ describe('SuggestionsService', () => {
     const unexpected = new Error('boom');
     vi.mocked(suggestionRepository.create).mockRejectedValue(unexpected);
 
-    await expect(service.create(chunkRequest(), WORKSPACE_ID)).rejects.toBe(unexpected);
+    await expect(service.create(chunkRequest(), WORKSPACE_ID, claims)).rejects.toBe(unexpected);
   });
 
   it('accepts a pending suggestion, returning the created branch response', async () => {
@@ -310,7 +311,7 @@ describe('SuggestionsService', () => {
       pendingSuggestion({ id: 'suggestion-1' }),
     );
 
-    const result = await service.findById('suggestion-1', STAKEHOLDER_ID, WORKSPACE_ID);
+    const result = await service.findById('suggestion-1', claims, WORKSPACE_ID);
 
     expect(result.id).toBe('suggestion-1');
   });
@@ -319,7 +320,7 @@ describe('SuggestionsService', () => {
     const { suggestionRepository, service } = setUp();
     vi.mocked(suggestionRepository.findById).mockResolvedValue(undefined);
 
-    await expect(service.findById('missing', STAKEHOLDER_ID, WORKSPACE_ID)).rejects.toThrow(
+    await expect(service.findById('missing', claims, WORKSPACE_ID)).rejects.toThrow(
       NotFoundException,
     );
   });
@@ -327,7 +328,7 @@ describe('SuggestionsService', () => {
   it('findById throws ForbiddenException when the X-Workspace-Id header is missing', async () => {
     const { suggestionRepository, service } = setUp();
 
-    await expect(service.findById('missing', STAKEHOLDER_ID, undefined)).rejects.toThrow(
+    await expect(service.findById('missing', claims, undefined)).rejects.toThrow(
       ForbiddenException,
     );
     expect(suggestionRepository.findById).not.toHaveBeenCalled();
@@ -340,7 +341,7 @@ describe('SuggestionsService', () => {
       pendingSuggestion({ id: 'suggestion-2' }),
     ]);
 
-    const result = await service.findAll('pending', STAKEHOLDER_ID, WORKSPACE_ID);
+    const result = await service.findAll('pending', claims, WORKSPACE_ID);
 
     expect(result).toHaveLength(2);
     expect(suggestionRepository.findAll).toHaveBeenCalledWith('pending', WORKSPACE_ID);
@@ -350,14 +351,14 @@ describe('SuggestionsService', () => {
     const { service } = setUp();
 
     await expect(
-      service.findAll('not-a-status', STAKEHOLDER_ID, WORKSPACE_ID),
+      service.findAll('not-a-status', claims, WORKSPACE_ID),
     ).rejects.toThrow(BadRequestException);
   });
 
   it('findAll throws ForbiddenException when the X-Workspace-Id header is missing', async () => {
     const { suggestionRepository, service } = setUp();
 
-    await expect(service.findAll('pending', STAKEHOLDER_ID, undefined)).rejects.toThrow(
+    await expect(service.findAll('pending', claims, undefined)).rejects.toThrow(
       ForbiddenException,
     );
     expect(suggestionRepository.findAll).not.toHaveBeenCalled();

@@ -38,21 +38,21 @@ export class ChunksService {
   ) {}
 
   /**
-   * Resolves SG3's delegated-tier `WorkspaceScopeCheck` (an async membership lookup, since
-   * `assertWorkspaceScope` itself stays pure/sync) and asserts it, mapping a violation to a 403.
-   * A missing/blank header short-circuits the membership lookup (no workspace to look up).
+   * Resolves the Meridian IDEA-139 single-tier `WorkspaceScopeCheck` (an async membership lookup,
+   * since `assertWorkspaceScope` itself stays pure/sync) and asserts it, mapping a violation to a
+   * 403. A missing/blank header short-circuits the membership lookup (no workspace to look up).
    */
-  private async assertDelegatedScope(
+  private async assertScope(
     headerWorkspaceId: string | null | undefined,
-    stakeholderId: string,
+    claims: SessionTokenClaims,
   ): Promise<string> {
     const isMember =
       headerWorkspaceId === null || headerWorkspaceId === undefined || headerWorkspaceId.trim().length === 0
         ? false
-        : await this.workspaceRepository.isMember(headerWorkspaceId, stakeholderId);
+        : await this.workspaceRepository.isMember(headerWorkspaceId, claims.stakeholderId);
 
     try {
-      assertWorkspaceScope(headerWorkspaceId, { tier: 'delegated', isMember });
+      assertWorkspaceScope(headerWorkspaceId, { workspaceIdClaim: claims.workspaceId, isMember });
     } catch (error) {
       if (error instanceof WorkspaceScopeViolationError) {
         throw new ForbiddenException(error.message);
@@ -63,8 +63,12 @@ export class ChunksService {
     return headerWorkspaceId;
   }
 
-  async create(request: CreateChunkRequest, headerWorkspaceId: string | null | undefined): Promise<ChunkResponse> {
-    const workspaceId = await this.assertDelegatedScope(headerWorkspaceId, request.stakeholderId);
+  async create(
+    request: CreateChunkRequest,
+    headerWorkspaceId: string | null | undefined,
+    claims: SessionTokenClaims,
+  ): Promise<ChunkResponse> {
+    const workspaceId = await this.assertScope(headerWorkspaceId, claims);
 
     let branchId: string | undefined;
 
@@ -116,9 +120,9 @@ export class ChunksService {
   async findById(
     id: string,
     headerWorkspaceId: string | null | undefined,
-    stakeholderId: string,
+    claims: SessionTokenClaims,
   ): Promise<ChunkResponse> {
-    const workspaceId = await this.assertDelegatedScope(headerWorkspaceId, stakeholderId);
+    const workspaceId = await this.assertScope(headerWorkspaceId, claims);
 
     const chunk = await this.chunkRepository.findById(id, workspaceId);
     if (chunk === undefined) {
@@ -133,14 +137,7 @@ export class ChunksService {
     claims: SessionTokenClaims,
     cursor?: string,
   ): Promise<{ chunks: ChunkResponse[]; nextCursor: string | null }> {
-    try {
-      assertWorkspaceScope(filters.workspaceId, { tier: 'token', workspaceIdClaim: claims.workspaceId });
-    } catch (error) {
-      if (error instanceof WorkspaceScopeViolationError) {
-        throw new ForbiddenException(error.message);
-      }
-      throw error;
-    }
+    await this.assertScope(filters.workspaceId, claims);
 
     if (filters.branchId !== undefined) {
       if (claims.discipline === null) {
@@ -168,18 +165,7 @@ export class ChunksService {
     depth: number,
     branchId?: string,
   ): Promise<{ chunk: ChunkResponse; neighbours: NeighbourResponse[] }> {
-    try {
-      assertWorkspaceScope(headerWorkspaceId, { tier: 'token', workspaceIdClaim: claims.workspaceId });
-    } catch (error) {
-      if (error instanceof WorkspaceScopeViolationError) {
-        throw new ForbiddenException(error.message);
-      }
-      throw error;
-    }
-    const workspaceId = claims.workspaceId;
-    if (workspaceId === null) {
-      throw new ForbiddenException('Token must have a workspaceId claim');
-    }
+    const workspaceId = await this.assertScope(headerWorkspaceId, claims);
 
     if (branchId !== undefined) {
       if (claims.discipline === null) {

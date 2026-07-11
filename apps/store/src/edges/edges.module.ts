@@ -1,10 +1,11 @@
 import { Module } from '@nestjs/common';
 import { PersistenceModule } from '../persistence/persistence.module.js';
+import { AuthModule } from '../auth/auth.module.js';
 import { EdgesController } from './edges.controller.js';
 import { EdgesService } from './edges.service.js';
 
 @Module({
-  imports: [PersistenceModule],
+  imports: [PersistenceModule, AuthModule],
   controllers: [EdgesController],
   providers: [EdgesService],
 })

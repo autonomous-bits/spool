@@ -5,59 +5,51 @@ const WORKSPACE_A = '11111111-1111-1111-1111-111111111111';
 const WORKSPACE_B = '22222222-2222-2222-2222-222222222222';
 
 describe('assertWorkspaceScope', () => {
-  it('rejects a missing X-Workspace-Id header regardless of tier', () => {
+  it('rejects a missing X-Workspace-Id header', () => {
     expect(() =>
-      { assertWorkspaceScope(undefined, { tier: 'token', workspaceIdClaim: WORKSPACE_A }); },
+      { assertWorkspaceScope(undefined, { workspaceIdClaim: WORKSPACE_A, isMember: true }); },
     ).toThrow(WorkspaceScopeViolationError);
     expect(() =>
-      { assertWorkspaceScope(null, { tier: 'delegated', isMember: true }); },
+      { assertWorkspaceScope(null, { workspaceIdClaim: WORKSPACE_A, isMember: true }); },
     ).toThrow(WorkspaceScopeViolationError);
   });
 
   it('rejects a blank X-Workspace-Id header', () => {
     expect(() =>
-      { assertWorkspaceScope('   ', { tier: 'delegated', isMember: true }); },
+      { assertWorkspaceScope('   ', { workspaceIdClaim: WORKSPACE_A, isMember: true }); },
     ).toThrow(WorkspaceScopeViolationError);
   });
 
-  describe('token tier', () => {
-    it('accepts a header that matches the token workspaceId claim', () => {
-      expect(() =>
-        { assertWorkspaceScope(WORKSPACE_A, { tier: 'token', workspaceIdClaim: WORKSPACE_A }); },
-      ).not.toThrow();
-    });
-
-    it('rejects a header that does not match the token workspaceId claim', () => {
-      expect(() =>
-        { assertWorkspaceScope(WORKSPACE_A, { tier: 'token', workspaceIdClaim: WORKSPACE_B }); },
-      ).toThrow(WorkspaceScopeViolationError);
-    });
-
-    it('rejects a workspace-less (null claim) token', () => {
-      expect(() =>
-        { assertWorkspaceScope(WORKSPACE_A, { tier: 'token', workspaceIdClaim: null }); },
-      ).toThrow(WorkspaceScopeViolationError);
-    });
+  it('rejects a workspace-less (null claim) token', () => {
+    expect(() =>
+      { assertWorkspaceScope(WORKSPACE_A, { workspaceIdClaim: null, isMember: true }); },
+    ).toThrow(WorkspaceScopeViolationError);
   });
 
-  describe('delegated tier', () => {
-    it('accepts when the caller-supplied stakeholderId has a membership row', () => {
-      expect(() =>
-        { assertWorkspaceScope(WORKSPACE_A, { tier: 'delegated', isMember: true }); },
-      ).not.toThrow();
-    });
+  it('rejects a header that does not match the token workspaceId claim (claim-mismatch)', () => {
+    expect(() =>
+      { assertWorkspaceScope(WORKSPACE_A, { workspaceIdClaim: WORKSPACE_B, isMember: true }); },
+    ).toThrow(WorkspaceScopeViolationError);
+  });
 
-    it('rejects when the caller-supplied stakeholderId has no membership row', () => {
-      expect(() =>
-        { assertWorkspaceScope(WORKSPACE_A, { tier: 'delegated', isMember: false }); },
-      ).toThrow(WorkspaceScopeViolationError);
-    });
+  it('rejects a claim-matched header when the stakeholder is not a current member (403)', () => {
+    // A removed member with an unexpired, otherwise-matching token must still be rejected
+    // (Meridian IDEA-139) — token validity/claim-match alone is never sufficient.
+    expect(() =>
+      { assertWorkspaceScope(WORKSPACE_A, { workspaceIdClaim: WORKSPACE_A, isMember: false }); },
+    ).toThrow(WorkspaceScopeViolationError);
+  });
+
+  it('accepts a claim-matched header when the stakeholder is a current member', () => {
+    expect(() =>
+      { assertWorkspaceScope(WORKSPACE_A, { workspaceIdClaim: WORKSPACE_A, isMember: true }); },
+    ).not.toThrow();
   });
 
   it('throws a distinct WorkspaceScopeViolationError type', () => {
     let error: unknown;
     try {
-      assertWorkspaceScope(undefined, { tier: 'delegated', isMember: false });
+      assertWorkspaceScope(undefined, { workspaceIdClaim: WORKSPACE_A, isMember: false });
     } catch (caught) {
       error = caught;
     }

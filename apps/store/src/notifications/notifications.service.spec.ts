@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { FeedbackNotification } from '../domain/feedback-notification.js';
 import type { SessionTokenClaims } from '../auth/session-token.service.js';
 import type { FeedbackNotificationRepository } from '../persistence/feedback-notification.repository.js';
+import type { WorkspaceRepository } from '../persistence/workspace.repository.js';
 import { NotificationsService } from './notifications.service.js';
 
 const STAKEHOLDER_ID = '00000000-0000-0000-0000-000000000001';
@@ -33,8 +34,14 @@ function setUp() {
     findByStakeholderId: vi.fn(),
     markAsRead: vi.fn(),
   };
-  const service = new NotificationsService(notificationRepository as FeedbackNotificationRepository);
-  return { notificationRepository, service };
+  const workspaceRepository: Pick<WorkspaceRepository, 'isMember'> = {
+    isMember: vi.fn().mockResolvedValue(true),
+  };
+  const service = new NotificationsService(
+    notificationRepository as FeedbackNotificationRepository,
+    workspaceRepository as WorkspaceRepository,
+  );
+  return { notificationRepository, workspaceRepository, service };
 }
 
 describe('NotificationsService', () => {

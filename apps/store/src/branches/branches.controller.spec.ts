@@ -67,20 +67,21 @@ describe('BranchesController', () => {
       createdByStakeholderId: 'stakeholder-1',
       workspaceId: WORKSPACE_ID,
     } satisfies BranchResponse;
+    vi.mocked(sessionTokenService.verify).mockReturnValue(claims);
     vi.mocked(service.create).mockResolvedValue(expected);
 
     const result = await controller.create({
       name: 'feature-branch',
       discipline: 'product',
       stakeholderId: 'stakeholder-1',
-    }, WORKSPACE_ID);
+    }, 'Bearer signed-token', WORKSPACE_ID);
 
     expect(result).toEqual(expected);
     expect(service.create).toHaveBeenCalledWith({
       name: 'feature-branch',
       discipline: 'product',
       stakeholderId: 'stakeholder-1',
-    }, WORKSPACE_ID);
+    }, WORKSPACE_ID, claims);
   });
 
   it('verifies the bearer token and delegates submission to BranchesService', async () => {
@@ -243,11 +244,12 @@ describe('BranchesController', () => {
       createdByStakeholderId: 'stakeholder-1',
       workspaceId: WORKSPACE_ID,
     } satisfies BranchResponse;
+    vi.mocked(sessionTokenService.verify).mockReturnValue(claims);
     vi.mocked(service.findById).mockResolvedValue(expected);
 
-    const result = await controller.findOne('abc', WORKSPACE_ID, 'stakeholder-1');
+    const result = await controller.findOne('abc', 'Bearer signed-token', WORKSPACE_ID);
 
     expect(result).toEqual(expected);
-    expect(service.findById).toHaveBeenCalledWith('abc', WORKSPACE_ID, 'stakeholder-1');
+    expect(service.findById).toHaveBeenCalledWith('abc', WORKSPACE_ID, claims);
   });
 });

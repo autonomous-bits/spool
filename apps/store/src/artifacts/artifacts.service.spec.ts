@@ -9,6 +9,7 @@ import type { ArtifactRepository } from '../persistence/artifact.repository.js';
 import type { ChunkArtifactRepository } from '../persistence/chunk-artifact.repository.js';
 import type { ChunkRepository } from '../persistence/chunk.repository.js';
 import type { WorkspaceRepository } from '../persistence/workspace.repository.js';
+import type { SessionTokenClaims } from '../auth/session-token.service.js';
 import type { ArtifactDownloadTokenService } from './artifact-download-token.service.js';
 import { InvalidArtifactDownloadTokenError } from './artifact-download-token.service.js';
 import { ArtifactsService } from './artifacts.service.js';
@@ -26,6 +27,16 @@ describe('ArtifactsService', () => {
   let service: ArtifactsService;
 
   const stakeholderId = '22222222-2222-2222-2222-222222222222';
+
+  function validClaims(overrides: Partial<SessionTokenClaims> = {}): SessionTokenClaims {
+    return {
+      stakeholderId,
+      workspaceId: WORKSPACE_ID,
+      discipline: 'product',
+      authTime: 1_752_000_000,
+      ...overrides,
+    };
+  }
 
   beforeEach(() => {
     artifactRepository = { create: vi.fn(), findById: vi.fn() };
@@ -61,6 +72,7 @@ describe('ArtifactsService', () => {
           stakeholderId,
         },
         WORKSPACE_ID,
+        validClaims(),
       );
 
       expect(result).toEqual({
@@ -87,6 +99,7 @@ describe('ArtifactsService', () => {
             stakeholderId,
           },
           undefined,
+          validClaims(),
         ),
       ).rejects.toThrow(ForbiddenException);
       expect(artifactRepository.create).not.toHaveBeenCalled();
@@ -103,6 +116,7 @@ describe('ArtifactsService', () => {
             stakeholderId,
           },
           WORKSPACE_ID,
+          validClaims(),
         ),
       ).rejects.toThrow(ForbiddenException);
       expect(artifactRepository.create).not.toHaveBeenCalled();
@@ -121,6 +135,7 @@ describe('ArtifactsService', () => {
             stakeholderId,
           },
           WORKSPACE_ID,
+          validClaims(),
         ),
       ).rejects.toThrow(NotFoundException);
       expect(chunkArtifactRepository.create).not.toHaveBeenCalled();
@@ -135,6 +150,7 @@ describe('ArtifactsService', () => {
             stakeholderId,
           },
           undefined,
+          validClaims(),
         ),
       ).rejects.toThrow(ForbiddenException);
       expect(chunkRepository.findByLabel).not.toHaveBeenCalled();
@@ -162,6 +178,7 @@ describe('ArtifactsService', () => {
             stakeholderId,
           },
           WORKSPACE_ID,
+          validClaims(),
         ),
       ).rejects.toThrow(NotFoundException);
       expect(chunkArtifactRepository.create).not.toHaveBeenCalled();
@@ -201,6 +218,7 @@ describe('ArtifactsService', () => {
           stakeholderId,
         },
         WORKSPACE_ID,
+        validClaims(),
       );
 
       expect(result.status).toBe('active');
@@ -252,7 +270,7 @@ describe('ArtifactsService', () => {
         'ATOMIC-1',
         artifact.id,
         'branch-1',
-        stakeholderId,
+        validClaims(),
         WORKSPACE_ID,
       );
 
@@ -277,7 +295,7 @@ describe('ArtifactsService', () => {
           'ATOMIC-1',
           'artifact-1',
           'branch-1',
-          stakeholderId,
+          validClaims(),
           WORKSPACE_ID,
         ),
       ).rejects.toThrow(NotFoundException);
@@ -290,7 +308,7 @@ describe('ArtifactsService', () => {
           'ATOMIC-1',
           'artifact-1',
           'branch-1',
-          stakeholderId,
+          validClaims(),
           undefined,
         ),
       ).rejects.toThrow(ForbiddenException);
@@ -303,14 +321,14 @@ describe('ArtifactsService', () => {
       vi.mocked(chunkRepository.findByLabel).mockResolvedValue(undefined);
 
       await expect(
-        service.getEffectiveArtifactsForChunk('ATOMIC-1', undefined, stakeholderId, WORKSPACE_ID),
+        service.getEffectiveArtifactsForChunk('ATOMIC-1', undefined, validClaims(), WORKSPACE_ID),
       ).rejects.toThrow(NotFoundException);
       expect(chunkArtifactRepository.findEffectiveForChunk).not.toHaveBeenCalled();
     });
 
     it('throws ForbiddenException when the X-Workspace-Id header is missing', async () => {
       await expect(
-        service.getEffectiveArtifactsForChunk('ATOMIC-1', undefined, stakeholderId, undefined),
+        service.getEffectiveArtifactsForChunk('ATOMIC-1', undefined, validClaims(), undefined),
       ).rejects.toThrow(ForbiddenException);
       expect(chunkRepository.findByLabel).not.toHaveBeenCalled();
     });
@@ -332,7 +350,7 @@ describe('ArtifactsService', () => {
       const result = await service.getEffectiveArtifactsForChunk(
         'ATOMIC-1',
         'branch-1',
-        stakeholderId,
+        validClaims(),
         WORKSPACE_ID,
       );
 
@@ -350,14 +368,14 @@ describe('ArtifactsService', () => {
       vi.mocked(artifactRepository.findById).mockResolvedValue(undefined);
 
       await expect(
-        service.issueDownloadToken('artifact-1', stakeholderId, WORKSPACE_ID),
+        service.issueDownloadToken('artifact-1', validClaims(), WORKSPACE_ID),
       ).rejects.toThrow(NotFoundException);
       expect(downloadTokenService.issue).not.toHaveBeenCalled();
     });
 
     it('throws ForbiddenException when the X-Workspace-Id header is missing', async () => {
       await expect(
-        service.issueDownloadToken('artifact-1', stakeholderId, undefined),
+        service.issueDownloadToken('artifact-1', validClaims(), undefined),
       ).rejects.toThrow(ForbiddenException);
       expect(artifactRepository.findById).not.toHaveBeenCalled();
     });
@@ -373,7 +391,7 @@ describe('ArtifactsService', () => {
       const issued = { token: 'signed-token', expiresAt: new Date('2026-01-01T00:00:00Z') };
       vi.mocked(downloadTokenService.issue).mockReturnValue(issued);
 
-      const result = await service.issueDownloadToken(artifact.id, stakeholderId, WORKSPACE_ID);
+      const result = await service.issueDownloadToken(artifact.id, validClaims(), WORKSPACE_ID);
 
       expect(result).toEqual(issued);
       expect(downloadTokenService.issue).toHaveBeenCalledWith(artifact.id, WORKSPACE_ID);
