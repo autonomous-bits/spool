@@ -2,12 +2,17 @@
 
 Concrete tool sequences for the most frequent Spool MCP tasks. All examples assume you already
 hold a `workspaceId`, `stakeholderId` (for delegated tools), and, where noted, a `sessionToken`
-(for session tools).
+(for session tools) — load these from `.spool/context.json` (see SKILL.md) before starting any
+workflow below, and update that file whenever a step changes the branch state.
 
 ## Capture a new idea chunk on a draft branch
 
+By default, scope new chunk/edge writes to a draft branch rather than mainline — only skip the
+branch step if a branchless/mainline write is explicitly requested.
+
 1. `spool-search-chunks` (`q`, `discipline`) — confirm no equivalent chunk already exists.
-2. `spool-create-branch` — only if you don't already have a draft `branchId` for this discipline.
+2. Check `.spool/context.json` for a `currentBranchId` matching this discipline; if none exists,
+   call `spool-create-branch` to create one and record the new `branchId` back into the file.
 3. `spool-capture-chunk` — pass the `branchId` from step 2 to scope the chunk to the branch.
 
 ## Relate two existing chunks
