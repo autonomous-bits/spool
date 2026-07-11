@@ -333,11 +333,14 @@ export class ChunkRepository {
     if (hasNext) {
       const last = rows[rows.length - 1];
       if (last) {
-        nextCursor = encodeCursor({
+        const cursorPayload: ChunkSearchCursor = {
           tieBreakDate: last.created_at.toISOString(),
           tieBreakId: last.id,
-          tieBreakRank: last.rank,
-        });
+        };
+        if (last.rank !== undefined) {
+          cursorPayload.tieBreakRank = last.rank;
+        }
+        nextCursor = encodeCursor(cursorPayload);
       }
     }
 

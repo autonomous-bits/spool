@@ -82,18 +82,36 @@ export function parseSearchChunksInput(body: unknown): SearchChunksInput {
 
   const record = body as Record<string, unknown>;
 
-  return {
+  const result: SearchChunksInput = {
     sessionToken: requireStringField(record, 'sessionToken'),
     workspaceId: requireStringField(record, 'workspaceId'),
-    discipline: optionalStringField(record, 'discipline'),
-    chunkType: optionalStringField(record, 'chunkType'),
-    status: optionalStringField(record, 'status'),
-    contextKind: optionalStringField(record, 'contextKind'),
-    branchId: optionalStringField(record, 'branchId'),
-    q: optionalStringField(record, 'q'),
-    limit: optionalNumberField(record, 'limit'),
-    cursor: optionalStringField(record, 'cursor'),
   };
+
+  const discipline = optionalStringField(record, 'discipline');
+  if (discipline !== undefined) result.discipline = discipline;
+
+  const chunkType = optionalStringField(record, 'chunkType');
+  if (chunkType !== undefined) result.chunkType = chunkType;
+
+  const status = optionalStringField(record, 'status');
+  if (status !== undefined) result.status = status;
+
+  const contextKind = optionalStringField(record, 'contextKind');
+  if (contextKind !== undefined) result.contextKind = contextKind;
+
+  const branchId = optionalStringField(record, 'branchId');
+  if (branchId !== undefined) result.branchId = branchId;
+
+  const q = optionalStringField(record, 'q');
+  if (q !== undefined) result.q = q;
+
+  const limit = optionalNumberField(record, 'limit');
+  if (limit !== undefined) result.limit = limit;
+
+  const cursor = optionalStringField(record, 'cursor');
+  if (cursor !== undefined) result.cursor = cursor;
+
+  return result;
 }
 
 function extractErrorMessage(body: unknown, fallback: string): string {

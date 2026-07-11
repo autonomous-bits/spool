@@ -4,7 +4,7 @@ import { assertWorkspaceScope, WorkspaceScopeViolationError } from '../domain/wo
 import { BranchRepository } from '../persistence/branch.repository.js';
 import { ChunkRepository } from '../persistence/chunk.repository.js';
 import { WorkspaceRepository } from '../persistence/workspace.repository.js';
-import type { SearchChunksFilters, SearchChunksResult } from '../persistence/chunk.repository.js';
+import type { SearchChunksFilters } from '../persistence/chunk.repository.js';
 import type { SessionTokenClaims } from '../auth/session-token.service.js';
 import { toChunkResponse, type ChunkResponse, type NeighbourResponse } from './chunk-response.dto.js';
 import type { CreateChunkRequest } from './create-chunk-request.dto.js';
@@ -177,6 +177,9 @@ export class ChunksService {
       throw error;
     }
     const workspaceId = claims.workspaceId;
+    if (workspaceId === null) {
+      throw new ForbiddenException('Token must have a workspaceId claim');
+    }
 
     if (branchId !== undefined) {
       if (claims.discipline === null) {

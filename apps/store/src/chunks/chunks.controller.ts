@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Headers, Param, Post, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, ForbiddenException, Get, Headers, Param, Post, Query, ParseUUIDPipe } from '@nestjs/common';
 import { SessionTokenService } from '../auth/session-token.service.js';
 import { verifySessionClaims } from '../auth/session-claims.helper.js';
 import type { ChunkResponse, NeighbourResponse } from './chunk-response.dto.js';
@@ -33,18 +33,21 @@ export class ChunksController {
     @Query('cursor') cursor?: string,
   ): Promise<{ chunks: ChunkResponse[]; nextCursor: string | null }> {
     const claims = verifySessionClaims(authorizationHeader, this.sessionTokenService);
+    if (headerWorkspaceId === undefined || headerWorkspaceId.trim().length === 0) {
+      throw new ForbiddenException('Missing X-Workspace-Id header');
+    }
     const limit = limitStr !== undefined ? parseInt(limitStr, 10) : 20;
 
+    const filters: any = { workspaceId: headerWorkspaceId };
+    if (discipline !== undefined) filters.discipline = discipline;
+    if (chunkType !== undefined) filters.chunkType = chunkType;
+    if (status !== undefined) filters.status = status;
+    if (contextKind !== undefined) filters.contextKind = contextKind;
+    if (branchId !== undefined) filters.branchId = branchId;
+    if (q !== undefined) filters.q = q;
+
     return this.chunks.search(
-      {
-        discipline,
-        chunkType,
-        status,
-        contextKind,
-        branchId,
-        q,
-        workspaceId: headerWorkspaceId,
-      },
+      filters,
       isNaN(limit) ? 20 : limit,
       claims,
       cursor,
@@ -62,7 +65,7 @@ export class ChunksController {
 
   @Get(':id')
   async findOne(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Headers('x-workspace-id') workspaceId: string | undefined,
     @Query('stakeholderId') stakeholderId: string | undefined,
   ): Promise<ChunkResponse> {
@@ -71,7 +74,7 @@ export class ChunksController {
 
   @Get(':id/neighbourhood')
   async getNeighbourhood(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Headers('authorization') authorizationHeader: unknown,
     @Headers('x-workspace-id') headerWorkspaceId: string | undefined,
     @Query('depth') depthStr?: string,

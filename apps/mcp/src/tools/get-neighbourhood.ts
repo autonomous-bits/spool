@@ -82,13 +82,19 @@ export function parseGetNeighbourhoodInput(body: unknown): GetNeighbourhoodInput
 
   const record = body as Record<string, unknown>;
 
-  return {
+  const result: GetNeighbourhoodInput = {
     id: requireStringField(record, 'id'),
     sessionToken: requireStringField(record, 'sessionToken'),
     workspaceId: requireStringField(record, 'workspaceId'),
-    depth: optionalNumberField(record, 'depth'),
-    branchId: optionalStringField(record, 'branchId'),
   };
+  
+  const depth = optionalNumberField(record, 'depth');
+  if (depth !== undefined) result.depth = depth;
+  
+  const branchId = optionalStringField(record, 'branchId');
+  if (branchId !== undefined) result.branchId = branchId;
+  
+  return result;
 }
 
 function extractErrorMessage(body: unknown, fallback: string): string {
