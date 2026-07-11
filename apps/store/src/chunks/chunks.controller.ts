@@ -1,7 +1,7 @@
 import { BadRequestException, Body, Controller, Get, Headers, Param, Post, Query } from '@nestjs/common';
 import { SessionTokenService } from '../auth/session-token.service.js';
 import { verifySessionClaims } from '../auth/session-claims.helper.js';
-import type { ChunkResponse } from './chunk-response.dto.js';
+import type { ChunkResponse, NeighbourResponse } from './chunk-response.dto.js';
 import { parseCreateChunkRequest } from './create-chunk-request.dto.js';
 import { ChunksService } from './chunks.service.js';
 
@@ -67,5 +67,24 @@ export class ChunksController {
     @Query('stakeholderId') stakeholderId: string | undefined,
   ): Promise<ChunkResponse> {
     return this.chunks.findById(id, workspaceId, requireStakeholderId(stakeholderId));
+  }
+
+  @Get(':id/neighbourhood')
+  async getNeighbourhood(
+    @Param('id') id: string,
+    @Headers('authorization') authorizationHeader: unknown,
+    @Headers('x-workspace-id') headerWorkspaceId: string | undefined,
+    @Query('depth') depthStr?: string,
+    @Query('branchId') branchId?: string,
+  ): Promise<{ chunk: ChunkResponse; neighbours: NeighbourResponse[] }> {
+    const claims = verifySessionClaims(authorizationHeader, this.sessionTokenService);
+    const depth = depthStr !== undefined ? parseInt(depthStr, 10) : 1;
+    if (isNaN(depth) || depth < 1) {
+      throw new BadRequestException('depth must be a positive integer');
+    }
+    if (depth > 5) {
+      throw new BadRequestException('depth cannot exceed 5');
+    }
+    return this.chunks.getNeighbourhood(id, headerWorkspaceId, claims, depth, branchId);
   }
 }

@@ -78,6 +78,19 @@ export interface SearchChunksResult {
   nextCursor: string | null;
 }
 
+export interface NeighbourRow {
+  edgeId: string;
+  chunkId: string;
+  label: string;
+  content: string;
+  type: string;
+  status: string;
+  discipline: string;
+  contextKind: string;
+  direction: 'outgoing' | 'incoming';
+  hop: number;
+}
+
 type Queryable = Pick<Pool, 'query'>;
 
 function createNonDraftBranchConflict(branchId: string): ConflictException {
@@ -332,5 +345,108 @@ export class ChunkRepository {
       chunks: rows.map(toChunk),
       nextCursor,
     };
+  }
+
+  async getNeighbourhood(
+    rootLabel: string,
+    workspaceId: string,
+    depth: number,
+    branchId?: string,
+  ): Promise<NeighbourRow[]> {
+    let currentHopLabels = new Set<string>([rootLabel]);
+    const visitedLabels = new Set<string>([rootLabel]);
+    const neighbours = new Map<string, { edgeId: string; direction: 'outgoing' | 'incoming'; hop: number }>();
+
+    for (let hop = 1; hop <= depth; hop++) {
+      if (currentHopLabels.size === 0) break;
+
+      const edgeConditions = ['workspace_id = $1'];
+      const edgeParams: unknown[] = [workspaceId];
+
+      if (branchId !== undefined) {
+        edgeParams.push(branchId);
+        edgeConditions.push(`branch_id = $${edgeParams.length}`);
+      } else {
+        edgeConditions.push('branch_id IS NULL');
+      }
+
+      edgeParams.push(Array.from(currentHopLabels));
+      edgeConditions.push(`(from_chunk_label = ANY($${edgeParams.length}) OR to_chunk_label = ANY($${edgeParams.length}))`);
+
+      const edgesResult = await this.pool.query<{ id: string; from_chunk_label: string; to_chunk_label: string }>(
+        `SELECT id, from_chunk_label, to_chunk_label FROM edges WHERE ${edgeConditions.join(' AND ')}`,
+        edgeParams,
+      );
+
+      const nextHopLabels = new Set<string>();
+
+      for (const edge of edgesResult.rows) {
+        const isOutgoing = currentHopLabels.has(edge.from_chunk_label);
+        const isIncoming = currentHopLabels.has(edge.to_chunk_label);
+
+        if (isOutgoing) {
+          const neighbourLabel = edge.to_chunk_label;
+          if (!visitedLabels.has(neighbourLabel)) {
+            visitedLabels.add(neighbourLabel);
+            nextHopLabels.add(neighbourLabel);
+            neighbours.set(neighbourLabel, { edgeId: edge.id, direction: 'outgoing', hop });
+          }
+        }
+        if (isIncoming) {
+          const neighbourLabel = edge.from_chunk_label;
+          if (!visitedLabels.has(neighbourLabel)) {
+            visitedLabels.add(neighbourLabel);
+            nextHopLabels.add(neighbourLabel);
+            neighbours.set(neighbourLabel, { edgeId: edge.id, direction: 'incoming', hop });
+          }
+        }
+      }
+
+      currentHopLabels = nextHopLabels;
+    }
+
+    if (neighbours.size === 0) return [];
+
+    const chunkLabels = Array.from(neighbours.keys());
+    const chunkConditions = ['workspace_id = $1'];
+    const chunkParams: unknown[] = [workspaceId];
+
+    if (branchId !== undefined) {
+      chunkParams.push(branchId);
+      chunkConditions.push(`branch_id = $${chunkParams.length}`);
+    } else {
+      chunkConditions.push('branch_id IS NULL');
+    }
+
+    chunkParams.push(chunkLabels);
+    chunkConditions.push(`label = ANY($${chunkParams.length})`);
+
+    const chunksResult = await this.pool.query<ChunkRow>(
+      `SELECT * FROM chunks WHERE ${chunkConditions.join(' AND ')}`,
+      chunkParams,
+    );
+
+    const result: NeighbourRow[] = [];
+    for (const row of chunksResult.rows) {
+      const n = neighbours.get(row.label);
+      if (n !== undefined) {
+        result.push({
+          edgeId: n.edgeId,
+          chunkId: row.id,
+          label: row.label,
+          content: row.content,
+          type: row.chunk_type,
+          status: row.status,
+          discipline: row.discipline,
+          contextKind: row.context_kind,
+          direction: n.direction,
+          hop: n.hop,
+        });
+      }
+    }
+
+    result.sort((a, b) => a.hop - b.hop);
+
+    return result;
   }
 }

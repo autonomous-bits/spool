@@ -19,6 +19,7 @@ import {
 } from './tools/submit-verification-signal.js';
 import { uploadArtifact, UploadArtifactValidationError, parseUploadArtifactInput } from './tools/upload-artifact.js';
 import { searchChunks, SearchChunksValidationError, parseSearchChunksInput } from './tools/search-chunks.js';
+import { getNeighbourhood, GetNeighbourhoodValidationError, parseGetNeighbourhoodInput } from './tools/get-neighbourhood.js';
 
 interface McpHealthResponse {
   status: 'ok';
@@ -44,6 +45,7 @@ const SUBMIT_VERIFICATION_SIGNAL_ROUTE = '/tools/submit-verification-signal';
 const UPLOAD_ARTIFACT_ROUTE = '/tools/upload-artifact';
 const ATTACH_ARTIFACT_TO_CHUNK_ROUTE = '/tools/attach-artifact-to-chunk';
 const SEARCH_CHUNKS_ROUTE = '/tools/search-chunks';
+const GET_NEIGHBOURHOOD_ROUTE = '/tools/get-neighbourhood';
 // Bounds the in-memory body buffer for a single tool call (node-memory-management: avoid
 // unbounded buffering of untrusted input).
 const MAX_BODY_BYTES = 1_000_000;
@@ -316,6 +318,35 @@ async function handleSearchChunks(
   }
 }
 
+async function handleGetNeighbourhood(
+  request: IncomingMessage,
+  response: ServerResponse,
+  harnessUrl: string,
+): Promise<void> {
+  try {
+    const raw = await readRequestBody(request);
+    let parsedBody: unknown;
+    try {
+      parsedBody = raw.length === 0 ? undefined : JSON.parse(raw);
+    } catch {
+      throw new GetNeighbourhoodValidationError('Request body must be valid JSON', 400);
+    }
+
+    const input = parseGetNeighbourhoodInput(parsedBody);
+    const result = await getNeighbourhood(input, harnessUrl);
+    sendJson(response, 200, result);
+  } catch (error) {
+    if (error instanceof RequestBodyError || error instanceof GetNeighbourhoodValidationError) {
+      sendJson(response, error.statusCode, { message: error.message });
+      return;
+    }
+
+    const reason = error instanceof Error ? error.message : 'Unknown error';
+    logDiagnostic('error', 'get-neighbourhood tool call failed', { reason });
+    sendJson(response, 502, { message: 'Failed to reach the store' });
+  }
+}
+
 export function createMcpHttpServer(
   harnessUrl = process.env.HARNESS_URL ?? 'http://localhost:3000',
 ): Server {
@@ -357,6 +388,11 @@ export function createMcpHttpServer(
 
     if (request.method === 'POST' && request.url === SEARCH_CHUNKS_ROUTE) {
       void handleSearchChunks(request, response, harnessUrl);
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === GET_NEIGHBOURHOOD_ROUTE) {
+      void handleGetNeighbourhood(request, response, harnessUrl);
       return;
     }
 

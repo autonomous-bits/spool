@@ -6,7 +6,7 @@ import { ChunkRepository } from '../persistence/chunk.repository.js';
 import { WorkspaceRepository } from '../persistence/workspace.repository.js';
 import type { SearchChunksFilters, SearchChunksResult } from '../persistence/chunk.repository.js';
 import type { SessionTokenClaims } from '../auth/session-token.service.js';
-import { toChunkResponse, type ChunkResponse } from './chunk-response.dto.js';
+import { toChunkResponse, type ChunkResponse, type NeighbourResponse } from './chunk-response.dto.js';
 import type { CreateChunkRequest } from './create-chunk-request.dto.js';
 
 const FOREIGN_KEY_VIOLATION = '23503';
@@ -158,6 +158,58 @@ export class ChunksService {
     return {
       chunks: result.chunks.map(toChunkResponse),
       nextCursor: result.nextCursor,
+    };
+  }
+
+  async getNeighbourhood(
+    id: string,
+    headerWorkspaceId: string | null | undefined,
+    claims: SessionTokenClaims,
+    depth: number,
+    branchId?: string,
+  ): Promise<{ chunk: ChunkResponse; neighbours: NeighbourResponse[] }> {
+    try {
+      assertWorkspaceScope(headerWorkspaceId, { tier: 'token', workspaceIdClaim: claims.workspaceId });
+    } catch (error) {
+      if (error instanceof WorkspaceScopeViolationError) {
+        throw new ForbiddenException(error.message);
+      }
+      throw error;
+    }
+    const workspaceId = claims.workspaceId;
+
+    if (branchId !== undefined) {
+      if (claims.discipline === null) {
+        throw new BadRequestException('Discipline is required to query a branch-scoped chunk');
+      }
+      const branch = await this.branchRepository.findById(branchId, workspaceId);
+      if (branch !== undefined && branch.discipline !== claims.discipline) {
+        throw new ForbiddenException(
+          `Branch discipline (${branch.discipline}) does not match token discipline (${claims.discipline})`,
+        );
+      }
+    }
+
+    const chunk = await this.chunkRepository.findById(id, workspaceId);
+    if (chunk === undefined) {
+      throw new NotFoundException(`Chunk ${id} not found`);
+    }
+
+    const neighbours = await this.chunkRepository.getNeighbourhood(chunk.label, workspaceId, depth, branchId);
+
+    if (branchId !== undefined) {
+      for (const neighbour of neighbours) {
+        if (neighbour.discipline !== claims.discipline) {
+          throw new ForbiddenException(
+            `Neighbour chunk discipline (${neighbour.discipline}) does not match token discipline (${claims.discipline})`,
+          );
+        }
+      }
+    }
+
+    return {
+      chunk: toChunkResponse(chunk),
+      neighbours,
     };
   }
 }

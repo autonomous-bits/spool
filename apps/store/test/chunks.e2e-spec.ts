@@ -399,5 +399,121 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
       expect(nextRes.body.chunks).toHaveLength(1); // 3 total, got 2, 1 left
       expect(nextRes.body.nextCursor).toBeNull();
     });
+  describe('GET /chunks/:id/neighbourhood', () => {
+    let validToken: string;
+
+    beforeAll(() => {
+      validToken = sessionTokenService.sign({
+        stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
+        discipline: 'engineering',
+        authTime: Math.floor(Date.now() / 1000),
+        workspaceId: WORKSPACE_ID,
+      });
+    });
+
+    it('returns 400 if depth is invalid or exceeds 5', async () => {
+      const response1 = await request(app.getHttpServer())
+        .get('/chunks/chunk-123/neighbourhood')
+        .set('Authorization', `Bearer ${validToken}`)
+        .set('X-Workspace-Id', WORKSPACE_ID)
+        .query({ depth: 6 });
+      expect(response1.status).toBe(400);
+
+      const response2 = await request(app.getHttpServer())
+        .get('/chunks/chunk-123/neighbourhood')
+        .set('Authorization', `Bearer ${validToken}`)
+        .set('X-Workspace-Id', WORKSPACE_ID)
+        .query({ depth: -1 });
+      expect(response2.status).toBe(400);
+
+      const response3 = await request(app.getHttpServer())
+        .get('/chunks/chunk-123/neighbourhood')
+        .set('Authorization', `Bearer ${validToken}`)
+        .set('X-Workspace-Id', WORKSPACE_ID)
+        .query({ depth: 'abc' });
+      expect(response3.status).toBe(400);
+    });
+
+    it('returns 404 for an unknown id', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/chunks/00000000-0000-0000-0000-00000000dead/neighbourhood')
+        .set('Authorization', `Bearer ${validToken}`)
+        .set('X-Workspace-Id', WORKSPACE_ID);
+      expect(response.status).toBe(404);
+    });
+
+    it('traverses the neighbourhood, avoids cycles, and respects depth', async () => {
+      // Create chunks A, B, C, D
+      const suffix = Math.random().toString(36).slice(2, 10);
+      const labels = ['a', 'b', 'c', 'd'].map(l => `nh-${l}-${suffix}`);
+      const chunkIds: Record<string, string> = {};
+
+      for (const label of labels) {
+        const res = await request(app.getHttpServer())
+          .post('/chunks')
+          .set('Authorization', `Bearer ${validToken}`)
+          .set('X-Workspace-Id', WORKSPACE_ID)
+          .send({
+            label,
+            content: `content for ${label}`,
+            discipline: 'engineering',
+            chunkType: 'feature',
+            contextKind: 'permanent',
+            stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
+          });
+        expect(res.status).toBe(201);
+        chunkIds[label] = res.body.id as string;
+      }
+
+      // Create edges: A -> B, B -> C, C -> A (cycle), B -> D
+      const edgeDefs = [
+        { from: labels[0], to: labels[1] }, // A -> B
+        { from: labels[1], to: labels[2] }, // B -> C
+        { from: labels[2], to: labels[0] }, // C -> A
+        { from: labels[1], to: labels[3] }, // B -> D
+      ];
+
+      for (const edge of edgeDefs) {
+        const res = await request(app.getHttpServer())
+          .post('/edges')
+          .set('Authorization', `Bearer ${validToken}`)
+          .set('X-Workspace-Id', WORKSPACE_ID)
+          .send({
+            fromChunkLabel: edge.from,
+            toChunkLabel: edge.to,
+            type: 'depends-on',
+            discipline: 'engineering',
+            stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
+          });
+        expect(res.status).toBe(201);
+      }
+
+      // Query A neighbourhood with depth 1
+      const depth1 = await request(app.getHttpServer())
+        .get(`/chunks/${chunkIds[labels[0]]}/neighbourhood`)
+        .set('Authorization', `Bearer ${validToken}`)
+        .set('X-Workspace-Id', WORKSPACE_ID)
+        .query({ depth: 1 });
+
+      expect(depth1.status).toBe(200);
+      expect(depth1.body.chunk.id).toBe(chunkIds[labels[0]]);
+      expect(depth1.body.neighbours).toHaveLength(2); // A->B and C->A (incoming)
+      const neighbours1 = depth1.body.neighbours.map((n: any) => n.label).sort();
+      expect(neighbours1).toEqual([labels[1], labels[2]].sort());
+      
+      // Query A neighbourhood with depth 2
+      const depth2 = await request(app.getHttpServer())
+        .get(`/chunks/${chunkIds[labels[0]]}/neighbourhood`)
+        .set('Authorization', `Bearer ${validToken}`)
+        .set('X-Workspace-Id', WORKSPACE_ID)
+        .query({ depth: 2 });
+
+      expect(depth2.status).toBe(200);
+      expect(depth2.body.neighbours).toHaveLength(3); // B, C, and now D (from B)
+      const neighbours2 = depth2.body.neighbours.map((n: any) => n.label).sort();
+      expect(neighbours2).toEqual([labels[1], labels[2], labels[3]].sort());
+    });
+
+    });
   });
 });

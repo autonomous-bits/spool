@@ -26,6 +26,19 @@ export interface ChunkResponse {
   updatedAt: Date;
 }
 
+export interface NeighbourResponse {
+  edgeId: string;
+  chunkId: string;
+  label: string;
+  content: string;
+  type: string;
+  status: string;
+  discipline: string;
+  contextKind: string;
+  direction: 'outgoing' | 'incoming';
+  hop: number;
+}
+
 export function toChunkResponse(chunk: Chunk): ChunkResponse {
   return {
     id: chunk.id,
