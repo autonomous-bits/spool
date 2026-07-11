@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   attachArtifactToChunk,
   AttachArtifactToChunkValidationError,
@@ -7,12 +7,11 @@ import {
   type AttachArtifactToChunkResult,
 } from './attach-artifact-to-chunk.js';
 
+import { resetStoreCredentialsForTests } from '../store-client.js';
 describe('parseAttachArtifactToChunkInput', () => {
   const validBody = {
     chunkLabel: 'IDEA-1',
     artifactId: 'artifact-1',
-    stakeholderId: 'stakeholder-1',
-    workspaceId: 'workspace-1',
   };
 
   it('accepts a well-formed body without branchId', () => {
@@ -29,7 +28,7 @@ describe('parseAttachArtifactToChunkInput', () => {
     expect(() => parseAttachArtifactToChunkInput(null)).toThrow(AttachArtifactToChunkValidationError);
   });
 
-  it.each(['chunkLabel', 'artifactId', 'stakeholderId', 'workspaceId'])(
+  it.each(['chunkLabel', 'artifactId'])(
     'rejects a missing %s, never inventing one',
     (field) => {
       const body: Record<string, unknown> = { ...validBody };
@@ -53,12 +52,17 @@ describe('attachArtifactToChunk', () => {
   const input: AttachArtifactToChunkInput = {
     chunkLabel: 'IDEA-1',
     artifactId: 'artifact-1',
-    stakeholderId: 'stakeholder-1',
-    workspaceId: 'workspace-1',
   };
+
+  beforeEach(() => {
+    vi.stubEnv('SPOOL_SESSION_TOKEN', 'test-session-token');
+    vi.stubEnv('SPOOL_WORKSPACE_ID', 'test-workspace-id');
+  });
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    resetStoreCredentialsForTests();
   });
 
   it('forwards the input to POST {storeUrl}/chunks/:label/artifacts and returns the created association', async () => {
@@ -69,8 +73,8 @@ describe('attachArtifactToChunk', () => {
       status: 'active',
       branchId: null,
       originBranchId: null,
-      createdByStakeholderId: input.stakeholderId,
-      updatedByStakeholderId: input.stakeholderId,
+      createdByStakeholderId: 'stakeholder-1',
+      updatedByStakeholderId: 'stakeholder-1',
       createdAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',
     };
@@ -85,8 +89,12 @@ describe('attachArtifactToChunk', () => {
 
     expect(fetchMock).toHaveBeenCalledWith('http://store.test/chunks/IDEA-1/artifacts', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-workspace-id': input.workspaceId },
-      body: JSON.stringify({ artifactId: input.artifactId, stakeholderId: input.stakeholderId }),
+      headers: {
+        'content-type': 'application/json',
+        authorization: 'Bearer test-session-token',
+        'x-workspace-id': 'test-workspace-id',
+      },
+      body: JSON.stringify({ artifactId: input.artifactId }),
     });
     expect(result).toEqual(expected);
     expect(result.id).toBe('assoc-1');
@@ -105,8 +113,8 @@ describe('attachArtifactToChunk', () => {
           status: 'active',
           branchId: withBranch.branchId,
           originBranchId: withBranch.branchId,
-          createdByStakeholderId: withBranch.stakeholderId,
-          updatedByStakeholderId: withBranch.stakeholderId,
+          createdByStakeholderId: 'stakeholder-1',
+          updatedByStakeholderId: 'stakeholder-1',
           createdAt: '2026-01-01T00:00:00.000Z',
           updatedAt: '2026-01-01T00:00:00.000Z',
         }),
@@ -117,10 +125,13 @@ describe('attachArtifactToChunk', () => {
 
     expect(fetchMock).toHaveBeenCalledWith('http://store.test/chunks/IDEA%2F1/artifacts', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-workspace-id': withBranch.workspaceId },
+      headers: {
+        'content-type': 'application/json',
+        authorization: 'Bearer test-session-token',
+        'x-workspace-id': 'test-workspace-id',
+      },
       body: JSON.stringify({
         artifactId: withBranch.artifactId,
-        stakeholderId: withBranch.stakeholderId,
         branchId: withBranch.branchId,
       }),
     });

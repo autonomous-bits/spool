@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createBranch,
   CreateBranchValidationError,
@@ -7,13 +7,12 @@ import {
   type CreateBranchResult,
 } from './create-branch.js';
 
+import { resetStoreCredentialsForTests } from '../store-client.js';
 describe('parseCreateBranchInput', () => {
   it('accepts a well-formed body', () => {
     const body = {
       name: 'feature/foo',
       discipline: 'product',
-      stakeholderId: 'stakeholder-1',
-      workspaceId: 'workspace-1',
     };
 
     expect(parseCreateBranchInput(body)).toEqual(body);
@@ -27,8 +26,6 @@ describe('parseCreateBranchInput', () => {
   it('rejects a missing required field', () => {
     const body = {
       discipline: 'product',
-      stakeholderId: 'stakeholder-1',
-      workspaceId: 'workspace-1',
     };
 
     expect(() => parseCreateBranchInput(body)).toThrow(/name/);
@@ -38,31 +35,9 @@ describe('parseCreateBranchInput', () => {
     const body = {
       name: '   ',
       discipline: 'product',
-      stakeholderId: 'stakeholder-1',
-      workspaceId: 'workspace-1',
     };
 
     expect(() => parseCreateBranchInput(body)).toThrow(/name/);
-  });
-
-  it('rejects a missing stakeholderId, never inventing one', () => {
-    const body = {
-      name: 'feature/foo',
-      discipline: 'product',
-      workspaceId: 'workspace-1',
-    };
-
-    expect(() => parseCreateBranchInput(body)).toThrow(/stakeholderId/);
-  });
-
-  it('rejects a missing workspaceId, never inventing one', () => {
-    const body = {
-      name: 'feature/foo',
-      discipline: 'product',
-      stakeholderId: 'stakeholder-1',
-    };
-
-    expect(() => parseCreateBranchInput(body)).toThrow(/workspaceId/);
   });
 });
 
@@ -70,12 +45,17 @@ describe('createBranch', () => {
   const input: CreateBranchInput = {
     name: 'feature/foo',
     discipline: 'product',
-    stakeholderId: 'stakeholder-1',
-    workspaceId: 'workspace-1',
   };
+
+  beforeEach(() => {
+    vi.stubEnv('SPOOL_SESSION_TOKEN', 'test-session-token');
+    vi.stubEnv('SPOOL_WORKSPACE_ID', 'test-workspace-id');
+  });
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    resetStoreCredentialsForTests();
   });
 
   it('forwards the input to POST {storeUrl}/branches and returns the created branch', async () => {
@@ -87,7 +67,7 @@ describe('createBranch', () => {
       divergedAt: '2026-01-01T00:00:00.000Z',
       createdAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',
-      createdByStakeholderId: input.stakeholderId,
+      createdByStakeholderId: 'stakeholder-1',
     };
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -98,11 +78,14 @@ describe('createBranch', () => {
 
     const result = await createBranch(input, 'http://store.test');
 
-    const { workspaceId, ...expectedBody } = input;
     expect(fetchMock).toHaveBeenCalledWith('http://store.test/branches', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-workspace-id': workspaceId },
-      body: JSON.stringify(expectedBody),
+      headers: {
+        'content-type': 'application/json',
+        authorization: 'Bearer test-session-token',
+        'x-workspace-id': 'test-workspace-id',
+      },
+      body: JSON.stringify(input),
     });
     expect(result).toEqual(expected);
     expect(result.id).toBe('branch-1');

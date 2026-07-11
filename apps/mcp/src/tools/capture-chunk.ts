@@ -1,14 +1,12 @@
 /**
  * MCP `capture-chunk` tool (Meridian IDEA-9): lets an ideation assistant capture a chunk on
- * behalf of a human stakeholder by delegating to the store's `POST /chunks` endpoint. The tool
- * never invents a stakeholder identity — it always forwards the caller-supplied
- * `stakeholderId` and lets the store enforce that it already exists.
- *
- * G11 SG6 (Meridian IDEA-92/IDEA-98/IDEA-100): `POST /chunks` sits on the delegated, tokenless
- * auth tier, so this tool requires a `workspaceId` input and forwards it as the store's
- * `X-Workspace-Id` header (not a body field) — the store validates it against a
- * `workspace_memberships` row for the caller-supplied `stakeholderId`.
+ * behalf of a human stakeholder by delegating to the store's `POST /chunks` endpoint. Neither
+ * stakeholder identity nor workspace scope is a per-call input any more (G19 SG2/SG3): both come
+ * from the shared store-client helper's host-held session token/workspace id, and the store
+ * derives authorship from the verified token's `stakeholderId` claim.
  */
+
+import { getStoreAuthHeaders } from '../store-client.js';
 
 /** Untrusted-input shape mirroring the store's `CreateChunkRequest` (apps/store/src/chunks). */
 export interface CaptureChunkInput {
@@ -17,8 +15,6 @@ export interface CaptureChunkInput {
   discipline: string;
   chunkType: string;
   contextKind: string;
-  stakeholderId: string;
-  workspaceId: string;
   branchId?: string;
 }
 
@@ -93,8 +89,6 @@ export function parseCaptureChunkInput(body: unknown): CaptureChunkInput {
     discipline: requireStringField(record, 'discipline'),
     chunkType: requireStringField(record, 'chunkType'),
     contextKind: requireStringField(record, 'contextKind'),
-    stakeholderId: requireStringField(record, 'stakeholderId'),
-    workspaceId: requireStringField(record, 'workspaceId'),
     ...(branchId !== undefined ? { branchId } : {}),
   } satisfies CaptureChunkInput;
 }
@@ -120,11 +114,10 @@ export async function captureChunk(
   input: CaptureChunkInput,
   storeUrl: string,
 ): Promise<CaptureChunkResult> {
-  const { workspaceId, ...body } = input;
   const response = await fetch(`${storeUrl}/chunks`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-workspace-id': workspaceId },
-    body: JSON.stringify(body),
+    headers: { 'content-type': 'application/json', ...getStoreAuthHeaders() },
+    body: JSON.stringify(input),
   });
 
   const payload: unknown = await response.json().catch(() => undefined);

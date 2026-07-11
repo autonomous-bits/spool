@@ -1,8 +1,9 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { createMcpServer } from './server.js';
+import { resetStoreCredentialsForTests } from './store-client.js';
 
 const EXPECTED_TOOL_NAMES = [
   'capture-chunk',
@@ -22,21 +23,25 @@ const captureChunkInput = {
   discipline: 'product',
   chunkType: 'feature',
   contextKind: 'permanent',
-  stakeholderId: 'stakeholder-1',
-  workspaceId: 'workspace-1',
 };
 
 const searchChunksInput = {
-  sessionToken: 'session-token-1',
-  workspaceId: 'workspace-1',
+  q: 'test query',
 };
 
 describe('Spool MCP stdio server (Meridian IDEA-137)', () => {
   const originalFetch = fetch;
   const pairs: { client: Client; server: McpServer }[] = [];
 
+  beforeEach(() => {
+    vi.stubEnv('SPOOL_SESSION_TOKEN', 'test-session-token');
+    vi.stubEnv('SPOOL_WORKSPACE_ID', 'test-workspace-id');
+  });
+
   afterEach(async () => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    resetStoreCredentialsForTests();
 
     await Promise.all(
       pairs.map(async ({ client, server }) => {
@@ -84,7 +89,7 @@ describe('Spool MCP stdio server (Meridian IDEA-137)', () => {
     }
   });
 
-  describe('tools/call capture-chunk (tokenless/delegated)', () => {
+  describe('tools/call capture-chunk (host-held session token, G19)', () => {
     it('succeeds and forwards the created chunk on the success path', async () => {
       const createdChunk = { id: 'chunk-1', ...captureChunkInput, status: 'draft' };
       const fetchSpy = vi.fn(async (url: string, init?: RequestInit) => {
@@ -114,7 +119,7 @@ describe('Spool MCP stdio server (Meridian IDEA-137)', () => {
       const { client } = await connectClientAndServer();
       const result = await client.callTool({
         name: 'capture-chunk',
-        arguments: { ...captureChunkInput, stakeholderId: '   ' },
+        arguments: { ...captureChunkInput, label: '   ' },
       });
 
       expect(result.isError).toBe(true);
@@ -122,7 +127,7 @@ describe('Spool MCP stdio server (Meridian IDEA-137)', () => {
     });
   });
 
-  describe('tools/call search-chunks (session-token)', () => {
+  describe('tools/call search-chunks (host-held session token, G19)', () => {
     it('succeeds and forwards the search result on the success path', async () => {
       const searchResult = { chunks: [], nextCursor: null };
       const fetchSpy = vi.fn(async (url: string, init?: RequestInit) => {
@@ -145,14 +150,14 @@ describe('Spool MCP stdio server (Meridian IDEA-137)', () => {
       expect(fetchSpy).toHaveBeenCalled();
     });
 
-    it('returns isError: true for a schema-valid but semantically invalid (whitespace-only) sessionToken, without calling fetch', async () => {
+    it('returns isError: true for a schema-valid but semantically invalid (whitespace-only) field, without calling fetch', async () => {
       const fetchSpy = vi.fn(originalFetch);
       vi.stubGlobal('fetch', fetchSpy);
 
       const { client } = await connectClientAndServer();
       const result = await client.callTool({
         name: 'search-chunks',
-        arguments: { ...searchChunksInput, sessionToken: '   ' },
+        arguments: { ...searchChunksInput, q: '   ' },
       });
 
       expect(result.isError).toBe(true);

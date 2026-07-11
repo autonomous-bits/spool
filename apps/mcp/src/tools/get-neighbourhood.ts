@@ -1,7 +1,16 @@
+/**
+ * MCP `get-neighbourhood` tool: fetches a chunk and its typed-edge neighbours, delegating to the
+ * store's `GET /chunks/:id/neighbourhood` endpoint.
+ *
+ * Neither the session token nor the workspace id is a per-call input any more (G19 SG2/SG4):
+ * both come from the shared store-client helper's host-held credentials, the same as the other
+ * 8 MCP tools.
+ */
+
+import { getStoreAuthHeaders } from '../store-client.js';
+
 export interface GetNeighbourhoodInput {
   id: string;
-  sessionToken: string;
-  workspaceId: string;
   depth?: number;
   branchId?: string;
 }
@@ -84,8 +93,6 @@ export function parseGetNeighbourhoodInput(body: unknown): GetNeighbourhoodInput
 
   const result: GetNeighbourhoodInput = {
     id: requireStringField(record, 'id'),
-    sessionToken: requireStringField(record, 'sessionToken'),
-    workspaceId: requireStringField(record, 'workspaceId'),
   };
   
   const depth = optionalNumberField(record, 'depth');
@@ -113,7 +120,7 @@ export async function getNeighbourhood(
   input: GetNeighbourhoodInput,
   storeUrl: string,
 ): Promise<GetNeighbourhoodResult> {
-  const { id, sessionToken, workspaceId, ...queryParams } = input;
+  const { id, ...queryParams } = input;
   
   const url = new URL(`${storeUrl}/chunks/${id}/neighbourhood`);
   for (const [key, value] of Object.entries(queryParams)) {
@@ -122,10 +129,7 @@ export async function getNeighbourhood(
 
   const response = await fetch(url.toString(), {
     method: 'GET',
-    headers: {
-      authorization: `Bearer ${sessionToken}`,
-      'x-workspace-id': workspaceId,
-    },
+    headers: { ...getStoreAuthHeaders() },
   });
 
   const payload: unknown = await response.json().catch(() => undefined);

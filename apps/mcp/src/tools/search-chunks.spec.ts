@@ -1,16 +1,15 @@
-import { describe, expect, it, vi, afterEach } from 'vitest';
+import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest';
 import {
   parseSearchChunksInput,
   SearchChunksValidationError,
   searchChunks,
 } from './search-chunks.js';
+import { resetStoreCredentialsForTests } from '../store-client.js';
 
 describe('search-chunks tool', () => {
   describe('parseSearchChunksInput', () => {
     it('parses a valid, fully populated request', () => {
       const result = parseSearchChunksInput({
-        sessionToken: 'token-123',
-        workspaceId: 'workspace-123',
         discipline: 'product',
         chunkType: 'feature',
         status: 'draft',
@@ -21,8 +20,6 @@ describe('search-chunks tool', () => {
         cursor: 'cursor-string',
       });
       expect(result).toEqual({
-        sessionToken: 'token-123',
-        workspaceId: 'workspace-123',
         discipline: 'product',
         chunkType: 'feature',
         status: 'draft',
@@ -34,15 +31,9 @@ describe('search-chunks tool', () => {
       });
     });
 
-    it('parses a valid, minimal request', () => {
-      const result = parseSearchChunksInput({
-        sessionToken: 'token-123',
-        workspaceId: 'workspace-123',
-      });
-      expect(result).toEqual({
-        sessionToken: 'token-123',
-        workspaceId: 'workspace-123',
-      });
+    it('parses a valid, minimal (empty) request', () => {
+      const result = parseSearchChunksInput({});
+      expect(result).toEqual({});
     });
 
     it('throws when body is not an object', () => {
@@ -50,20 +41,21 @@ describe('search-chunks tool', () => {
       expect(() => parseSearchChunksInput(null)).toThrow(SearchChunksValidationError);
     });
 
-    it('throws when sessionToken is missing or empty', () => {
-      expect(() => parseSearchChunksInput({ workspaceId: 'w' })).toThrow(SearchChunksValidationError);
-      expect(() => parseSearchChunksInput({ sessionToken: '', workspaceId: 'w' })).toThrow(SearchChunksValidationError);
-      expect(() => parseSearchChunksInput({ sessionToken: 123, workspaceId: 'w' })).toThrow(SearchChunksValidationError);
-    });
-
     it('throws when limit is not a number', () => {
-      expect(() => parseSearchChunksInput({ sessionToken: 't', workspaceId: 'w', limit: '10' })).toThrow(SearchChunksValidationError);
+      expect(() => parseSearchChunksInput({ limit: '10' })).toThrow(SearchChunksValidationError);
     });
   });
 
   describe('searchChunks', () => {
+    beforeEach(() => {
+      vi.stubEnv('SPOOL_SESSION_TOKEN', 'test-session-token');
+      vi.stubEnv('SPOOL_WORKSPACE_ID', 'test-workspace-id');
+    });
+
     afterEach(() => {
       vi.restoreAllMocks();
+      vi.unstubAllEnvs();
+      resetStoreCredentialsForTests();
     });
 
     it('forwards the request and returns the store result on success', async () => {
@@ -73,10 +65,7 @@ describe('search-chunks tool', () => {
         json: vi.fn().mockResolvedValue(mockResult),
       });
 
-      const result = await searchChunks(
-        { sessionToken: 'token-1', workspaceId: 'w-1', q: 'test' },
-        'http://localhost:3000',
-      );
+      const result = await searchChunks({ q: 'test' }, 'http://localhost:3000');
 
       expect(result).toEqual(mockResult);
       expect(global.fetch).toHaveBeenCalledWith(
@@ -84,8 +73,8 @@ describe('search-chunks tool', () => {
         expect.objectContaining({
           method: 'GET',
           headers: {
-            authorization: 'Bearer token-1',
-            'x-workspace-id': 'w-1',
+            authorization: `Bearer test-session-token`,
+            'x-workspace-id': 'test-workspace-id',
           },
         }),
       );
@@ -98,10 +87,7 @@ describe('search-chunks tool', () => {
         json: vi.fn().mockResolvedValue(mockResult),
       });
 
-      await searchChunks(
-        { sessionToken: 'token-1', workspaceId: 'w-1', chunkType: 'feature' },
-        'http://localhost:3000',
-      );
+      await searchChunks({ chunkType: 'feature' }, 'http://localhost:3000');
 
       expect(global.fetch).toHaveBeenCalledWith(
         'http://localhost:3000/chunks?type=feature',
@@ -116,9 +102,7 @@ describe('search-chunks tool', () => {
         json: vi.fn().mockResolvedValue({ message: 'Store said no' }),
       });
 
-      await expect(
-        searchChunks({ sessionToken: 'token-1', workspaceId: 'w-1' }, 'http://localhost:3000'),
-      ).rejects.toThrow('Store said no');
+      await expect(searchChunks({}, 'http://localhost:3000')).rejects.toThrow('Store said no');
     });
 
     it('falls back to a generic error message if store body is malformed', async () => {
@@ -128,9 +112,9 @@ describe('search-chunks tool', () => {
         json: vi.fn().mockRejectedValue(new Error('unparseable')),
       });
 
-      await expect(
-        searchChunks({ sessionToken: 'token-1', workspaceId: 'w-1' }, 'http://localhost:3000'),
-      ).rejects.toThrow('Store rejected search-chunks request (400)');
+      await expect(searchChunks({}, 'http://localhost:3000')).rejects.toThrow(
+        'Store rejected search-chunks request (400)',
+      );
     });
   });
 });

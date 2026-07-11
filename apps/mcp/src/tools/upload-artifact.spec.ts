@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   MAX_ARTIFACT_CONTENT_BYTES,
   parseUploadArtifactInput,
@@ -8,12 +8,11 @@ import {
   type UploadArtifactResult,
 } from './upload-artifact.js';
 
+import { resetStoreCredentialsForTests } from '../store-client.js';
 describe('parseUploadArtifactInput', () => {
   const validBody = {
     content: Buffer.from('hello world').toString('base64'),
     mimeType: 'text/plain',
-    stakeholderId: 'stakeholder-1',
-    workspaceId: 'workspace-1',
   };
 
   it('accepts a well-formed body', () => {
@@ -25,7 +24,7 @@ describe('parseUploadArtifactInput', () => {
     expect(() => parseUploadArtifactInput(null)).toThrow(UploadArtifactValidationError);
   });
 
-  it.each(['content', 'mimeType', 'stakeholderId', 'workspaceId'])('rejects a missing %s, never inventing one', (field) => {
+  it.each(['content', 'mimeType'])('rejects a missing %s, never inventing one', (field) => {
     const body: Record<string, unknown> = { ...validBody };
     Reflect.deleteProperty(body, field);
     expect(() => parseUploadArtifactInput(body)).toThrow(new RegExp(field));
@@ -64,12 +63,17 @@ describe('uploadArtifact', () => {
   const input: UploadArtifactInput = {
     content: Buffer.from('hello world').toString('base64'),
     mimeType: 'text/plain',
-    stakeholderId: 'stakeholder-1',
-    workspaceId: 'workspace-1',
   };
+
+  beforeEach(() => {
+    vi.stubEnv('SPOOL_SESSION_TOKEN', 'test-session-token');
+    vi.stubEnv('SPOOL_WORKSPACE_ID', 'test-workspace-id');
+  });
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    resetStoreCredentialsForTests();
   });
 
   it('forwards the input to POST {storeUrl}/artifacts and returns the created artifact id', async () => {
@@ -77,7 +81,7 @@ describe('uploadArtifact', () => {
       id: 'artifact-1',
       uri: 'file:///artifacts/artifact-1',
       mimeType: input.mimeType,
-      createdByStakeholderId: input.stakeholderId,
+      createdByStakeholderId: 'stakeholder-1',
       createdAt: '2026-01-01T00:00:00.000Z',
     };
     const fetchMock = vi.fn().mockResolvedValue({
@@ -89,11 +93,14 @@ describe('uploadArtifact', () => {
 
     const result = await uploadArtifact(input, 'http://store.test');
 
-    const { workspaceId, ...expectedBody } = input;
     expect(fetchMock).toHaveBeenCalledWith('http://store.test/artifacts', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-workspace-id': workspaceId },
-      body: JSON.stringify(expectedBody),
+      headers: {
+        'content-type': 'application/json',
+        authorization: 'Bearer test-session-token',
+        'x-workspace-id': 'test-workspace-id',
+      },
+      body: JSON.stringify(input),
     });
     expect(result).toEqual(expected);
     expect(result.id).toBe('artifact-1');

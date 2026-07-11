@@ -1,24 +1,21 @@
-import { describe, expect, it, vi, afterEach } from 'vitest';
+import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest';
 import {
   parseGetNeighbourhoodInput,
   GetNeighbourhoodValidationError,
   getNeighbourhood,
 } from './get-neighbourhood.js';
+import { resetStoreCredentialsForTests } from '../store-client.js';
 
 describe('get-neighbourhood tool', () => {
   describe('parseGetNeighbourhoodInput', () => {
     it('parses a valid, fully populated request', () => {
       const result = parseGetNeighbourhoodInput({
         id: 'chunk-123',
-        sessionToken: 'token-123',
-        workspaceId: 'workspace-123',
         depth: 2,
         branchId: 'branch-123',
       });
       expect(result).toEqual({
         id: 'chunk-123',
-        sessionToken: 'token-123',
-        workspaceId: 'workspace-123',
         depth: 2,
         branchId: 'branch-123',
       });
@@ -27,13 +24,9 @@ describe('get-neighbourhood tool', () => {
     it('parses a valid, minimal request', () => {
       const result = parseGetNeighbourhoodInput({
         id: 'chunk-123',
-        sessionToken: 'token-123',
-        workspaceId: 'workspace-123',
       });
       expect(result).toEqual({
         id: 'chunk-123',
-        sessionToken: 'token-123',
-        workspaceId: 'workspace-123',
       });
     });
 
@@ -43,19 +36,25 @@ describe('get-neighbourhood tool', () => {
     });
 
     it('throws when required fields are missing', () => {
-      expect(() => parseGetNeighbourhoodInput({ sessionToken: 't', workspaceId: 'w' })).toThrow(GetNeighbourhoodValidationError);
-      expect(() => parseGetNeighbourhoodInput({ id: 'i', workspaceId: 'w' })).toThrow(GetNeighbourhoodValidationError);
-      expect(() => parseGetNeighbourhoodInput({ id: 'i', sessionToken: 't' })).toThrow(GetNeighbourhoodValidationError);
+      expect(() => parseGetNeighbourhoodInput({})).toThrow(GetNeighbourhoodValidationError);
+      expect(() => parseGetNeighbourhoodInput({ id: '' })).toThrow(GetNeighbourhoodValidationError);
     });
 
     it('throws when depth is not a number', () => {
-      expect(() => parseGetNeighbourhoodInput({ id: 'i', sessionToken: 't', workspaceId: 'w', depth: '2' })).toThrow(GetNeighbourhoodValidationError);
+      expect(() => parseGetNeighbourhoodInput({ id: 'i', depth: '2' })).toThrow(GetNeighbourhoodValidationError);
     });
   });
 
   describe('getNeighbourhood', () => {
+    beforeEach(() => {
+      vi.stubEnv('SPOOL_SESSION_TOKEN', 'test-session-token');
+      vi.stubEnv('SPOOL_WORKSPACE_ID', 'test-workspace-id');
+    });
+
     afterEach(() => {
       vi.restoreAllMocks();
+      vi.unstubAllEnvs();
+      resetStoreCredentialsForTests();
     });
 
     it('forwards the request and returns the store result on success', async () => {
@@ -66,7 +65,7 @@ describe('get-neighbourhood tool', () => {
       });
 
       const result = await getNeighbourhood(
-        { id: 'chunk-123', sessionToken: 'token-1', workspaceId: 'w-1', depth: 2 },
+        { id: 'chunk-123', depth: 2 },
         'http://localhost:3000',
       );
 
@@ -76,8 +75,8 @@ describe('get-neighbourhood tool', () => {
         expect.objectContaining({
           method: 'GET',
           headers: {
-            authorization: 'Bearer token-1',
-            'x-workspace-id': 'w-1',
+            authorization: `Bearer test-session-token`,
+            'x-workspace-id': 'test-workspace-id',
           },
         }),
       );
@@ -91,7 +90,7 @@ describe('get-neighbourhood tool', () => {
       });
 
       await expect(
-        getNeighbourhood({ id: 'chunk-123', sessionToken: 'token-1', workspaceId: 'w-1' }, 'http://localhost:3000'),
+        getNeighbourhood({ id: 'chunk-123' }, 'http://localhost:3000'),
       ).rejects.toThrow('Store said no');
     });
 
@@ -103,7 +102,7 @@ describe('get-neighbourhood tool', () => {
       });
 
       await expect(
-        getNeighbourhood({ id: 'chunk-123', sessionToken: 'token-1', workspaceId: 'w-1' }, 'http://localhost:3000'),
+        getNeighbourhood({ id: 'chunk-123' }, 'http://localhost:3000'),
       ).rejects.toThrow('Store rejected get-neighbourhood request (400)');
     });
   });

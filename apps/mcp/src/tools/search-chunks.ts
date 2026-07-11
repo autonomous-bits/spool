@@ -2,13 +2,14 @@
  * MCP `search-chunks` tool: lets an ideation assistant search for chunks by full-text query
  * and strict workspace/branch boundaries, delegating to the store's `GET /chunks` endpoint.
  *
- * It requires `workspaceId` and a `sessionToken` (unlike delegated tokenless tools) since
- * `GET /chunks` sits on the human-only token tier.
+ * Neither the session token nor the workspace id is a per-call input any more (G19 SG2/SG4):
+ * both come from the shared store-client helper's host-held credentials, the same as the other
+ * 8 MCP tools.
  */
 
+import { getStoreAuthHeaders } from '../store-client.js';
+
 export interface SearchChunksInput {
-  sessionToken: string;
-  workspaceId: string;
   discipline?: string;
   chunkType?: string;
   status?: string;
@@ -82,10 +83,7 @@ export function parseSearchChunksInput(body: unknown): SearchChunksInput {
 
   const record = body as Record<string, unknown>;
 
-  const result: SearchChunksInput = {
-    sessionToken: requireStringField(record, 'sessionToken'),
-    workspaceId: requireStringField(record, 'workspaceId'),
-  };
+  const result: SearchChunksInput = {};
 
   const discipline = optionalStringField(record, 'discipline');
   if (discipline !== undefined) result.discipline = discipline;
@@ -130,10 +128,8 @@ export async function searchChunks(
   input: SearchChunksInput,
   storeUrl: string,
 ): Promise<SearchChunksResult> {
-  const { sessionToken, workspaceId, ...queryParams } = input;
-  
   const url = new URL(`${storeUrl}/chunks`);
-  for (const [key, value] of Object.entries(queryParams)) {
+  for (const [key, value] of Object.entries(input)) {
     if (key === 'chunkType') {
       url.searchParams.append('type', String(value));
     } else {
@@ -143,10 +139,7 @@ export async function searchChunks(
 
   const response = await fetch(url.toString(), {
     method: 'GET',
-    headers: {
-      authorization: `Bearer ${sessionToken}`,
-      'x-workspace-id': workspaceId,
-    },
+    headers: { ...getStoreAuthHeaders() },
   });
 
   const payload: unknown = await response.json().catch(() => undefined);

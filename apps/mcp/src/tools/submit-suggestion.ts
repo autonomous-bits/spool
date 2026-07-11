@@ -2,17 +2,13 @@
  * MCP `submit-suggestion` tool (Meridian IDEA-9, IDEA-27/IDEA-28/IDEA-49): lets an ideation
  * assistant submit a chunk or edge suggestion on behalf of a human stakeholder by delegating to
  * the store's `POST /suggestions` endpoint. Submission only -- this tool never accepts/rejects a
- * suggestion (Meridian IDEA-75: suggestion decisions are human-only). The tool never invents a
- * stakeholder identity -- it always forwards the caller-supplied `stakeholderId` and lets the
- * store enforce that it already exists. It also never re-validates the `relationshipType`/
- * `discipline` closed vocabularies itself: the store is the authoritative source for those
- * invariants, and this tool must surface the store's own validation errors rather than duplicate
- * or pre-empt them.
- *
- * G11 SG6 (Meridian IDEA-92/IDEA-98/IDEA-100): `POST /suggestions` sits on the delegated,
- * tokenless auth tier, so this tool requires a `workspaceId` input and forwards it as the
- * store's `X-Workspace-Id` header (not a body field) — the store validates it against a
- * `workspace_memberships` row for the caller-supplied `stakeholderId`.
+ * suggestion (Meridian IDEA-75: suggestion decisions are human-only). Neither stakeholder
+ * identity nor workspace scope is a per-call input any more (G19 SG2/SG3): both come from the
+ * shared store-client helper's host-held session token/workspace id, and the store derives
+ * authorship from the verified token's `stakeholderId` claim. It also never re-validates the
+ * `relationshipType`/`discipline` closed vocabularies itself: the store is the authoritative
+ * source for those invariants, and this tool must surface the store's own validation errors
+ * rather than duplicate or pre-empt them.
  */
 
 /**
@@ -21,10 +17,10 @@
  * (`fromChunkLabel`/`toChunkLabel`/`relationshipType`) field groups must be provided; the store
  * is the authoritative enforcer of that XOR shape (`check_suggestion_type`).
  */
+import { getStoreAuthHeaders } from '../store-client.js';
+
 export interface SubmitSuggestionInput {
   discipline: string;
-  stakeholderId: string;
-  workspaceId: string;
   label?: string;
   content?: string;
   fromChunkLabel?: string;
@@ -75,12 +71,12 @@ function requireStringField(record: Record<string, unknown>, field: string): str
 
 /**
  * Validates that an untrusted tool-call body has the expected shape before it is forwarded to
- * the store. Requires `discipline` and `stakeholderId` always, plus either the chunk-shaped
- * (`label`, `content`) or edge-shaped (`fromChunkLabel`, `toChunkLabel`, `relationshipType`)
- * fields -- mixing both, or providing neither/a partial shape of either, is rejected here so the
- * tool fails fast with a clear message; the store re-validates the same invariant independently.
- * `relationshipType`/`discipline` vocabulary values are intentionally not re-validated here: the
- * store is the authoritative source for those invariants.
+ * the store. Requires `discipline` always, plus either the chunk-shaped (`label`, `content`) or
+ * edge-shaped (`fromChunkLabel`, `toChunkLabel`, `relationshipType`) fields -- mixing both, or
+ * providing neither/a partial shape of either, is rejected here so the tool fails fast with a
+ * clear message; the store re-validates the same invariant independently. `relationshipType`/
+ * `discipline` vocabulary values are intentionally not re-validated here: the store is the
+ * authoritative source for those invariants.
  */
 export function parseSubmitSuggestionInput(body: unknown): SubmitSuggestionInput {
   if (typeof body !== 'object' || body === null) {
@@ -90,8 +86,6 @@ export function parseSubmitSuggestionInput(body: unknown): SubmitSuggestionInput
   const record = body as Record<string, unknown>;
 
   const discipline = requireStringField(record, 'discipline');
-  const stakeholderId = requireStringField(record, 'stakeholderId');
-  const workspaceId = requireStringField(record, 'workspaceId');
 
   const hasAnyChunkField = isNonEmptyString(record.label) || isNonEmptyString(record.content);
   const hasAnyEdgeField =
@@ -110,7 +104,7 @@ export function parseSubmitSuggestionInput(body: unknown): SubmitSuggestionInput
   if (hasAnyChunkField) {
     const label = requireStringField(record, 'label');
     const content = requireStringField(record, 'content');
-    return { discipline, stakeholderId, workspaceId, label, content } satisfies SubmitSuggestionInput;
+    return { discipline, label, content } satisfies SubmitSuggestionInput;
   }
 
   if (hasAnyEdgeField) {
@@ -119,8 +113,6 @@ export function parseSubmitSuggestionInput(body: unknown): SubmitSuggestionInput
     const relationshipType = requireStringField(record, 'relationshipType');
     return {
       discipline,
-      stakeholderId,
-      workspaceId,
       fromChunkLabel,
       toChunkLabel,
       relationshipType,
@@ -156,11 +148,10 @@ export async function submitSuggestion(
   input: SubmitSuggestionInput,
   storeUrl: string,
 ): Promise<SubmitSuggestionResult> {
-  const { workspaceId, ...body } = input;
   const response = await fetch(`${storeUrl}/suggestions`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-workspace-id': workspaceId },
-    body: JSON.stringify(body),
+    headers: { 'content-type': 'application/json', ...getStoreAuthHeaders() },
+    body: JSON.stringify(input),
   });
 
   const payload: unknown = await response.json().catch(() => undefined);

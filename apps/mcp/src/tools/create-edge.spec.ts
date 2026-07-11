@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createEdge,
   CreateEdgeValidationError,
@@ -7,14 +7,13 @@ import {
   type CreateEdgeResult,
 } from './create-edge.js';
 
+import { resetStoreCredentialsForTests } from '../store-client.js';
 describe('parseCreateEdgeInput', () => {
   const validBody = {
     fromChunkLabel: 'IDEA-1',
     toChunkLabel: 'IDEA-2',
     type: 'refines',
     discipline: 'product',
-    stakeholderId: 'stakeholder-1',
-    workspaceId: 'workspace-1',
   };
 
   it('accepts a well-formed body without branchId', () => {
@@ -31,7 +30,7 @@ describe('parseCreateEdgeInput', () => {
     expect(() => parseCreateEdgeInput(null)).toThrow(CreateEdgeValidationError);
   });
 
-  it.each(['fromChunkLabel', 'toChunkLabel', 'type', 'discipline', 'stakeholderId', 'workspaceId'])(
+  it.each(['fromChunkLabel', 'toChunkLabel', 'type', 'discipline'])(
     'rejects a missing %s, never inventing one',
     (field) => {
       const body: Record<string, unknown> = { ...validBody };
@@ -62,12 +61,17 @@ describe('createEdge', () => {
     toChunkLabel: 'IDEA-2',
     type: 'refines',
     discipline: 'product',
-    stakeholderId: 'stakeholder-1',
-    workspaceId: 'workspace-1',
   };
+
+  beforeEach(() => {
+    vi.stubEnv('SPOOL_SESSION_TOKEN', 'test-session-token');
+    vi.stubEnv('SPOOL_WORKSPACE_ID', 'test-workspace-id');
+  });
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    resetStoreCredentialsForTests();
   });
 
   it('forwards the input to POST {storeUrl}/edges and returns the created edge', async () => {
@@ -81,8 +85,8 @@ describe('createEdge', () => {
       branchId: null,
       originBranchId: null,
       supersededByEdgeId: null,
-      createdByStakeholderId: input.stakeholderId,
-      updatedByStakeholderId: input.stakeholderId,
+      createdByStakeholderId: 'stakeholder-1',
+      updatedByStakeholderId: 'stakeholder-1',
       createdAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',
     };
@@ -95,11 +99,14 @@ describe('createEdge', () => {
 
     const result = await createEdge(input, 'http://store.test');
 
-    const { workspaceId, ...expectedBody } = input;
     expect(fetchMock).toHaveBeenCalledWith('http://store.test/edges', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-workspace-id': workspaceId },
-      body: JSON.stringify(expectedBody),
+      headers: {
+        'content-type': 'application/json',
+        authorization: 'Bearer test-session-token',
+        'x-workspace-id': 'test-workspace-id',
+      },
+      body: JSON.stringify(input),
     });
     expect(result).toEqual(expected);
     expect(result.id).toBe('edge-1');

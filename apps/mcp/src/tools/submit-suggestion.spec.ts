@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   submitSuggestion,
   SubmitSuggestionValidationError,
@@ -9,19 +9,16 @@ import {
 
 const STAKEHOLDER_ID = 'stakeholder-1';
 
+import { resetStoreCredentialsForTests } from '../store-client.js';
 describe('parseSubmitSuggestionInput', () => {
   const chunkBody = {
     discipline: 'product',
-    stakeholderId: STAKEHOLDER_ID,
-    workspaceId: 'workspace-1',
     label: 'IDEA-1',
     content: 'Some proposed content.',
   };
 
   const edgeBody = {
     discipline: 'product',
-    stakeholderId: STAKEHOLDER_ID,
-    workspaceId: 'workspace-1',
     fromChunkLabel: 'IDEA-1',
     toChunkLabel: 'IDEA-2',
     relationshipType: 'refines',
@@ -40,7 +37,7 @@ describe('parseSubmitSuggestionInput', () => {
     expect(() => parseSubmitSuggestionInput(null)).toThrow(SubmitSuggestionValidationError);
   });
 
-  it.each(['discipline', 'stakeholderId', 'workspaceId'])('rejects a missing %s, never inventing one', (field) => {
+  it.each(['discipline'])('rejects a missing %s, never inventing one', (field) => {
     const body: Record<string, unknown> = { ...chunkBody };
     Reflect.deleteProperty(body, field);
     expect(() => parseSubmitSuggestionInput(body)).toThrow(new RegExp(field));
@@ -52,7 +49,7 @@ describe('parseSubmitSuggestionInput', () => {
   });
 
   it('rejects a body providing neither chunk nor edge fields', () => {
-    const body = { discipline: 'product', stakeholderId: STAKEHOLDER_ID, workspaceId: 'workspace-1' };
+    const body = { discipline: 'product' };
     expect(() => parseSubmitSuggestionInput(body)).toThrow(SubmitSuggestionValidationError);
   });
 
@@ -65,8 +62,6 @@ describe('parseSubmitSuggestionInput', () => {
   it('rejects a partial edge shape (only fromChunkLabel)', () => {
     const body = {
       discipline: 'product',
-      stakeholderId: STAKEHOLDER_ID,
-      workspaceId: 'workspace-1',
       fromChunkLabel: 'IDEA-1',
     };
     expect(() => parseSubmitSuggestionInput(body)).toThrow(SubmitSuggestionValidationError);
@@ -81,14 +76,19 @@ describe('parseSubmitSuggestionInput', () => {
 describe('submitSuggestion', () => {
   const input: SubmitSuggestionInput = {
     discipline: 'product',
-    stakeholderId: STAKEHOLDER_ID,
-    workspaceId: 'workspace-1',
     label: 'IDEA-1',
     content: 'Some proposed content.',
   };
 
+  beforeEach(() => {
+    vi.stubEnv('SPOOL_SESSION_TOKEN', 'test-session-token');
+    vi.stubEnv('SPOOL_WORKSPACE_ID', 'test-workspace-id');
+  });
+
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    resetStoreCredentialsForTests();
   });
 
   it('forwards the input to POST {storeUrl}/suggestions and returns the created suggestion', async () => {
@@ -101,7 +101,7 @@ describe('submitSuggestion', () => {
       relationshipType: null,
       discipline: input.discipline,
       status: 'pending',
-      submittedByStakeholderId: input.stakeholderId,
+      submittedByStakeholderId: STAKEHOLDER_ID,
       submittedByActorKind: 'delegated',
       decidedByStakeholderId: null,
       decidedAt: null,
@@ -117,11 +117,14 @@ describe('submitSuggestion', () => {
 
     const result = await submitSuggestion(input, 'http://store.test');
 
-    const { workspaceId, ...expectedBody } = input;
     expect(fetchMock).toHaveBeenCalledWith('http://store.test/suggestions', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-workspace-id': workspaceId },
-      body: JSON.stringify(expectedBody),
+      headers: {
+        'content-type': 'application/json',
+        authorization: 'Bearer test-session-token',
+        'x-workspace-id': 'test-workspace-id',
+      },
+      body: JSON.stringify(input),
     });
     expect(result).toEqual(expected);
     expect(result.id).toBe('suggestion-1');

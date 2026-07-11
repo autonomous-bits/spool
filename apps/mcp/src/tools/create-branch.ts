@@ -1,21 +1,17 @@
 /**
  * MCP `create-branch` tool (Meridian IDEA-9, IDEA-52/IDEA-34): lets an ideation assistant create
  * a draft branch on behalf of a human stakeholder by delegating to the store's `POST /branches`
- * endpoint. The tool never invents a stakeholder identity — it always forwards the
- * caller-supplied `stakeholderId` and lets the store enforce that it already exists.
- *
- * G11 SG6 (Meridian IDEA-92/IDEA-98/IDEA-100): `POST /branches` sits on the delegated, tokenless
- * auth tier, so this tool requires a `workspaceId` input and forwards it as the store's
- * `X-Workspace-Id` header (not a body field) — the store validates it against a
- * `workspace_memberships` row for the caller-supplied `stakeholderId`.
+ * endpoint. Neither stakeholder identity nor workspace scope is a per-call input any more (G19
+ * SG2/SG3): both come from the shared store-client helper's host-held session token/workspace
+ * id, and the store derives authorship from the verified token's `stakeholderId` claim.
  */
+
+import { getStoreAuthHeaders } from '../store-client.js';
 
 /** Untrusted-input shape mirroring the store's `CreateBranchRequest` (apps/store/src/branches). */
 export interface CreateBranchInput {
   name: string;
   discipline: string;
-  stakeholderId: string;
-  workspaceId: string;
 }
 
 /** Branch as returned by the store's `POST /branches` on success. */
@@ -65,8 +61,6 @@ export function parseCreateBranchInput(body: unknown): CreateBranchInput {
   return {
     name: requireStringField(record, 'name'),
     discipline: requireStringField(record, 'discipline'),
-    stakeholderId: requireStringField(record, 'stakeholderId'),
-    workspaceId: requireStringField(record, 'workspaceId'),
   } satisfies CreateBranchInput;
 }
 
@@ -92,11 +86,10 @@ export async function createBranch(
   input: CreateBranchInput,
   storeUrl: string,
 ): Promise<CreateBranchResult> {
-  const { workspaceId, ...body } = input;
   const response = await fetch(`${storeUrl}/branches`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-workspace-id': workspaceId },
-    body: JSON.stringify(body),
+    headers: { 'content-type': 'application/json', ...getStoreAuthHeaders() },
+    body: JSON.stringify(input),
   });
 
   const payload: unknown = await response.json().catch(() => undefined);

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   submitVerificationSignal,
   SubmitVerificationSignalValidationError,
@@ -7,12 +7,12 @@ import {
   type SubmitVerificationSignalResult,
 } from './submit-verification-signal.js';
 
+import { resetStoreCredentialsForTests } from '../store-client.js';
 describe('parseSubmitVerificationSignalInput', () => {
   const validBody = {
     branchId: 'branch-1',
     verifierName: 'ci-evaluator',
     status: 'pass',
-    workspaceId: 'workspace-1',
     reason: 'Checks passed.',
   };
 
@@ -36,7 +36,7 @@ describe('parseSubmitVerificationSignalInput', () => {
     );
   });
 
-  it.each(['branchId', 'verifierName', 'status', 'workspaceId'])(
+  it.each(['branchId', 'verifierName', 'status'])(
     'rejects a missing or blank %s',
     (field) => {
       const missing: Record<string, unknown> = { ...validBody };
@@ -66,12 +66,18 @@ describe('submitVerificationSignal', () => {
     branchId: 'branch-1',
     verifierName: 'ci-evaluator',
     status: 'pass',
-    workspaceId: 'workspace-1',
     reason: 'Checks passed.',
   };
 
+  beforeEach(() => {
+    vi.stubEnv('SPOOL_SESSION_TOKEN', 'test-session-token');
+    vi.stubEnv('SPOOL_WORKSPACE_ID', 'test-workspace-id');
+  });
+
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    resetStoreCredentialsForTests();
   });
 
   it('forwards the input to POST {storeUrl}/branches/:branchId/verification-signals and returns the created signal', async () => {
@@ -96,7 +102,11 @@ describe('submitVerificationSignal', () => {
       'http://store.test/branches/branch-1/verification-signals',
       {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-workspace-id': input.workspaceId },
+        headers: {
+          'content-type': 'application/json',
+          authorization: 'Bearer test-session-token',
+          'x-workspace-id': 'test-workspace-id',
+        },
         body: JSON.stringify({
           verifierName: input.verifierName,
           status: input.status,

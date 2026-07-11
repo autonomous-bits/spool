@@ -45,16 +45,12 @@ const captureChunkInputSchema = {
   discipline: z.string().min(1),
   chunkType: z.string().min(1),
   contextKind: z.string().min(1),
-  stakeholderId: z.string().min(1),
-  workspaceId: z.string().min(1),
   branchId: z.string().min(1).optional(),
 } satisfies ZodRawShape;
 
 const createBranchInputSchema = {
   name: z.string().min(1),
   discipline: z.string().min(1),
-  stakeholderId: z.string().min(1),
-  workspaceId: z.string().min(1),
 } satisfies ZodRawShape;
 
 const createEdgeInputSchema = {
@@ -62,15 +58,11 @@ const createEdgeInputSchema = {
   toChunkLabel: z.string().min(1),
   type: z.string().min(1),
   discipline: z.string().min(1),
-  stakeholderId: z.string().min(1),
-  workspaceId: z.string().min(1),
   branchId: z.string().min(1).optional(),
 } satisfies ZodRawShape;
 
 const submitSuggestionInputSchema = {
   discipline: z.string().min(1),
-  stakeholderId: z.string().min(1),
-  workspaceId: z.string().min(1),
   label: z.string().min(1).optional(),
   content: z.string().min(1).optional(),
   fromChunkLabel: z.string().min(1).optional(),
@@ -82,28 +74,21 @@ const submitVerificationSignalInputSchema = {
   branchId: z.string().min(1),
   verifierName: z.string().min(1),
   status: z.string().min(1),
-  workspaceId: z.string().min(1),
   reason: z.string().min(1).optional(),
 } satisfies ZodRawShape;
 
 const uploadArtifactInputSchema = {
   content: z.string().min(1),
   mimeType: z.string().min(1),
-  stakeholderId: z.string().min(1),
-  workspaceId: z.string().min(1),
 } satisfies ZodRawShape;
 
 const attachArtifactToChunkInputSchema = {
   chunkLabel: z.string().min(1),
   artifactId: z.string().min(1),
-  stakeholderId: z.string().min(1),
-  workspaceId: z.string().min(1),
   branchId: z.string().min(1).optional(),
 } satisfies ZodRawShape;
 
 const searchChunksInputSchema = {
-  sessionToken: z.string().min(1),
-  workspaceId: z.string().min(1),
   discipline: z.string().min(1).optional(),
   chunkType: z.string().min(1).optional(),
   status: z.string().min(1).optional(),
@@ -116,8 +101,6 @@ const searchChunksInputSchema = {
 
 const getNeighbourhoodInputSchema = {
   id: z.string().min(1),
-  sessionToken: z.string().min(1),
-  workspaceId: z.string().min(1),
   depth: z.number().optional(),
   branchId: z.string().min(1).optional(),
 } satisfies ZodRawShape;
@@ -136,7 +119,7 @@ export function createMcpServer(storeUrl = process.env.SPOOL_STORE_URL ?? 'http:
     {
       title: 'Capture Chunk',
       description:
-        'Captures a chunk on behalf of a human stakeholder by delegating to the store (tokenless, delegated auth tier).',
+        'Captures a chunk on behalf of a human stakeholder by delegating to the store (host-held session token, G19).',
       inputSchema: captureChunkInputSchema,
     },
     async (args) =>
@@ -150,7 +133,7 @@ export function createMcpServer(storeUrl = process.env.SPOOL_STORE_URL ?? 'http:
     'create-branch',
     {
       title: 'Create Branch',
-      description: 'Creates a new branch for a discipline on behalf of a human stakeholder (tokenless, delegated auth tier).',
+      description: 'Creates a new branch for a discipline on behalf of a human stakeholder (host-held session token, G19).',
       inputSchema: createBranchInputSchema,
     },
     async (args) =>
@@ -164,7 +147,7 @@ export function createMcpServer(storeUrl = process.env.SPOOL_STORE_URL ?? 'http:
     'create-edge',
     {
       title: 'Create Edge',
-      description: 'Creates a typed relationship edge between two chunks (tokenless, delegated auth tier).',
+      description: 'Creates a typed relationship edge between two chunks (host-held session token, G19).',
       inputSchema: createEdgeInputSchema,
     },
     async (args) =>
@@ -178,7 +161,7 @@ export function createMcpServer(storeUrl = process.env.SPOOL_STORE_URL ?? 'http:
     'submit-suggestion',
     {
       title: 'Submit Suggestion',
-      description: 'Submits a chunk or edge suggestion for later review (tokenless, delegated auth tier).',
+      description: 'Submits a chunk or edge suggestion for later review (host-held session token, G19).',
       inputSchema: submitSuggestionInputSchema,
     },
     async (args) =>
@@ -192,7 +175,7 @@ export function createMcpServer(storeUrl = process.env.SPOOL_STORE_URL ?? 'http:
     'submit-verification-signal',
     {
       title: 'Submit Verification Signal',
-      description: 'Submits a pass/fail verification signal for a branch (tokenless, delegated auth tier).',
+      description: 'Submits a pass/fail verification signal for a branch (host-held session token, G19).',
       inputSchema: submitVerificationSignalInputSchema,
     },
     async (args) =>
@@ -206,7 +189,7 @@ export function createMcpServer(storeUrl = process.env.SPOOL_STORE_URL ?? 'http:
     'upload-artifact',
     {
       title: 'Upload Artifact',
-      description: 'Uploads a base64-encoded artifact on behalf of a human stakeholder (tokenless, delegated auth tier).',
+      description: 'Uploads a base64-encoded artifact on behalf of a human stakeholder (host-held session token, G19).',
       inputSchema: uploadArtifactInputSchema,
     },
     async (args) =>
@@ -220,7 +203,7 @@ export function createMcpServer(storeUrl = process.env.SPOOL_STORE_URL ?? 'http:
     'attach-artifact-to-chunk',
     {
       title: 'Attach Artifact To Chunk',
-      description: 'Attaches a previously uploaded artifact to a chunk (tokenless, delegated auth tier).',
+      description: 'Attaches a previously uploaded artifact to a chunk (host-held session token, G19).',
       inputSchema: attachArtifactToChunkInputSchema,
     },
     async (args) =>

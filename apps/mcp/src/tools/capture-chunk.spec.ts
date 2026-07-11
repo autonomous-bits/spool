@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   captureChunk,
   CaptureChunkValidationError,
@@ -7,6 +7,7 @@ import {
   type CaptureChunkResult,
 } from './capture-chunk.js';
 
+import { resetStoreCredentialsForTests } from '../store-client.js';
 describe('parseCaptureChunkInput', () => {
   it('accepts a well-formed body', () => {
     const body = {
@@ -15,8 +16,6 @@ describe('parseCaptureChunkInput', () => {
       discipline: 'product',
       chunkType: 'feature',
       contextKind: 'permanent',
-      stakeholderId: 'stakeholder-1',
-      workspaceId: 'workspace-1',
     };
 
     expect(parseCaptureChunkInput(body)).toEqual(body);
@@ -33,8 +32,6 @@ describe('parseCaptureChunkInput', () => {
       discipline: 'product',
       chunkType: 'feature',
       contextKind: 'permanent',
-      stakeholderId: 'stakeholder-1',
-      workspaceId: 'workspace-1',
     };
 
     expect(() => parseCaptureChunkInput(body)).toThrow(/label/);
@@ -47,24 +44,9 @@ describe('parseCaptureChunkInput', () => {
       discipline: 'product',
       chunkType: 'feature',
       contextKind: 'permanent',
-      stakeholderId: 'stakeholder-1',
-      workspaceId: 'workspace-1',
     };
 
     expect(() => parseCaptureChunkInput(body)).toThrow(/label/);
-  });
-
-  it('rejects a missing workspaceId, never inventing one', () => {
-    const body = {
-      label: 'ATOMIC-1',
-      content: 'content',
-      discipline: 'product',
-      chunkType: 'feature',
-      contextKind: 'permanent',
-      stakeholderId: 'stakeholder-1',
-    };
-
-    expect(() => parseCaptureChunkInput(body)).toThrow(/workspaceId/);
   });
 
   it('accepts an optional branchId and forwards it as-is', () => {
@@ -74,8 +56,6 @@ describe('parseCaptureChunkInput', () => {
       discipline: 'product',
       chunkType: 'feature',
       contextKind: 'permanent',
-      stakeholderId: 'stakeholder-1',
-      workspaceId: 'workspace-1',
       branchId: 'branch-1',
     };
 
@@ -89,8 +69,6 @@ describe('parseCaptureChunkInput', () => {
       discipline: 'product',
       chunkType: 'feature',
       contextKind: 'permanent',
-      stakeholderId: 'stakeholder-1',
-      workspaceId: 'workspace-1',
     };
 
     expect(parseCaptureChunkInput(body)).not.toHaveProperty('branchId');
@@ -103,8 +81,6 @@ describe('parseCaptureChunkInput', () => {
       discipline: 'product',
       chunkType: 'feature',
       contextKind: 'permanent',
-      stakeholderId: 'stakeholder-1',
-      workspaceId: 'workspace-1',
       branchId: '   ',
     };
 
@@ -119,12 +95,17 @@ describe('captureChunk', () => {
     discipline: 'product',
     chunkType: 'feature',
     contextKind: 'permanent',
-    stakeholderId: 'stakeholder-1',
-    workspaceId: 'workspace-1',
   };
+
+  beforeEach(() => {
+    vi.stubEnv('SPOOL_SESSION_TOKEN', 'test-session-token');
+    vi.stubEnv('SPOOL_WORKSPACE_ID', 'test-workspace-id');
+  });
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    resetStoreCredentialsForTests();
   });
 
   it('forwards the input to POST {storeUrl}/chunks and returns the created chunk', async () => {
@@ -136,8 +117,8 @@ describe('captureChunk', () => {
       chunkType: input.chunkType,
       contextKind: input.contextKind,
       status: 'draft',
-      createdByStakeholderId: input.stakeholderId,
-      updatedByStakeholderId: input.stakeholderId,
+      createdByStakeholderId: 'stakeholder-1',
+      updatedByStakeholderId: 'stakeholder-1',
       createdAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',
       branchId: null,
@@ -152,11 +133,14 @@ describe('captureChunk', () => {
 
     const result = await captureChunk(input, 'http://store.test');
 
-    const { workspaceId, ...expectedBody } = input;
     expect(fetchMock).toHaveBeenCalledWith('http://store.test/chunks', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-workspace-id': workspaceId },
-      body: JSON.stringify(expectedBody),
+      headers: {
+        'content-type': 'application/json',
+        authorization: 'Bearer test-session-token',
+        'x-workspace-id': 'test-workspace-id',
+      },
+      body: JSON.stringify(input),
     });
     expect(result).toEqual(expected);
     expect(result.id).toBe('chunk-1');
@@ -172,8 +156,8 @@ describe('captureChunk', () => {
       chunkType: inputWithBranch.chunkType,
       contextKind: inputWithBranch.contextKind,
       status: 'draft',
-      createdByStakeholderId: inputWithBranch.stakeholderId,
-      updatedByStakeholderId: inputWithBranch.stakeholderId,
+      createdByStakeholderId: 'stakeholder-1',
+      updatedByStakeholderId: 'stakeholder-1',
       createdAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',
       branchId: 'branch-1',
@@ -188,11 +172,14 @@ describe('captureChunk', () => {
 
     const result = await captureChunk(inputWithBranch, 'http://store.test');
 
-    const { workspaceId, ...expectedBody } = inputWithBranch;
     expect(fetchMock).toHaveBeenCalledWith('http://store.test/chunks', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-workspace-id': workspaceId },
-      body: JSON.stringify(expectedBody),
+      headers: {
+        'content-type': 'application/json',
+        authorization: 'Bearer test-session-token',
+        'x-workspace-id': 'test-workspace-id',
+      },
+      body: JSON.stringify(inputWithBranch),
     });
     expect(result.branchId).toBe('branch-1');
     expect(result.originBranchId).toBe('branch-1');

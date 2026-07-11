@@ -1,16 +1,13 @@
 /**
  * MCP `attach-artifact-to-chunk` tool (Meridian IDEA-9, IDEA-60, IDEA-52/IDEA-34): lets an
  * ideation assistant associate an already-uploaded artifact with a chunk on behalf of a human
- * stakeholder by delegating to the store's `POST /chunks/:label/artifacts` endpoint. The tool
- * never invents a stakeholder identity -- it always forwards the caller-supplied `stakeholderId`
- * and lets the store enforce that it already exists. `branchId` is forwarded as-is when present:
- * branch-scoped vs. mainline association semantics are the store's responsibility (Meridian
- * IDEA-32/IDEA-60), and this tool must surface the store's own validation/404 errors rather than
- * duplicate or pre-empt them.
- *
- * G11 SG6 (Meridian IDEA-92/IDEA-98/IDEA-100): `POST /chunks/:label/artifacts` sits on the
- * delegated, tokenless auth tier, so this tool requires a `workspaceId` input and forwards it as
- * the store's `X-Workspace-Id` header (not a body field).
+ * stakeholder by delegating to the store's `POST /chunks/:label/artifacts` endpoint. Neither
+ * stakeholder identity nor workspace scope is a per-call input any more (G19 SG2/SG3): both come
+ * from the shared store-client helper's host-held session token/workspace id, and the store
+ * derives authorship from the verified token's `stakeholderId` claim. `branchId` is forwarded
+ * as-is when present: branch-scoped vs. mainline association semantics are the store's
+ * responsibility (Meridian IDEA-32/IDEA-60), and this tool must surface the store's own
+ * validation/404 errors rather than duplicate or pre-empt them.
  */
 
 /**
@@ -19,11 +16,11 @@
  * param) because this tool speaks to a single MCP route and forwards it into the store's
  * `:label` path segment itself.
  */
+import { getStoreAuthHeaders } from '../store-client.js';
+
 export interface AttachArtifactToChunkInput {
   chunkLabel: string;
   artifactId: string;
-  stakeholderId: string;
-  workspaceId: string;
   branchId?: string;
 }
 
@@ -74,8 +71,6 @@ export function parseAttachArtifactToChunkInput(body: unknown): AttachArtifactTo
 
   const chunkLabel = requireStringField(record, 'chunkLabel');
   const artifactId = requireStringField(record, 'artifactId');
-  const stakeholderId = requireStringField(record, 'stakeholderId');
-  const workspaceId = requireStringField(record, 'workspaceId');
 
   const branchIdValue = record.branchId;
   if (branchIdValue !== undefined) {
@@ -85,13 +80,11 @@ export function parseAttachArtifactToChunkInput(body: unknown): AttachArtifactTo
     return {
       chunkLabel,
       artifactId,
-      stakeholderId,
-      workspaceId,
       branchId: branchIdValue,
     } satisfies AttachArtifactToChunkInput;
   }
 
-  return { chunkLabel, artifactId, stakeholderId, workspaceId } satisfies AttachArtifactToChunkInput;
+  return { chunkLabel, artifactId } satisfies AttachArtifactToChunkInput;
 }
 
 function extractErrorMessage(body: unknown, fallback: string): string {
@@ -116,10 +109,10 @@ export async function attachArtifactToChunk(
   input: AttachArtifactToChunkInput,
   storeUrl: string,
 ): Promise<AttachArtifactToChunkResult> {
-  const { chunkLabel, workspaceId, ...body } = input;
+  const { chunkLabel, ...body } = input;
   const response = await fetch(`${storeUrl}/chunks/${encodeURIComponent(chunkLabel)}/artifacts`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-workspace-id': workspaceId },
+    headers: { 'content-type': 'application/json', ...getStoreAuthHeaders() },
     body: JSON.stringify(body),
   });
 
