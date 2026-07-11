@@ -19,7 +19,6 @@ function validRequest(overrides: Partial<CreateChunkRequest> = {}): CreateChunkR
     discipline: 'product',
     chunkType: 'feature',
     contextKind: 'permanent',
-    stakeholderId: STAKEHOLDER_ID,
     ...overrides,
   };
 }
@@ -68,7 +67,7 @@ describe('ChunksService', () => {
       discipline: request.discipline,
       chunkType: request.chunkType,
       contextKind: request.contextKind,
-      createdByStakeholderId: request.stakeholderId,
+      createdByStakeholderId: STAKEHOLDER_ID,
     });
     vi.mocked(chunkRepository.create).mockResolvedValue(persisted);
 
@@ -98,12 +97,13 @@ describe('ChunksService', () => {
   });
 
   it('translates a foreign key violation on an unknown stakeholderId into a BadRequestException', async () => {
-    const request = validRequest({ stakeholderId: '00000000-0000-0000-0000-0000000000ff' });
+    const request = validRequest();
+    const claims = validClaims({ stakeholderId: '00000000-0000-0000-0000-0000000000ff' });
     vi.mocked(chunkRepository.create).mockRejectedValue(
       Object.assign(new Error('violates foreign key constraint'), { code: '23503' }),
     );
 
-    await expect(service.create(request, WORKSPACE_ID, validClaims())).rejects.toThrow(BadRequestException);
+    await expect(service.create(request, WORKSPACE_ID, claims)).rejects.toThrow(BadRequestException);
   });
 
   it('rethrows unrelated repository errors', async () => {
@@ -118,7 +118,7 @@ describe('ChunksService', () => {
     const persisted = new Chunk({
       workspaceId: WORKSPACE_ID,
       ...request,
-      createdByStakeholderId: request.stakeholderId,
+      createdByStakeholderId: STAKEHOLDER_ID,
     });
     vi.mocked(chunkRepository.findById).mockResolvedValue(persisted);
 

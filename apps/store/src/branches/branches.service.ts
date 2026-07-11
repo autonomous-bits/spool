@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { SessionTokenClaims } from '../auth/session-token.service.js';
+import { resolveHumanActorContext } from '../auth/resolve-human-actor.helper.js';
 import {
   BranchLifecycleError,
   assertDraftStatus,
@@ -17,7 +18,6 @@ import {
 } from '../domain/branch-lifecycle.js';
 import { Branch } from '../domain/branch.js';
 import type { HumanActorContext } from '../domain/types/actor/actor-context.js';
-import { isDiscipline } from '../domain/types/vocabulary/discipline.js';
 import { assertWorkspaceScope, WorkspaceScopeViolationError } from '../domain/workspace-scope.js';
 import { BranchRepository } from '../persistence/branch.repository.js';
 import { StakeholderRepository } from '../persistence/stakeholder.repository.js';
@@ -124,18 +124,10 @@ export class BranchesService {
   ): Promise<BranchResponse> {
     const workspaceId = await this.assertScope(headerWorkspaceId, claims);
 
-    const stakeholder = await this.stakeholderRepository.findById(claims.stakeholderId);
-    if (stakeholder === undefined || !isDiscipline(stakeholder.discipline)) {
-      throw new BadRequestException(
-        `Stakeholder ${claims.stakeholderId} must exist with a valid discipline to submit a branch`,
-      );
-    }
-
-    const actor = {
-      kind: 'human',
-      stakeholderId: claims.stakeholderId,
-      discipline: stakeholder.discipline,
-    } satisfies HumanActorContext;
+    const actor = await resolveHumanActorContext(this.stakeholderRepository, claims, {
+      requireDiscipline: true,
+      actionDescription: 'submit a branch',
+    });
 
     const branch = await this.branchRepository.findById(branchId, workspaceId);
     if (branch === undefined) {
@@ -271,18 +263,10 @@ export class BranchesService {
       throw new NotFoundException(`Branch ${branchId} not found`);
     }
 
-    const stakeholder = await this.stakeholderRepository.findById(claims.stakeholderId);
-    if (stakeholder === undefined) {
-      throw new BadRequestException(
-        `Stakeholder ${claims.stakeholderId} must exist to verify, reject, or merge a branch`,
-      );
-    }
-
-    const actor = {
-      kind: 'human',
-      stakeholderId: claims.stakeholderId,
-      discipline: isDiscipline(stakeholder.discipline) ? stakeholder.discipline : null,
-    } satisfies HumanActorContext;
+    const actor = await resolveHumanActorContext(this.stakeholderRepository, claims, {
+      requireDiscipline: false,
+      actionDescription: 'verify, reject, or merge a branch',
+    });
 
     return { ...actor, branch };
   }

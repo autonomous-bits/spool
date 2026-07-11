@@ -8,9 +8,12 @@ import { isDiscipline } from '../domain/types/vocabulary/discipline.js';
 
 /**
  * Validated shape of a `POST /chunks` request body, per Meridian IDEA-52/IDEA-34 (chunk capture
- * API). Stakeholder registration is out of scope for G01 (Meridian IDEA-11 attribution still
- * requires stakeholderId to already exist). `branchId` is optional (G02): when present, the
- * chunk is attached to that draft branch; when absent, capture is branchless as in G01.
+ * API). `branchId` is optional (G02): when present, the chunk is attached to that draft branch;
+ * when absent, capture is branchless as in G01.
+ *
+ * G16 SG5 (Meridian IDEA-139): authorship attribution (`createdByStakeholderId`) is derived from
+ * the verified session token's `stakeholderId` claim, not a client-supplied body field — this
+ * interface intentionally has no `stakeholderId` field.
  */
 export interface CreateChunkRequest {
   label: string;
@@ -18,7 +21,6 @@ export interface CreateChunkRequest {
   discipline: Discipline;
   chunkType: ChunkType;
   contextKind: ContextKind;
-  stakeholderId: string;
   branchId?: string;
 }
 
@@ -45,7 +47,6 @@ export function parseCreateChunkRequest(body: unknown): CreateChunkRequest {
 
   const label = requireStringField(record, 'label');
   const content = requireStringField(record, 'content');
-  const stakeholderId = requireStringField(record, 'stakeholderId');
 
   const discipline = record.discipline;
   if (!isDiscipline(discipline)) {
@@ -73,7 +74,6 @@ export function parseCreateChunkRequest(body: unknown): CreateChunkRequest {
       discipline,
       chunkType,
       contextKind,
-      stakeholderId,
       branchId: branchIdValue,
     } satisfies CreateChunkRequest;
   }
@@ -84,6 +84,5 @@ export function parseCreateChunkRequest(body: unknown): CreateChunkRequest {
     discipline,
     chunkType,
     contextKind,
-    stakeholderId,
   } satisfies CreateChunkRequest;
 }

@@ -76,7 +76,6 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
         discipline: 'engineering',
         chunkType: 'feature',
         contextKind: 'permanent',
-        stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
       });
 
     expect(createResponse.status).toBe(201);
@@ -109,7 +108,6 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
         discipline: 'bogus',
         chunkType: 'feature',
         contextKind: 'permanent',
-        stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
       });
 
     expect(response.status).toBe(400);
@@ -124,37 +122,70 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
       discipline: 'engineering',
       chunkType: 'feature',
       contextKind: 'permanent',
-      stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
     });
 
     expect(response.status).toBe(400);
   });
 
-  it('POST /chunks returns 400 for an unknown stakeholderId (FK violation on authorship attribution)', async () => {
+  it('POST /chunks returns 403 when the stakeholder is not a current member of the workspace (authorship is claim-derived, not client-supplied)', async () => {
+    const nonMemberToken = sessionTokenService.sign({
+      stakeholderId: randomUUID(),
+      discipline: 'engineering',
+      authTime: Math.floor(Date.now() / 1000),
+      workspaceId: WORKSPACE_ID,
+    });
+
     const response = await request(app.getHttpServer())
       .post('/chunks')
-      .set('Authorization', `Bearer ${defaultToken}`)
+      .set('Authorization', `Bearer ${nonMemberToken}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .send({
-        label: `e2e-unknown-stakeholder-${Math.random().toString(36).slice(2, 10)}`,
+        label: `e2e-non-member-${Math.random().toString(36).slice(2, 10)}`,
         content: 'content',
         discipline: 'engineering',
         chunkType: 'feature',
         contextKind: 'permanent',
-        stakeholderId: '00000000-0000-0000-0000-0000000000ff',
       });
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(403);
   });
 
   it('GET /chunks/:id returns 404 for an unknown id', async () => {
     const response = await request(app.getHttpServer())
       .get('/chunks/00000000-0000-0000-0000-00000000dead')
       .set('Authorization', `Bearer ${defaultToken}`)
-      .set('X-Workspace-Id', WORKSPACE_ID)
-      .query({ stakeholderId: BOOTSTRAP_STAKEHOLDER_ID });
+      .set('X-Workspace-Id', WORKSPACE_ID);
 
     expect(response.status).toBe(404);
+  });
+
+  it('GET /chunks/:id returns 403 when the stakeholder is not a current member of the workspace', async () => {
+    const createResponse = await request(app.getHttpServer())
+      .post('/chunks')
+      .set('Authorization', `Bearer ${defaultToken}`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
+      .send({
+        label: `e2e-get-non-member-${Math.random().toString(36).slice(2, 10)}`,
+        content: 'content',
+        discipline: 'engineering',
+        chunkType: 'feature',
+        contextKind: 'permanent',
+      });
+    expect(createResponse.status).toBe(201);
+
+    const nonMemberToken = sessionTokenService.sign({
+      stakeholderId: randomUUID(),
+      discipline: 'engineering',
+      authTime: Math.floor(Date.now() / 1000),
+      workspaceId: WORKSPACE_ID,
+    });
+
+    const response = await request(app.getHttpServer())
+      .get(`/chunks/${createResponse.body.id as string}`)
+      .set('Authorization', `Bearer ${nonMemberToken}`)
+      .set('X-Workspace-Id', WORKSPACE_ID);
+
+    expect(response.status).toBe(403);
   });
 
   it('POST /chunks attaches a chunk to an existing draft branch', async () => {
@@ -180,7 +211,6 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
         discipline: 'engineering',
         chunkType: 'feature',
         contextKind: 'permanent',
-        stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
         branchId,
       });
 
@@ -210,7 +240,6 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
         discipline: 'engineering',
         chunkType: 'feature',
         contextKind: 'permanent',
-        stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
         branchId: '00000000-0000-0000-0000-00000000dead',
       });
 
@@ -239,7 +268,6 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
         discipline: 'engineering',
         chunkType: 'feature',
         contextKind: 'permanent',
-        stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
         branchId: branchResponse.body.id,
       });
 
@@ -260,7 +288,6 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
         discipline: 'engineering',
         chunkType: 'feature',
         contextKind: 'permanent',
-        stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
       });
     expect(firstResponse.status).toBe(201);
 
@@ -274,7 +301,6 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
         discipline: 'engineering',
         chunkType: 'feature',
         contextKind: 'permanent',
-        stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
       });
     expect(secondResponse.status).toBe(201);
     expect(secondResponse.body.id).not.toBe(firstResponse.body.id);
@@ -411,7 +437,6 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
             discipline: 'engineering',
             chunkType: 'feature',
             contextKind: 'permanent',
-            stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
           });
       }
 
@@ -497,7 +522,6 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
             discipline: 'engineering',
             chunkType: 'feature',
             contextKind: 'permanent',
-            stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
           });
         expect(res.status).toBe(201);
         chunkIds[label] = res.body.id as string;

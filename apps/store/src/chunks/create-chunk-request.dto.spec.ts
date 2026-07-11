@@ -9,7 +9,6 @@ function validBody(overrides: Record<string, unknown> = {}): Record<string, unkn
     discipline: 'product',
     chunkType: 'feature',
     contextKind: 'permanent',
-    stakeholderId: '00000000-0000-0000-0000-000000000001',
     ...overrides,
   };
 }
@@ -24,8 +23,13 @@ describe('parseCreateChunkRequest', () => {
       discipline: 'product',
       chunkType: 'feature',
       contextKind: 'permanent',
-      stakeholderId: '00000000-0000-0000-0000-000000000001',
     });
+  });
+
+  it('ignores a client-supplied stakeholderId field (authorship is claim-derived)', () => {
+    const parsed = parseCreateChunkRequest(validBody({ stakeholderId: 'client-supplied-id' }));
+
+    expect(parsed).not.toHaveProperty('stakeholderId');
   });
 
   it('rejects a non-object body', () => {
@@ -33,12 +37,12 @@ describe('parseCreateChunkRequest', () => {
     expect(() => parseCreateChunkRequest(null)).toThrow(BadRequestException);
   });
 
-  it.each(['label', 'content', 'stakeholderId'])('rejects a missing %s', (field) => {
+  it.each(['label', 'content'])('rejects a missing %s', (field) => {
     const body = validBody({ [field]: undefined });
     expect(() => parseCreateChunkRequest(body)).toThrow(BadRequestException);
   });
 
-  it.each(['label', 'content', 'stakeholderId'])('rejects a blank %s', (field) => {
+  it.each(['label', 'content'])('rejects a blank %s', (field) => {
     const body = validBody({ [field]: '   ' });
     expect(() => parseCreateChunkRequest(body)).toThrow(BadRequestException);
   });

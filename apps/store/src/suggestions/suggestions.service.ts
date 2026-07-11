@@ -8,10 +8,9 @@ import {
 import type { SessionTokenClaims } from '../auth/session-token.service.js';
 import { assertIsHumanActor } from '../domain/branch-lifecycle.js';
 import { Suggestion } from '../domain/suggestion.js';
-import type { HumanActorContext } from '../domain/types/actor/actor-context.js';
-import { isDiscipline } from '../domain/types/vocabulary/discipline.js';
 import { isSuggestionStatus } from '../domain/types/vocabulary/suggestion-status.js';
 import { assertWorkspaceScope, WorkspaceScopeViolationError } from '../domain/workspace-scope.js';
+import { resolveHumanActorContext } from '../auth/resolve-human-actor.helper.js';
 import type { BranchResponse } from '../branches/branch-response.dto.js';
 import { toBranchResponse } from '../branches/branch-response.dto.js';
 import { StakeholderRepository } from '../persistence/stakeholder.repository.js';
@@ -125,18 +124,10 @@ export class SuggestionsService {
   ): Promise<BranchResponse> {
     const workspaceId = await this.assertScope(headerWorkspaceId, claims);
 
-    const stakeholder = await this.stakeholderRepository.findById(claims.stakeholderId);
-    if (stakeholder === undefined) {
-      throw new BadRequestException(
-        `Stakeholder ${claims.stakeholderId} must exist to accept a suggestion`,
-      );
-    }
-
-    const actor = {
-      kind: 'human',
-      stakeholderId: claims.stakeholderId,
-      discipline: isDiscipline(stakeholder.discipline) ? stakeholder.discipline : null,
-    } satisfies HumanActorContext;
+    const actor = await resolveHumanActorContext(this.stakeholderRepository, claims, {
+      requireDiscipline: false,
+      actionDescription: 'accept a suggestion',
+    });
     assertIsHumanActor(actor);
 
     let result;
@@ -178,18 +169,10 @@ export class SuggestionsService {
   ): Promise<SuggestionResponse> {
     const workspaceId = await this.assertScope(headerWorkspaceId, claims);
 
-    const stakeholder = await this.stakeholderRepository.findById(claims.stakeholderId);
-    if (stakeholder === undefined) {
-      throw new BadRequestException(
-        `Stakeholder ${claims.stakeholderId} must exist to reject a suggestion`,
-      );
-    }
-
-    const actor = {
-      kind: 'human',
-      stakeholderId: claims.stakeholderId,
-      discipline: isDiscipline(stakeholder.discipline) ? stakeholder.discipline : null,
-    } satisfies HumanActorContext;
+    const actor = await resolveHumanActorContext(this.stakeholderRepository, claims, {
+      requireDiscipline: false,
+      actionDescription: 'reject a suggestion',
+    });
     assertIsHumanActor(actor);
 
     const result = await this.suggestionRepository.reject(

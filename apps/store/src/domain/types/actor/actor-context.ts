@@ -8,10 +8,14 @@ type BaseActorContext = Readonly<{
 }>;
 
 /**
- * Authenticated actor context for branch/domain writes. `stakeholderId` and `discipline` must come
- * from SG0's verified session-token claims after server-side validation/narrowing, while `kind`
- * must be assigned by trusted server execution flow. Never hydrate this type from client-supplied
- * body fields such as `discipline` or `actorKind`.
+ * Authenticated actor context for branch/domain writes. Every `ActorContext` must be constructed
+ * only from a verified `SessionTokenClaims` (Meridian IDEA-139/G16 SG4): `stakeholderId` is always
+ * `claims.stakeholderId`, `discipline` is always looked up server-side against the `stakeholders`
+ * table for that id (never a request body/query field), and `kind` is always assigned by trusted
+ * server execution flow (`'human'` for every current call site — `BranchesService.submit`/
+ * `resolveActorForVerification` and `SuggestionsService.accept`/`reject`, both via the shared
+ * `resolveHumanActorContext` helper in `auth/resolve-human-actor.helper.ts`). No call site may ever
+ * hydrate this type from a client-supplied `stakeholderId`, `discipline`, or `actorKind` field.
  */
 export type ActorContext = HumanActorContext | DelegatedActorContext;
 

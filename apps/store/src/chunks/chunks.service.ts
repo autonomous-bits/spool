@@ -24,10 +24,10 @@ function isForeignKeyViolation(error: unknown): boolean {
  * Application service for chunk capture and retrieval (Meridian IDEA-52/IDEA-34), sitting between
  * the HTTP controller and the `ChunkRepository`/`BranchRepository` persistence layers.
  *
- * G11 SG4 (Meridian IDEA-98/IDEA-100): both `create` and `findById` sit on the delegated,
- * tokenless auth tier — the request's `X-Workspace-Id` header is validated against a
- * `workspace_memberships` row for the caller-declared `stakeholderId` (the same identity already
- * used for discipline attribution on these routes), not a session token.
+ * G16 SG5 (Meridian IDEA-139): every route sits on the single-tier, session-token-verified auth
+ * model — the request's `X-Workspace-Id` header is validated against a `workspace_memberships`
+ * row for `claims.stakeholderId` (the verified token's stakeholder, never a client-supplied
+ * value), and chunk authorship attribution is likewise derived from `claims.stakeholderId`.
  */
 @Injectable()
 export class ChunksService {
@@ -97,7 +97,7 @@ export class ChunksService {
         discipline: request.discipline,
         chunkType: request.chunkType,
         contextKind: request.contextKind,
-        createdByStakeholderId: request.stakeholderId,
+        createdByStakeholderId: claims.stakeholderId,
         ...(branchId === undefined ? {} : { branchId, originBranchId: branchId }),
       });
     } catch (error) {
@@ -111,7 +111,7 @@ export class ChunksService {
       return toChunkResponse(created);
     } catch (error) {
       if (isForeignKeyViolation(error)) {
-        throw new BadRequestException(`Unknown stakeholderId: ${request.stakeholderId}`);
+        throw new BadRequestException(`Unknown stakeholderId: ${claims.stakeholderId}`);
       }
       throw error;
     }

@@ -72,7 +72,6 @@ describe('ChunksController', () => {
       discipline: 'product',
       chunkType: 'feature',
       contextKind: 'permanent',
-      stakeholderId: 'stakeholder-1',
     }, 'Bearer signed-token', WORKSPACE_ID);
 
     expect(result).toEqual(expected);
@@ -82,7 +81,6 @@ describe('ChunksController', () => {
       discipline: 'product',
       chunkType: 'feature',
       contextKind: 'permanent',
-      stakeholderId: 'stakeholder-1',
     }, WORKSPACE_ID, claims);
   });
 
