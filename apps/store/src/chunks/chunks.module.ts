@@ -1,10 +1,11 @@
 import { Module } from '@nestjs/common';
 import { PersistenceModule } from '../persistence/persistence.module.js';
+import { AuthModule } from '../auth/auth.module.js';
 import { ChunksController } from './chunks.controller.js';
 import { ChunksService } from './chunks.service.js';
 
 @Module({
-  imports: [PersistenceModule],
+  imports: [PersistenceModule, AuthModule],
   controllers: [ChunksController],
   providers: [ChunksService],
 })

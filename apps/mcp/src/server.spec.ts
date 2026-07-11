@@ -675,4 +675,82 @@ describe('MCP HTTP server scaffold', () => {
       expect(fetchMock).not.toHaveBeenCalled();
     });
   });
+
+  describe('POST /tools/search-chunks', () => {
+    const originalFetch = fetch;
+    const searchChunksInput = {
+      sessionToken: 'token-1',
+      workspaceId: 'w-1',
+      q: 'test',
+    };
+
+    async function startServer(): Promise<number> {
+      server = createMcpHttpServer('http://harness.test');
+      await new Promise<void>((resolve) => server?.listen(0, resolve));
+      return (server.address() as AddressInfo).port;
+    }
+
+    async function postSearchChunks(port: number, body: unknown): Promise<Response> {
+      return originalFetch(`http://127.0.0.1:${String(port)}/tools/search-chunks`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    }
+
+    it('returns 200 on success', async () => {
+      const mockResult = { chunks: [], nextCursor: null };
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: string, init?: RequestInit) => {
+          if (url === 'http://harness.test/chunks?q=test') {
+            return new Response(JSON.stringify(mockResult), {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            });
+          }
+          return originalFetch(url, init);
+        }),
+      );
+
+      const port = await startServer();
+      const response = await postSearchChunks(port, searchChunksInput);
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual(mockResult);
+    });
+
+    it('surfaces 400 validation errors from the store', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: string, init?: RequestInit) => {
+          if (url.startsWith('http://harness.test/chunks')) {
+            return new Response(JSON.stringify({ message: 'Invalid query' }), {
+              status: 400,
+              headers: { 'content-type': 'application/json' },
+            });
+          }
+          return originalFetch(url, init);
+        }),
+      );
+
+      const port = await startServer();
+      const response = await postSearchChunks(port, searchChunksInput);
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({ message: 'Invalid query' });
+    });
+
+    it('returns 400 for malformed JSON', async () => {
+      const port = await startServer();
+      const response = await originalFetch(`http://127.0.0.1:${String(port)}/tools/search-chunks`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{ bad json }',
+      });
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({ message: 'Request body must be valid JSON' });
+    });
+  });
 });

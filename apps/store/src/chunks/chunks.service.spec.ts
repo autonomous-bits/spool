@@ -23,7 +23,7 @@ function validRequest(overrides: Partial<CreateChunkRequest> = {}): CreateChunkR
 }
 
 describe('ChunksService', () => {
-  let chunkRepository: Pick<ChunkRepository, 'create' | 'findById'>;
+  let chunkRepository: Pick<ChunkRepository, 'create' | 'findById' | 'search'>;
   let branchRepository: Pick<BranchRepository, 'findById'>;
   let workspaceRepository: Pick<WorkspaceRepository, 'isMember'>;
   let service: ChunksService;
@@ -32,6 +32,7 @@ describe('ChunksService', () => {
     chunkRepository = {
       create: vi.fn(),
       findById: vi.fn(),
+      search: vi.fn(),
     };
     branchRepository = {
       findById: vi.fn(),
