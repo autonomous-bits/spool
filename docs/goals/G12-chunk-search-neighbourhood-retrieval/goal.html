@@ -105,7 +105,7 @@ flowchart LR
 <h2>Sub-goal Detail</h2>
 
 <details open>
-<summary>SG1 &mdash; Chunk Search vertical slice <span class="badge open" data-sg="SG1">open</span></summary>
+<summary>SG1 &mdash; Chunk Search vertical slice <span class="badge done" data-sg="SG1">done</span></summary>
 <p><strong>Layer:</strong> persistence + domain + API + MCP (full vertical slice) &nbsp;|&nbsp; <strong>Depends on:</strong> none</p>
 <p><strong>Objective:</strong> Implement <code>GET /chunks</code> search/filter/pagination end to end, plus the <code>search-chunks</code> MCP tool, both session-token gated.</p>
 <ul>
@@ -214,7 +214,7 @@ flowchart LR
         "Unit + e2e tests covering filters, pagination, auth failures (401/403/400), MCP fail-fast and success paths"
       ],
       "verification": "pnpm test:store, pnpm test:mcp",
-      "status": "open"
+      "status": "done"
     },
     {
       "id": "SG2",

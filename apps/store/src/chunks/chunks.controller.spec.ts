@@ -2,6 +2,7 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChunksController } from './chunks.controller.js';
 import { ChunksService } from './chunks.service.js';
+import { SessionTokenService } from '../auth/session-token.service.js';
 import type { ChunkResponse } from './chunk-response.dto.js';
 
 const WORKSPACE_ID = '00000000-0000-0000-0000-00000000d0fa';
@@ -19,7 +20,15 @@ describe('ChunksController', () => {
           useValue: {
             create: vi.fn(),
             findById: vi.fn(),
-          } satisfies Pick<ChunksService, 'create' | 'findById'>,
+            search: vi.fn(),
+          },
+        },
+        {
+          provide: SessionTokenService,
+          useValue: {
+            sign: vi.fn(),
+            verify: vi.fn(),
+          },
         },
       ],
     }).compile();

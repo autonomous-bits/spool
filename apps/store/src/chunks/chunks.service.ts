@@ -4,6 +4,8 @@ import { assertWorkspaceScope, WorkspaceScopeViolationError } from '../domain/wo
 import { BranchRepository } from '../persistence/branch.repository.js';
 import { ChunkRepository } from '../persistence/chunk.repository.js';
 import { WorkspaceRepository } from '../persistence/workspace.repository.js';
+import type { SearchChunksFilters, SearchChunksResult } from '../persistence/chunk.repository.js';
+import type { SessionTokenClaims } from '../auth/session-token.service.js';
 import { toChunkResponse, type ChunkResponse } from './chunk-response.dto.js';
 import type { CreateChunkRequest } from './create-chunk-request.dto.js';
 
@@ -123,5 +125,39 @@ export class ChunksService {
       throw new NotFoundException(`Chunk ${id} not found`);
     }
     return toChunkResponse(chunk);
+  }
+
+  async search(
+    filters: SearchChunksFilters,
+    limit: number,
+    claims: SessionTokenClaims,
+    cursor?: string,
+  ): Promise<{ chunks: ChunkResponse[]; nextCursor: string | null }> {
+    try {
+      assertWorkspaceScope(filters.workspaceId, { tier: 'token', workspaceIdClaim: claims.workspaceId });
+    } catch (error) {
+      if (error instanceof WorkspaceScopeViolationError) {
+        throw new ForbiddenException(error.message);
+      }
+      throw error;
+    }
+
+    if (filters.branchId !== undefined) {
+      if (claims.discipline === null) {
+        throw new BadRequestException('Discipline is required to query a branch-scoped chunk');
+      }
+      const branch = await this.branchRepository.findById(filters.branchId, filters.workspaceId);
+      if (branch !== undefined && branch.discipline !== claims.discipline) {
+        throw new ForbiddenException(
+          `Branch discipline (${branch.discipline}) does not match token discipline (${claims.discipline})`,
+        );
+      }
+    }
+
+    const result = await this.chunkRepository.search(filters, limit, cursor);
+    return {
+      chunks: result.chunks.map(toChunkResponse),
+      nextCursor: result.nextCursor,
+    };
   }
 }
