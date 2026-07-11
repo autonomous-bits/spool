@@ -83,7 +83,6 @@ describe('ArtifactsController', () => {
       {
         content: 'aGVsbG8=',
         mimeType: 'text/plain',
-        stakeholderId: 'stakeholder-1',
       },
       'Bearer signed-token',
       WORKSPACE_ID,
@@ -94,11 +93,24 @@ describe('ArtifactsController', () => {
       {
         content: 'aGVsbG8=',
         mimeType: 'text/plain',
-        stakeholderId: 'stakeholder-1',
       },
       WORKSPACE_ID,
       claims,
     );
+  });
+
+  it('POST /artifacts rejects a missing Authorization header', async () => {
+    await expect(
+      controller.create(
+        {
+          content: 'aGVsbG8=',
+          mimeType: 'text/plain',
+        },
+        undefined,
+        WORKSPACE_ID,
+      ),
+    ).rejects.toThrow();
+    expect(service.createArtifact).not.toHaveBeenCalled();
   });
 
   it('POST /chunks/:label/artifacts parses the body and delegates to ArtifactsService.attachArtifactToChunk', async () => {
@@ -121,7 +133,6 @@ describe('ArtifactsController', () => {
       'ATOMIC-1',
       {
         artifactId: 'artifact-1',
-        stakeholderId: 'stakeholder-1',
       },
       'Bearer signed-token',
       WORKSPACE_ID,
@@ -132,11 +143,17 @@ describe('ArtifactsController', () => {
       'ATOMIC-1',
       {
         artifactId: 'artifact-1',
-        stakeholderId: 'stakeholder-1',
       },
       WORKSPACE_ID,
       claims,
     );
+  });
+
+  it('POST /chunks/:label/artifacts rejects a missing Authorization header', async () => {
+    await expect(
+      controller.attach('ATOMIC-1', { artifactId: 'artifact-1' }, undefined, WORKSPACE_ID),
+    ).rejects.toThrow();
+    expect(service.attachArtifactToChunk).not.toHaveBeenCalled();
   });
 
   it('DELETE .../artifacts/:artifactId parses query params and delegates to ArtifactsService.detachArtifactFromChunk', async () => {
@@ -247,7 +264,12 @@ describe('ArtifactsController', () => {
     );
   });
 
-  it('GET artifacts/content/:token streams the artifact content as a StreamableFile with its mimeType', async () => {
+  it('GET artifacts/:id/download-token rejects a missing Authorization header', async () => {
+    await expect(controller.downloadToken('artifact-1', undefined, WORKSPACE_ID)).rejects.toThrow();
+    expect(service.issueDownloadToken).not.toHaveBeenCalled();
+  });
+
+  it('GET artifacts/content/:token remains reachable without a bearer token and streams the artifact content', async () => {
     const stream = Readable.from([Buffer.from('hello')]);
     vi.mocked(service.streamArtifactContent).mockResolvedValue({ stream, mimeType: 'text/plain' });
 
@@ -255,5 +277,6 @@ describe('ArtifactsController', () => {
 
     expect(result).toBeInstanceOf(StreamableFile);
     expect(service.streamArtifactContent).toHaveBeenCalledWith('signed-token');
+    expect(sessionTokenService.verify).not.toHaveBeenCalled();
   });
 });

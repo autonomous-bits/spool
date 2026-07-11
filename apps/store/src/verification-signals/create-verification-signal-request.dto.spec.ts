@@ -26,6 +26,17 @@ describe('parseCreateVerificationSignalRequest', () => {
     });
   });
 
+  it('does not accept a client-supplied reportedByStakeholderId field', () => {
+    const request = parseCreateVerificationSignalRequest({
+      verifierName: 'ci-evaluator',
+      status: 'pass',
+      reportedByStakeholderId: 'caller-controlled',
+    });
+
+    expect(request).toEqual({ verifierName: 'ci-evaluator', status: 'pass' });
+    expect('reportedByStakeholderId' in request).toBe(false);
+  });
+
   it('rejects a non-object body', () => {
     expect(() => parseCreateVerificationSignalRequest(null)).toThrow(BadRequestException);
     expect(() => parseCreateVerificationSignalRequest('nope')).toThrow(BadRequestException);

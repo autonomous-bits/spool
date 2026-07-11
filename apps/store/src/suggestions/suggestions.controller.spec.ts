@@ -16,6 +16,8 @@ const claims = {
   workspaceId: WORKSPACE_ID,
 } satisfies SessionTokenClaims;
 
+const AUTH_HEADER = 'Bearer signed-token';
+
 describe('SuggestionsController', () => {
   let controller: SuggestionsController;
   let service: Pick<SuggestionsService, 'create' | 'accept' | 'reject' | 'findById' | 'findAll'>;
@@ -49,7 +51,7 @@ describe('SuggestionsController', () => {
     sessionTokenService = module.get(SessionTokenService);
   });
 
-  it('parses the body and delegates creation to SuggestionsService', async () => {
+  it('verifies the bearer token, parses the body, and delegates creation to SuggestionsService', async () => {
     const expected = {
       id: 'abc',
       label: 'ATOMIC-1',
@@ -74,22 +76,33 @@ describe('SuggestionsController', () => {
         label: 'ATOMIC-1',
         content: 'content',
         discipline: 'product',
-        stakeholderId: 'stakeholder-1',
       },
       'Bearer signed-token',
       WORKSPACE_ID,
     );
 
     expect(result).toEqual(expected);
+    expect(sessionTokenService.verify).toHaveBeenCalledWith('signed-token');
     expect(service.create).toHaveBeenCalledWith(
       {
         variant: { kind: 'chunk', label: 'ATOMIC-1', content: 'content' },
         discipline: 'product',
-        stakeholderId: 'stakeholder-1',
       },
       WORKSPACE_ID,
       claims,
     );
+  });
+
+  it('rejects create with a missing Authorization header', async () => {
+    await expect(
+      controller.create(
+        { label: 'ATOMIC-1', content: 'content', discipline: 'product' },
+        undefined,
+        WORKSPACE_ID,
+      ),
+    ).rejects.toThrow(UnauthorizedException);
+    expect(sessionTokenService.verify).not.toHaveBeenCalled();
+    expect(service.create).not.toHaveBeenCalled();
   });
 
   it('verifies the bearer token, parses the body, and delegates acceptance to SuggestionsService', async () => {

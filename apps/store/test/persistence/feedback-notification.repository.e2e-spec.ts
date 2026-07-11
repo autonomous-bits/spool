@@ -91,6 +91,7 @@ describe('FeedbackNotificationRepository (containerized Postgres)', () => {
       workspaceId: WORKSPACE_ID,
       verifierName: 'ci-evaluator',
       status: 'pass',
+      reportedByStakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
     });
     if (result.kind !== 'created') {
       throw new Error('expected created result');

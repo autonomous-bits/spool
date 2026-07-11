@@ -48,12 +48,12 @@ function isForeignKeyViolation(error: unknown): boolean {
  * IDEA-58/IDEA-59/IDEA-60/IDEA-52/IDEA-34), sitting between the HTTP controller and the
  * `ArtifactRepository`/`ChunkArtifactRepository`/`ChunkRepository` persistence layers.
  *
- * G11 SG5 (Meridian IDEA-98/IDEA-100): every write and list/attach/detach route sits on the
- * delegated, tokenless auth tier — the request's `X-Workspace-Id` header is validated against a
- * `workspace_memberships` row for the caller-declared `stakeholderId`, mirroring
- * `ChunksService`'s pattern. `GET /artifacts/content/:token` is the one exemption: the download
- * token itself carries the `workspaceId` it was minted for, so redemption is already
- * workspace-bound without needing the header.
+ * G18 SG3 (Meridian IDEA-139, superseding IDEA-100): every ordinary artifact route is gated by a
+ * verified bearer session token, and workspace membership is re-checked live against
+ * `claims.stakeholderId` via `workspace_memberships`. `GET /artifacts/content/:token` is the one
+ * deliberate exception: it accepts no bearer token because the short-lived HMAC download token is
+ * itself the capability credential for redeeming exactly one already-authenticated,
+ * already-workspace-scoped artifact download.
  */
 @Injectable()
 export class ArtifactsService {
@@ -101,12 +101,12 @@ export class ArtifactsService {
         workspaceId,
         content: Buffer.from(request.content, 'base64'),
         mimeType: request.mimeType,
-        createdByStakeholderId: request.stakeholderId,
+        createdByStakeholderId: claims.stakeholderId,
       });
       return toArtifactResponse(artifact);
     } catch (error) {
       if (isForeignKeyViolation(error)) {
-        throw new BadRequestException(`Unknown stakeholderId: ${request.stakeholderId}`);
+        throw new BadRequestException(`Unknown stakeholderId: ${claims.stakeholderId}`);
       }
       throw error;
     }
@@ -137,7 +137,7 @@ export class ArtifactsService {
         chunkLabel,
         artifactId: request.artifactId,
         status: 'active',
-        createdByStakeholderId: request.stakeholderId,
+        createdByStakeholderId: claims.stakeholderId,
         ...(request.branchId === undefined
           ? {}
           : { branchId: request.branchId, originBranchId: request.branchId }),
@@ -152,7 +152,7 @@ export class ArtifactsService {
       return toChunkArtifactResponse(created);
     } catch (error) {
       if (isForeignKeyViolation(error)) {
-        throw new BadRequestException(`Unknown stakeholderId: ${request.stakeholderId}`);
+        throw new BadRequestException(`Unknown stakeholderId: ${claims.stakeholderId}`);
       }
       throw error;
     }
@@ -227,10 +227,11 @@ export class ArtifactsService {
 
   /**
    * Issues a signed, time-limited download token for `artifactId` (Meridian IDEA-85's resolution
-   * of the IDEA-84 gap report). 404s if the artifact does not exist rather than minting a token
-   * for a blob that can never be streamed. The minted token carries `artifactId`'s `workspaceId`
-   * (G11 SG5), so `GET /artifacts/content/:token` can later redeem it without re-checking the
-   * header.
+   * of the IDEA-84 gap report). This route still requires bearer-token auth under IDEA-139: only
+   * an already-authenticated, already-workspace-scoped caller may mint the capability token. 404s
+   * if the artifact does not exist rather than minting a token for a blob that can never be
+   * streamed. The minted token carries `artifactId`'s `workspaceId`, so
+   * `GET /artifacts/content/:token` can later redeem it as a standalone capability credential.
    */
   async issueDownloadToken(
     artifactId: string,
@@ -251,9 +252,12 @@ export class ArtifactsService {
    * Verifies `token` and streams the referenced artifact's original bytes back (Meridian
    * IDEA-85). An invalid/expired/tampered token yields 401 (mirrors `BranchesController`'s
    * session-token-invalid handling); a token that verifies but whose artifact no longer exists
-   * yields 404. Deliberately exempt from the `X-Workspace-Id` header check (G11 SG5): the token
-   * was minted from an already workspace-scoped lookup at issuance time, so `claims.workspaceId`
-   * is a trustworthy scope for this lookup on its own.
+   * yields 404. This is the explicit IDEA-139 exception: the route intentionally accepts no bearer
+   * token because the short-lived HMAC download token is the authentication/capability credential.
+   * That token is minted only by the authenticated `GET /artifacts/:id/download-token` route, is
+   * time-limited, and is workspace-bound at issuance time via its embedded `workspaceId`. The blob
+   * read happens only after token verification and an artifact lookup constrained by that
+   * token-carried workspace scope.
    */
   async streamArtifactContent(token: string): Promise<StreamedArtifactContent> {
     let claims;

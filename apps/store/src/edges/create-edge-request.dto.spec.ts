@@ -8,7 +8,6 @@ function validBody(overrides: Record<string, unknown> = {}): Record<string, unkn
     toChunkLabel: 'ATOMIC-2',
     type: 'refines',
     discipline: 'product',
-    stakeholderId: '00000000-0000-0000-0000-000000000001',
     ...overrides,
   };
 }
@@ -22,8 +21,13 @@ describe('parseCreateEdgeRequest', () => {
       toChunkLabel: 'ATOMIC-2',
       type: 'refines',
       discipline: 'product',
-      stakeholderId: '00000000-0000-0000-0000-000000000001',
     });
+  });
+
+  it('ignores a client-supplied stakeholderId field (authorship is claim-derived)', () => {
+    const parsed = parseCreateEdgeRequest(validBody({ stakeholderId: 'client-supplied-id' }));
+
+    expect(parsed).not.toHaveProperty('stakeholderId');
   });
 
   it('rejects a non-object body', () => {
@@ -31,12 +35,12 @@ describe('parseCreateEdgeRequest', () => {
     expect(() => parseCreateEdgeRequest(null)).toThrow(BadRequestException);
   });
 
-  it.each(['fromChunkLabel', 'toChunkLabel', 'stakeholderId'])('rejects a missing %s', (field) => {
+  it.each(['fromChunkLabel', 'toChunkLabel'])('rejects a missing %s', (field) => {
     const body = validBody({ [field]: undefined });
     expect(() => parseCreateEdgeRequest(body)).toThrow(BadRequestException);
   });
 
-  it.each(['fromChunkLabel', 'toChunkLabel', 'stakeholderId'])('rejects a blank %s', (field) => {
+  it.each(['fromChunkLabel', 'toChunkLabel'])('rejects a blank %s', (field) => {
     const body = validBody({ [field]: '   ' });
     expect(() => parseCreateEdgeRequest(body)).toThrow(BadRequestException);
   });

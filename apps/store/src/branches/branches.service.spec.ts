@@ -15,7 +15,6 @@ function validRequest(overrides: Partial<CreateBranchRequest> = {}): CreateBranc
   return {
     name: 'feature-branch',
     discipline: 'product',
-    stakeholderId: '00000000-0000-0000-0000-000000000001',
     ...overrides,
   };
 }
@@ -78,22 +77,25 @@ describe('BranchesService', () => {
     workspaceRepository = module.get(WorkspaceRepository);
   });
 
-  it('creates and returns the persisted branch', async () => {
+  it('creates and returns the persisted branch with claims-derived authorship', async () => {
     const request = validRequest();
+    const claims = validClaims();
     const persisted = new Branch({
       workspaceId: WORKSPACE_ID,
       name: request.name,
       discipline: request.discipline,
-      createdByStakeholderId: request.stakeholderId,
+      createdByStakeholderId: claims.stakeholderId,
     });
     vi.mocked(branchRepository.create).mockResolvedValue(persisted);
 
-    const result = await service.create(request, WORKSPACE_ID, validClaims());
+    const result = await service.create(request, WORKSPACE_ID, claims);
 
     expect(result.id).toBe(persisted.id);
     expect(result.status).toBe('draft');
     expect(result.submittedAt).toBeNull();
     expect(branchRepository.create).toHaveBeenCalledOnce();
+    const createdBranch = vi.mocked(branchRepository.create).mock.calls[0]?.[0];
+    expect(createdBranch?.createdByStakeholderId).toBe(claims.stakeholderId);
   });
 
   it('throws ForbiddenException when the X-Workspace-Id header is missing', async () => {
@@ -116,12 +118,14 @@ describe('BranchesService', () => {
   });
 
   it('translates a foreign key violation on an unknown stakeholderId into a BadRequestException', async () => {
-    const request = validRequest({ stakeholderId: '00000000-0000-0000-0000-0000000000ff' });
+    const request = validRequest();
     vi.mocked(branchRepository.create).mockRejectedValue(
       Object.assign(new Error('violates foreign key constraint'), { code: '23503' }),
     );
 
-    await expect(service.create(request, WORKSPACE_ID, validClaims())).rejects.toThrow(BadRequestException);
+    await expect(
+      service.create(request, WORKSPACE_ID, validClaims({ stakeholderId: '00000000-0000-0000-0000-0000000000ff' })),
+    ).rejects.toThrow(BadRequestException);
   });
 
   it('translates a unique-name violation into a BadRequestException', async () => {
@@ -737,7 +741,7 @@ describe('BranchesService', () => {
       workspaceId: WORKSPACE_ID,
       name: request.name,
       discipline: request.discipline,
-      createdByStakeholderId: request.stakeholderId,
+      createdByStakeholderId: '00000000-0000-0000-0000-000000000001',
     });
     vi.mocked(branchRepository.findById).mockResolvedValue(persisted);
 

@@ -5,11 +5,14 @@ import { BadRequestException } from '@nestjs/common';
  * boundary) and IDEA-58/IDEA-59 (artifacts as standalone immutable blobs). `content` is the
  * artifact's raw bytes, base64-encoded for JSON transport (mirrors the MCP `upload-artifact` tool
  * planned for SG6, which forwards base64 inline content the same way).
+ *
+ * G18 SG3 (Meridian IDEA-139): authorship attribution (`createdByStakeholderId`) is derived from
+ * the verified session token's `stakeholderId` claim, not a client-supplied body field — this
+ * interface intentionally has no `stakeholderId` field.
  */
 export interface CreateArtifactRequest {
   content: string;
   mimeType: string;
-  stakeholderId: string;
 }
 
 function requireStringField(body: Record<string, unknown>, field: string): string {
@@ -37,11 +40,10 @@ export function parseCreateArtifactRequest(body: unknown): CreateArtifactRequest
 
   const content = requireStringField(record, 'content');
   const mimeType = requireStringField(record, 'mimeType');
-  const stakeholderId = requireStringField(record, 'stakeholderId');
 
   if (!BASE64_PATTERN.test(content) || content.length % 4 !== 0) {
     throw new BadRequestException('content must be base64-encoded');
   }
 
-  return { content, mimeType, stakeholderId } satisfies CreateArtifactRequest;
+  return { content, mimeType } satisfies CreateArtifactRequest;
 }

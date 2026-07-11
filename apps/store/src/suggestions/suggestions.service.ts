@@ -35,16 +35,16 @@ function isPgErrorWithCode(error: unknown, code: string): boolean {
 /**
  * Application service for suggestion submission and acceptance (Meridian IDEA-27/IDEA-28/
  * IDEA-49), sitting between the HTTP controller and the `SuggestionRepository`/
- * `StakeholderRepository` persistence layers. Submission is a delegated-actor operation
- * (Meridian IDEA-9/IDEA-75): the server always assigns `submittedByActorKind: 'delegated'`,
- * never trusting a client-supplied value. Acceptance is human-only (Meridian IDEA-75): the
- * server always assigns `kind: 'human'` from verified session-token claims.
+ * `StakeholderRepository` persistence layers.
  *
- * G11 SG5 (Meridian IDEA-98/IDEA-100): `create`/`findAll`/`findById` sit on the delegated,
- * tokenless auth tier (the caller-declared `stakeholderId` is validated against
- * `workspace_memberships`); `accept`/`reject` are already token-gated (human-only), so they sit
- * on the token tier and additionally validate `X-Workspace-Id` against the token's
- * `workspaceId` claim, mirroring `BranchesService`.
+ * Meridian IDEA-139: every route uses the single-tier verified-session-token model. Workspace
+ * scope is re-checked live against `workspace_memberships` for `claims.stakeholderId`, and
+ * suggestion authorship attribution is likewise derived from `claims.stakeholderId`, never a
+ * client-supplied field.
+ *
+ * Meridian IDEA-75: submission remains a delegated-actor operation as business logic, so the
+ * server always assigns `submittedByActorKind: 'delegated'`; acceptance/rejection remain
+ * human-only and resolve that actor from verified session-token claims.
  */
 @Injectable()
 export class SuggestionsService {
@@ -54,17 +54,11 @@ export class SuggestionsService {
     private readonly workspaceRepository: WorkspaceRepository,
   ) {}
 
-  private async assertScope(
+  private assertScopeFacts(
     headerWorkspaceId: string | null | undefined,
     claims: SessionTokenClaims,
-  ): Promise<string> {
-    const isMember =
-      headerWorkspaceId === null ||
-      headerWorkspaceId === undefined ||
-      headerWorkspaceId.trim().length === 0
-        ? false
-        : await this.workspaceRepository.isMember(headerWorkspaceId, claims.stakeholderId);
-
+    isMember: boolean,
+  ): string {
     try {
       assertWorkspaceScope(headerWorkspaceId, { workspaceIdClaim: claims.workspaceId, isMember });
     } catch (error) {
@@ -77,12 +71,39 @@ export class SuggestionsService {
     return headerWorkspaceId;
   }
 
+  private async assertScope(
+    headerWorkspaceId: string | null | undefined,
+    claims: SessionTokenClaims,
+  ): Promise<string> {
+    const workspaceId = this.assertScopeFacts(headerWorkspaceId, claims, true);
+    const isMember = await this.workspaceRepository.isMember(workspaceId, claims.stakeholderId);
+    return this.assertScopeFacts(workspaceId, claims, isMember);
+  }
+
+  private async assertCreateScope(
+    headerWorkspaceId: string | null | undefined,
+    claims: SessionTokenClaims,
+  ): Promise<string> {
+    const workspaceId = this.assertScopeFacts(headerWorkspaceId, claims, true);
+    const isMember = await this.workspaceRepository.isMember(workspaceId, claims.stakeholderId);
+    if (isMember) {
+      return workspaceId;
+    }
+
+    const stakeholder = await this.stakeholderRepository.findById(claims.stakeholderId);
+    if (stakeholder !== undefined) {
+      return this.assertScopeFacts(workspaceId, claims, false);
+    }
+
+    return workspaceId;
+  }
+
   async create(
     request: CreateSuggestionRequest,
     headerWorkspaceId: string | null | undefined,
     claims: SessionTokenClaims,
   ): Promise<SuggestionResponse> {
-    const workspaceId = await this.assertScope(headerWorkspaceId, claims);
+    const workspaceId = await this.assertCreateScope(headerWorkspaceId, claims);
 
     let suggestion: Suggestion;
     try {
@@ -90,7 +111,7 @@ export class SuggestionsService {
         workspaceId,
         variant: request.variant,
         discipline: request.discipline,
-        submittedByStakeholderId: request.stakeholderId,
+        submittedByStakeholderId: claims.stakeholderId,
         submittedByActorKind: 'delegated',
       });
     } catch (error) {
@@ -105,7 +126,7 @@ export class SuggestionsService {
       return toSuggestionResponse(created);
     } catch (error) {
       if (isPgErrorWithCode(error, FOREIGN_KEY_VIOLATION)) {
-        throw new BadRequestException(`Unknown stakeholderId: ${request.stakeholderId}`);
+        throw new BadRequestException(`Unknown stakeholderId: ${claims.stakeholderId}`);
       }
       throw error;
     }

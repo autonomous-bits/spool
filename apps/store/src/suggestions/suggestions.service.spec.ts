@@ -21,7 +21,6 @@ function chunkRequest(overrides: Partial<CreateSuggestionRequest> = {}): CreateS
   return {
     variant: { kind: 'chunk', label: 'ATOMIC-1', content: 'Some proposed content.' },
     discipline: 'product',
-    stakeholderId: STAKEHOLDER_ID,
     ...overrides,
   };
 }
@@ -35,7 +34,6 @@ function edgeRequest(): CreateSuggestionRequest {
       relationshipType: 'refines',
     },
     discipline: 'product',
-    stakeholderId: STAKEHOLDER_ID,
   };
 }
 
@@ -76,7 +74,7 @@ function setUp() {
 }
 
 describe('SuggestionsService', () => {
-  it('creates and returns the persisted chunk-shaped suggestion, always as delegated', async () => {
+  it('creates the persisted chunk-shaped suggestion from token claims, always as delegated', async () => {
     const { suggestionRepository, service } = setUp();
     vi.mocked(suggestionRepository.create).mockImplementation((suggestion) => suggestion);
 
@@ -90,6 +88,7 @@ describe('SuggestionsService', () => {
     expect(result.decidedAt).toBeNull();
     const created = vi.mocked(suggestionRepository.create).mock.calls[0]?.[0];
     expect(created?.submittedByActorKind).toBe('delegated');
+    expect(created?.submittedByStakeholderId).toBe(STAKEHOLDER_ID);
     expect(created?.workspaceId).toBe(WORKSPACE_ID);
   });
 
@@ -113,8 +112,12 @@ describe('SuggestionsService', () => {
   });
 
   it('throws ForbiddenException when the stakeholder is not a member of the header workspace', async () => {
-    const { suggestionRepository, workspaceRepository, service } = setUp();
+    const { suggestionRepository, stakeholderRepository, workspaceRepository, service } = setUp();
     vi.mocked(workspaceRepository.isMember).mockResolvedValue(false);
+    vi.mocked(stakeholderRepository.findById).mockResolvedValue({
+      id: STAKEHOLDER_ID,
+      discipline: 'product',
+    });
 
     await expect(service.create(chunkRequest(), WORKSPACE_ID, claims)).rejects.toThrow(
       ForbiddenException,
@@ -135,8 +138,10 @@ describe('SuggestionsService', () => {
     expect(suggestionRepository.create).not.toHaveBeenCalled();
   });
 
-  it('maps a foreign key violation on stakeholderId to BadRequestException', async () => {
-    const { suggestionRepository, service } = setUp();
+  it('maps a foreign key violation on an unknown stakeholderId claim to BadRequestException', async () => {
+    const { stakeholderRepository, suggestionRepository, workspaceRepository, service } = setUp();
+    vi.mocked(workspaceRepository.isMember).mockResolvedValue(false);
+    vi.mocked(stakeholderRepository.findById).mockResolvedValue(undefined);
     vi.mocked(suggestionRepository.create).mockRejectedValue({ code: '23503' });
 
     await expect(service.create(chunkRequest(), WORKSPACE_ID, claims)).rejects.toThrow(

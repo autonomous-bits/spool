@@ -114,6 +114,12 @@ export class ArtifactsController {
     return toDownloadTokenResponse(issued);
   }
 
+  /**
+   * IDEA-139 bearer-token policy deliberately does not apply to this one redemption endpoint. The
+   * caller presents the short-lived HMAC download token itself as the narrow capability credential;
+   * that token is minted only by the authenticated `GET /artifacts/:id/download-token` route and
+   * remains workspace-bound and time-limited.
+   */
   @Get('artifacts/content/:token')
   async content(@Param('token') token: string): Promise<StreamableFile> {
     const { stream, mimeType } = await this.artifacts.streamArtifactContent(token);

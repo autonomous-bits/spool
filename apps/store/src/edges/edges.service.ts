@@ -27,9 +27,11 @@ function isPgErrorWithCode(error: unknown, code: string): boolean {
  * persistence layers. Enforces branch-local endpoint existence and the single-active-edge
  * invariant; this goal's write path only ever produces 'active' edges.
  *
- * G11 SG4 (Meridian IDEA-98/IDEA-100): both `create` and `findById` sit on the delegated,
- * tokenless auth tier — the request's `X-Workspace-Id` header is validated against a
- * `workspace_memberships` row for the caller-declared `stakeholderId`, not a session token.
+ * G17 SG1 (Meridian IDEA-19/IDEA-26, mirroring G16 SG5's IDEA-139 pattern): every route sits on
+ * the single-tier, session-token-verified auth model — the request's `X-Workspace-Id` header is
+ * validated against a `workspace_memberships` row for `claims.stakeholderId` (the verified
+ * token's stakeholder, never a client-supplied value), and edge authorship attribution is
+ * likewise derived from `claims.stakeholderId`.
  */
 @Injectable()
 export class EdgesService {
@@ -108,7 +110,7 @@ export class EdgesService {
         toChunkLabel: request.toChunkLabel,
         type: request.type,
         discipline: request.discipline,
-        createdByStakeholderId: request.stakeholderId,
+        createdByStakeholderId: claims.stakeholderId,
         ...(branchId === undefined ? {} : { branchId, originBranchId: branchId }),
       });
     } catch (error) {
@@ -122,7 +124,7 @@ export class EdgesService {
       return toEdgeResponse(created);
     } catch (error) {
       if (isPgErrorWithCode(error, FOREIGN_KEY_VIOLATION)) {
-        throw new BadRequestException(`Unknown stakeholderId: ${request.stakeholderId}`);
+        throw new BadRequestException(`Unknown stakeholderId: ${claims.stakeholderId}`);
       }
       if (isPgErrorWithCode(error, UNIQUE_VIOLATION)) {
         throw new ConflictException(

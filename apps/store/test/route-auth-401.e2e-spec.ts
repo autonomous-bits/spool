@@ -10,17 +10,14 @@ const WORKSPACE_ID = '00000000-0000-0000-0000-00000000d0fa';
 const SOME_UUID = '00000000-0000-0000-0000-00000000dead';
 
 /**
- * G16 SG3 regression coverage: locks in that every route G16 SG2 already migrated onto real
- * session-token claims (Meridian IDEA-139) rejects a request with no `Authorization` header at
- * all with 401, before any body/param validation or business logic runs. See
- * `docs/goals/G16-store-single-tier-auth-foundation/route-auth-matrix.md` for the full per-route
- * tier inventory and the rationale for the two routes deliberately excluded below:
+ * G16/G18 regression coverage: every route migrated onto real session-token claims (Meridian
+ * IDEA-139) rejects a request with no `Authorization` header at all with 401, before any
+ * body/param validation or business logic runs. See
+ * `docs/goals/G16-store-single-tier-auth-foundation/route-auth-matrix.md` for the broader route
+ * inventory.
  *
- * - `GET /artifacts/content/:token` is an intentional unauthenticated capability-link exception
- *   (the opaque signed download token is itself the credential) — not covered here.
- * - `POST/GET /branches/:id/verification-signals` have no session-token check yet at all; that
- *   migration is explicitly G18 SG2's open acceptance criterion, not this sub-goal's — not
- *   covered here (would require implementing production code that belongs to a different goal).
+ * The only deliberate authentication exception remains `GET /artifacts/content/:token`, where the
+ * opaque signed download token is itself the credential.
  *
  * `POST /workspaces` IS covered: the Meridian IDEA-101 bootstrap exception only waives the
  * `X-Workspace-Id`/membership check, not the bearer-token requirement itself.
@@ -65,6 +62,8 @@ describe('Route auth: 401 without a bearer token (containerized Postgres)', () =
     { method: 'post', path: `/branches/${SOME_UUID}/reject` },
     { method: 'post', path: `/branches/${SOME_UUID}/merge` },
     { method: 'get', path: `/branches/${SOME_UUID}` },
+    { method: 'post', path: `/branches/${SOME_UUID}/verification-signals`, body: {} },
+    { method: 'get', path: `/branches/${SOME_UUID}/verification-signals` },
     // Suggestions
     { method: 'post', path: '/suggestions', body: {} },
     { method: 'post', path: `/suggestions/${SOME_UUID}/accept`, body: {} },

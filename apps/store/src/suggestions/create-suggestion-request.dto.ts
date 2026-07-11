@@ -10,15 +10,18 @@ export type CreateSuggestionVariant =
 
 /**
  * Validated shape of a `POST /suggestions` request body, per Meridian IDEA-49 (suggestions
- * queue). Mirrors the delegated-actor style of `CreateChunkRequest`/`CreateEdgeRequest`: body
- * carries `stakeholderId` plus exactly one variant's fields and a `discipline`, no session token
- * (submission is a delegated-actor operation per Meridian IDEA-9/IDEA-75; the server always
- * assigns `submittedByActorKind: 'delegated'`, never client-supplied).
+ * queue). The body carries exactly one variant's fields plus a `discipline`.
+ *
+ * Meridian IDEA-139: submission still authenticates with a verified session token, and authorship
+ * attribution (`submittedByStakeholderId`) is derived from the token's `stakeholderId` claim, not
+ * a client-supplied body field — this interface intentionally has no `stakeholderId` field.
+ *
+ * Meridian IDEA-75: submission remains a delegated-actor operation, so the server always assigns
+ * `submittedByActorKind: 'delegated'` as business logic, never from client input.
  */
 export interface CreateSuggestionRequest {
   variant: CreateSuggestionVariant;
   discipline: Discipline;
-  stakeholderId: string;
 }
 
 function isNonEmptyString(value: unknown): value is string {
@@ -46,8 +49,6 @@ export function parseCreateSuggestionRequest(body: unknown): CreateSuggestionReq
 
   const record = body as Record<string, unknown>;
 
-  const stakeholderId = requireStringField(record, 'stakeholderId');
-
   const discipline = record.discipline;
   if (!isDiscipline(discipline)) {
     throw new BadRequestException(`Invalid discipline: ${JSON.stringify(discipline)}`);
@@ -72,7 +73,6 @@ export function parseCreateSuggestionRequest(body: unknown): CreateSuggestionReq
     return {
       variant: { kind: 'chunk', label, content },
       discipline,
-      stakeholderId,
     } satisfies CreateSuggestionRequest;
   }
 
@@ -93,7 +93,6 @@ export function parseCreateSuggestionRequest(body: unknown): CreateSuggestionReq
     return {
       variant: { kind: 'edge', fromChunkLabel, toChunkLabel, relationshipType },
       discipline,
-      stakeholderId,
     } satisfies CreateSuggestionRequest;
   }
 

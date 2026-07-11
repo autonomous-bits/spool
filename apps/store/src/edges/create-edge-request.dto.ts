@@ -9,13 +9,17 @@ import { isEdgeType } from '../domain/types/vocabulary/edge-type.js';
  * boundary) and IDEA-36/IDEA-37/IDEA-38 (typed edges referenced by logical chunk labels).
  * `branchId` is optional: when present, the edge is scoped to that draft branch; when absent,
  * endpoint resolution is branchless (mirrors G02's chunk capture precedent).
+ *
+ * G17 SG1 (Meridian IDEA-19/IDEA-26, mirroring G16 SG5's IDEA-139 pattern): authorship
+ * attribution (`createdByStakeholderId`) is derived from the verified session token's
+ * `stakeholderId` claim, not a client-supplied body field — this interface intentionally has no
+ * `stakeholderId` field.
  */
 export interface CreateEdgeRequest {
   fromChunkLabel: string;
   toChunkLabel: string;
   type: EdgeType;
   discipline: Discipline;
-  stakeholderId: string;
   branchId?: string;
 }
 
@@ -42,7 +46,6 @@ export function parseCreateEdgeRequest(body: unknown): CreateEdgeRequest {
 
   const fromChunkLabel = requireStringField(record, 'fromChunkLabel');
   const toChunkLabel = requireStringField(record, 'toChunkLabel');
-  const stakeholderId = requireStringField(record, 'stakeholderId');
 
   if (fromChunkLabel === toChunkLabel) {
     throw new BadRequestException('fromChunkLabel and toChunkLabel must not be the same label');
@@ -68,7 +71,6 @@ export function parseCreateEdgeRequest(body: unknown): CreateEdgeRequest {
       toChunkLabel,
       type,
       discipline,
-      stakeholderId,
       branchId: branchIdValue,
     } satisfies CreateEdgeRequest;
   }
@@ -78,6 +80,5 @@ export function parseCreateEdgeRequest(body: unknown): CreateEdgeRequest {
     toChunkLabel,
     type,
     discipline,
-    stakeholderId,
   } satisfies CreateEdgeRequest;
 }

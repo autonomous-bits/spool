@@ -3,8 +3,10 @@ import type { VerificationSignalStatus } from '../domain/types/vocabulary/verifi
 import { isVerificationSignalStatus } from '../domain/types/vocabulary/verification-signal-status.js';
 
 /**
- * Validated shape of a `POST /branches/:id/verification-signals` request body, per Meridian
- * IDEA-21/IDEA-31. `reason` is optional free text.
+ * Validated shape of a `POST /branches/:id/verification-signals` request body. `verifierName`
+ * remains untrusted free text per Meridian IDEA-21, while authenticated reporter identity is
+ * derived from verified session-token claims per Meridian IDEA-139, so this interface
+ * intentionally has no `reportedByStakeholderId` field. `reason` is optional free text.
  */
 export interface CreateVerificationSignalRequest {
   verifierName: string;

@@ -112,32 +112,35 @@ describe('Verification Signals HTTP API (containerized Postgres)', () => {
 
   it('POST /branches/:id/verification-signals persists one row for a submitted branch and does not change branch status', async () => {
     const branchId = await createSubmittedBranch();
+    const token = mintSessionToken(engineeringStakeholderId, 'engineering');
 
     const response = await request(app.getHttpServer())
       .post(`/branches/${branchId}/verification-signals`)
       .set('X-Workspace-Id', WORKSPACE_ID)
+      .set('Authorization', authHeader(token))
       .send({ verifierName: 'ci-evaluator', status: 'pass', reason: 'all checks green' });
 
     expect(response.status).toBe(201);
     expect(response.body).toMatchObject({
       branchId,
+      reportedByStakeholderId: engineeringStakeholderId,
       verifierName: 'ci-evaluator',
       status: 'pass',
       reason: 'all checks green',
     });
 
     const row = await database.pool.query(
-      'SELECT verifier_name, status, reason FROM verification_signals WHERE branch_id = $1',
+      'SELECT reported_by_stakeholder_id, verifier_name, status, reason FROM verification_signals WHERE branch_id = $1',
       [branchId],
     );
     expect(row.rows).toHaveLength(1);
     expect(row.rows[0]).toMatchObject({
+      reported_by_stakeholder_id: engineeringStakeholderId,
       verifier_name: 'ci-evaluator',
       status: 'pass',
       reason: 'all checks green',
     });
 
-    const token = mintSessionToken(engineeringStakeholderId, 'engineering');
     const branchResponse = await request(app.getHttpServer())
       .get(`/branches/${branchId}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
@@ -148,16 +151,18 @@ describe('Verification Signals HTTP API (containerized Postgres)', () => {
 
   it('POST /branches/:id/verification-signals persists one row for a verified branch', async () => {
     const branchId = await createVerifiedBranch();
+    const token = mintSessionToken(engineeringStakeholderId, 'engineering');
 
     const response = await request(app.getHttpServer())
       .post(`/branches/${branchId}/verification-signals`)
       .set('X-Workspace-Id', WORKSPACE_ID)
+      .set('Authorization', authHeader(token))
       .send({ verifierName: 'human-reviewer', status: 'fail', reason: 'needs rework' });
 
     expect(response.status).toBe(201);
     expect(response.body.status).toBe('fail');
+    expect(response.body.reportedByStakeholderId).toBe(engineeringStakeholderId);
 
-    const token = mintSessionToken(engineeringStakeholderId, 'engineering');
     const branchResponse = await request(app.getHttpServer())
       .get(`/branches/${branchId}`)
       .set('X-Workspace-Id', WORKSPACE_ID)
@@ -167,9 +172,11 @@ describe('Verification Signals HTTP API (containerized Postgres)', () => {
   });
 
   it('POST /branches/:id/verification-signals returns 404 for an unknown branchId, no row persisted', async () => {
+    const token = mintSessionToken(engineeringStakeholderId, 'engineering');
     const response = await request(app.getHttpServer())
       .post('/branches/00000000-0000-0000-0000-00000000dead/verification-signals')
       .set('X-Workspace-Id', WORKSPACE_ID)
+      .set('Authorization', authHeader(token))
       .send({ verifierName: 'ci-evaluator', status: 'pass' });
 
     expect(response.status).toBe(404);
@@ -177,10 +184,12 @@ describe('Verification Signals HTTP API (containerized Postgres)', () => {
 
   it('POST /branches/:id/verification-signals returns 409 for a draft branch, no row persisted', async () => {
     const branchId = await createBranch();
+    const token = mintSessionToken(engineeringStakeholderId, 'engineering');
 
     const response = await request(app.getHttpServer())
       .post(`/branches/${branchId}/verification-signals`)
       .set('X-Workspace-Id', WORKSPACE_ID)
+      .set('Authorization', authHeader(token))
       .send({ verifierName: 'ci-evaluator', status: 'pass' });
 
     expect(response.status).toBe(409);
@@ -204,6 +213,7 @@ describe('Verification Signals HTTP API (containerized Postgres)', () => {
     const response = await request(app.getHttpServer())
       .post(`/branches/${branchId}/verification-signals`)
       .set('X-Workspace-Id', WORKSPACE_ID)
+      .set('Authorization', authHeader(token))
       .send({ verifierName: 'ci-evaluator', status: 'pass' });
 
     expect(response.status).toBe(409);
@@ -217,10 +227,12 @@ describe('Verification Signals HTTP API (containerized Postgres)', () => {
 
   it('POST /branches/:id/verification-signals returns 400 for an invalid status', async () => {
     const branchId = await createSubmittedBranch();
+    const token = mintSessionToken(engineeringStakeholderId, 'engineering');
 
     const response = await request(app.getHttpServer())
       .post(`/branches/${branchId}/verification-signals`)
       .set('X-Workspace-Id', WORKSPACE_ID)
+      .set('Authorization', authHeader(token))
       .send({ verifierName: 'ci-evaluator', status: 'unknown' });
 
     expect(response.status).toBe(400);
@@ -228,41 +240,74 @@ describe('Verification Signals HTTP API (containerized Postgres)', () => {
 
   it('POST /branches/:id/verification-signals returns 400 for a blank verifierName', async () => {
     const branchId = await createSubmittedBranch();
+    const token = mintSessionToken(engineeringStakeholderId, 'engineering');
 
     const response = await request(app.getHttpServer())
       .post(`/branches/${branchId}/verification-signals`)
       .set('X-Workspace-Id', WORKSPACE_ID)
+      .set('Authorization', authHeader(token))
       .send({ verifierName: '   ', status: 'pass' });
 
     expect(response.status).toBe(400);
   });
 
-  it('GET /branches/:id/verification-signals returns all signals oldest-first with a valid X-Workspace-Id header', async () => {
+  it('GET /branches/:id/verification-signals returns all signals oldest-first with a valid bearer token', async () => {
     const branchId = await createSubmittedBranch();
+    const token = mintSessionToken(engineeringStakeholderId, 'engineering');
 
     await request(app.getHttpServer())
       .post(`/branches/${branchId}/verification-signals`)
       .set('X-Workspace-Id', WORKSPACE_ID)
+      .set('Authorization', authHeader(token))
       .send({ verifierName: 'first-evaluator', status: 'pass' });
     await request(app.getHttpServer())
       .post(`/branches/${branchId}/verification-signals`)
       .set('X-Workspace-Id', WORKSPACE_ID)
+      .set('Authorization', authHeader(token))
       .send({ verifierName: 'second-evaluator', status: 'fail' });
+
+    const response = await request(app.getHttpServer())
+      .get(`/branches/${branchId}/verification-signals`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
+      .set('Authorization', authHeader(token));
+
+    expect(response.status).toBe(200);
+    const names = (response.body as { verifierName: string }[]).map((signal) => signal.verifierName);
+    expect(names).toEqual(['first-evaluator', 'second-evaluator']);
+    const reporters = (response.body as { reportedByStakeholderId: string }[]).map(
+      (signal) => signal.reportedByStakeholderId,
+    );
+    expect(reporters).toEqual([engineeringStakeholderId, engineeringStakeholderId]);
+  });
+
+  it('POST /branches/:id/verification-signals returns 401 when Authorization is missing', async () => {
+    const branchId = await createSubmittedBranch();
+
+    const response = await request(app.getHttpServer())
+      .post(`/branches/${branchId}/verification-signals`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
+      .send({ verifierName: 'ci-evaluator', status: 'pass' });
+
+    expect(response.status).toBe(401);
+  });
+
+  it('GET /branches/:id/verification-signals returns 401 when Authorization is missing', async () => {
+    const branchId = await createSubmittedBranch();
 
     const response = await request(app.getHttpServer())
       .get(`/branches/${branchId}/verification-signals`)
       .set('X-Workspace-Id', WORKSPACE_ID);
 
-    expect(response.status).toBe(200);
-    const names = (response.body as { verifierName: string }[]).map((s) => s.verifierName);
-    expect(names).toEqual(['first-evaluator', 'second-evaluator']);
+    expect(response.status).toBe(401);
   });
 
   it('POST /branches/:id/verification-signals returns 403 when the X-Workspace-Id header is missing', async () => {
     const branchId = await createSubmittedBranch();
+    const token = mintSessionToken(engineeringStakeholderId, 'engineering');
 
     const response = await request(app.getHttpServer())
       .post(`/branches/${branchId}/verification-signals`)
+      .set('Authorization', authHeader(token))
       .send({ verifierName: 'ci-evaluator', status: 'pass' });
 
     expect(response.status).toBe(403);
@@ -274,15 +319,17 @@ describe('Verification Signals HTTP API (containerized Postgres)', () => {
     expect(row.rows).toHaveLength(0);
   });
 
-  it('POST /branches/:id/verification-signals returns 404 when X-Workspace-Id does not match the branch workspace', async () => {
+  it('POST /branches/:id/verification-signals returns 403 when X-Workspace-Id does not match the session scope', async () => {
     const branchId = await createSubmittedBranch();
+    const token = mintSessionToken(engineeringStakeholderId, 'engineering');
 
     const response = await request(app.getHttpServer())
       .post(`/branches/${branchId}/verification-signals`)
       .set('X-Workspace-Id', '00000000-0000-0000-0000-00000000beef')
+      .set('Authorization', authHeader(token))
       .send({ verifierName: 'ci-evaluator', status: 'pass' });
 
-    expect(response.status).toBe(404);
+    expect(response.status).toBe(403);
 
     const row = await database.pool.query(
       'SELECT id FROM verification_signals WHERE branch_id = $1',
@@ -293,10 +340,11 @@ describe('Verification Signals HTTP API (containerized Postgres)', () => {
 
   it('GET /branches/:id/verification-signals returns 403 when the X-Workspace-Id header is missing', async () => {
     const branchId = await createSubmittedBranch();
+    const token = mintSessionToken(engineeringStakeholderId, 'engineering');
 
-    const response = await request(app.getHttpServer()).get(
-      `/branches/${branchId}/verification-signals`,
-    );
+    const response = await request(app.getHttpServer())
+      .get(`/branches/${branchId}/verification-signals`)
+      .set('Authorization', authHeader(token));
 
     expect(response.status).toBe(403);
   });

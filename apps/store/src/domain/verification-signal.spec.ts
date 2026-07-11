@@ -3,11 +3,13 @@ import { VerificationSignal, type VerificationSignalProps } from './verification
 
 const BRANCH_ID = '00000000-0000-0000-0000-000000000001';
 const WORKSPACE_ID = '00000000-0000-0000-0000-00000000d0fa';
+const STAKEHOLDER_ID = '00000000-0000-0000-0000-000000000002';
 
 function props(overrides: Partial<VerificationSignalProps> = {}): VerificationSignalProps {
   return {
     workspaceId: WORKSPACE_ID,
     branchId: BRANCH_ID,
+    reportedByStakeholderId: STAKEHOLDER_ID,
     verifierName: 'ci-evaluator',
     status: 'pass',
     ...overrides,
@@ -19,6 +21,7 @@ describe('VerificationSignal', () => {
     const signal = new VerificationSignal(props());
 
     expect(signal.branchId).toBe(BRANCH_ID);
+    expect(signal.reportedByStakeholderId).toBe(STAKEHOLDER_ID);
     expect(signal.verifierName).toBe('ci-evaluator');
     expect(signal.status).toBe('pass');
     expect(signal.id).toBeTruthy();
@@ -35,6 +38,10 @@ describe('VerificationSignal', () => {
 
   it.each(['', '   '])('rejects a blank branchId %j', (branchId) => {
     expect(() => new VerificationSignal(props({ branchId }))).toThrow(TypeError);
+  });
+
+  it.each(['', '   '])('rejects a blank reportedByStakeholderId %j', (reportedByStakeholderId) => {
+    expect(() => new VerificationSignal(props({ reportedByStakeholderId }))).toThrow(TypeError);
   });
 
   it.each(['', '   '])('rejects a blank verifierName %j', (verifierName) => {

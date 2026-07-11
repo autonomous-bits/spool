@@ -30,7 +30,6 @@ function validRequest(overrides: Partial<CreateEdgeRequest> = {}): CreateEdgeReq
     toChunkLabel: 'ATOMIC-2',
     type: 'refines',
     discipline: 'product',
-    stakeholderId: '00000000-0000-0000-0000-000000000001',
     ...overrides,
   };
 }
@@ -189,6 +188,22 @@ describe('EdgesService', () => {
     expect(chunkRepository.findByLabel).toHaveBeenCalledWith('ATOMIC-2', branch.id, WORKSPACE_ID);
   });
 
+  it('creates the edge with authorship derived from claims.stakeholderId, ignoring any request field', async () => {
+    const { edgeRepository, chunkRepository, service } = setUp();
+    vi.mocked(chunkRepository.findByLabel).mockImplementation((label) =>
+      chunkWithLabel(label),
+    );
+    let createdEdge: Edge | undefined;
+    vi.mocked(edgeRepository.create).mockImplementation((edge) => {
+      createdEdge = edge;
+      return edge;
+    });
+
+    await service.create(validRequest(), WORKSPACE_ID, validClaims());
+
+    expect(createdEdge?.createdByStakeholderId).toBe(STAKEHOLDER_ID);
+  });
+
   it('translates a foreign key violation on an unknown stakeholderId into a BadRequestException', async () => {
     const { chunkRepository, edgeRepository, service } = setUp();
     vi.mocked(chunkRepository.findByLabel).mockImplementation((label) =>
@@ -198,7 +213,9 @@ describe('EdgesService', () => {
       Object.assign(new Error('violates foreign key constraint'), { code: '23503' }),
     );
 
-    await expect(service.create(validRequest(), WORKSPACE_ID, validClaims())).rejects.toThrow(BadRequestException);
+    await expect(
+      service.create(validRequest(), WORKSPACE_ID, validClaims({ stakeholderId: '00000000-0000-0000-0000-0000000000ff' })),
+    ).rejects.toThrow(BadRequestException);
   });
 
   it('translates a unique violation on a duplicate active edge into a ConflictException', async () => {

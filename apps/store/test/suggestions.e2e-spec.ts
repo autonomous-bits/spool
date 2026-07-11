@@ -104,7 +104,6 @@ describe('Suggestions HTTP API (containerized Postgres)', () => {
         label: uniqueLabel('e2e-suggestion'),
         content: 'Some proposed content.',
         discipline: 'engineering',
-        stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
       });
 
     expect(response.status).toBe(201);
@@ -133,7 +132,6 @@ describe('Suggestions HTTP API (containerized Postgres)', () => {
         toChunkLabel: uniqueLabel('e2e-to'),
         relationshipType: 'refines',
         discipline: 'engineering',
-        stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
       });
 
     expect(response.status).toBe(201);
@@ -163,7 +161,6 @@ describe('Suggestions HTTP API (containerized Postgres)', () => {
         toChunkLabel: uniqueLabel('e2e-mixed-to'),
         relationshipType: 'refines',
         discipline: 'engineering',
-        stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
       });
 
     expect(response.status).toBe(400);
@@ -176,7 +173,6 @@ describe('Suggestions HTTP API (containerized Postgres)', () => {
       .set('X-Workspace-Id', WORKSPACE_ID)
       .send({
         discipline: 'engineering',
-        stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
       });
 
     expect(response.status).toBe(400);
@@ -190,25 +186,25 @@ describe('Suggestions HTTP API (containerized Postgres)', () => {
       .send({
         fromChunkLabel: uniqueLabel('e2e-partial-from'),
         discipline: 'engineering',
-        stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
       });
 
     expect(response.status).toBe(400);
   });
 
-  it('POST /suggestions returns 400 for an unknown stakeholderId in the request body', async () => {
+  it('POST /suggestions returns 400 when the bearer token claim names an unknown stakeholderId', async () => {
+    const unknownStakeholderId = '00000000-0000-0000-0000-00000000dead';
     const response = await request(app.getHttpServer())
       .post('/suggestions')
-      .set('Authorization', bootstrapAuthHeader())
+      .set('Authorization', authHeader(mintSessionToken(unknownStakeholderId, 'engineering')))
       .set('X-Workspace-Id', WORKSPACE_ID)
       .send({
         label: uniqueLabel('e2e-unknown-stakeholder'),
         content: 'content',
         discipline: 'engineering',
-        stakeholderId: '00000000-0000-0000-0000-00000000dead',
       });
 
     expect(response.status).toBe(400);
+    expect(response.body.message).toBe(`Unknown stakeholderId: ${unknownStakeholderId}`);
   });
 
   it('POST /suggestions returns 403 when the X-Workspace-Id header is missing', async () => {
@@ -219,7 +215,6 @@ describe('Suggestions HTTP API (containerized Postgres)', () => {
         label: uniqueLabel('e2e-no-header'),
         content: 'content',
         discipline: 'engineering',
-        stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
       });
 
     expect(response.status).toBe(403);
@@ -234,7 +229,6 @@ describe('Suggestions HTTP API (containerized Postgres)', () => {
         label: uniqueLabel('e2e-accept-suggestion'),
         content: 'Some proposed content.',
         discipline: 'security',
-        stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
       });
     expect(response.status).toBe(201);
     return response.body.id as string;

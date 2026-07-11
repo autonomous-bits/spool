@@ -11,6 +11,7 @@ export interface VerificationSignalRow extends QueryResultRow {
   id: string;
   workspace_id: string;
   branch_id: string;
+  reported_by_stakeholder_id: string;
   verifier_name: string;
   status: string;
   reason: string | null;
@@ -22,6 +23,7 @@ export function toVerificationSignal(row: VerificationSignalRow): VerificationSi
     id: row.id,
     workspaceId: row.workspace_id,
     branchId: row.branch_id,
+    reportedByStakeholderId: row.reported_by_stakeholder_id,
     verifierName: row.verifier_name,
     status: row.status as VerificationSignalStatus,
     ...(row.reason === null ? {} : { reason: row.reason }),
@@ -42,6 +44,7 @@ export type VerificationSignalCreateResult =
 export interface CreateVerificationSignalParams {
   branchId: string;
   workspaceId: string;
+  reportedByStakeholderId: string;
   verifierName: string;
   status: VerificationSignalStatus;
   reason?: string;
@@ -49,19 +52,16 @@ export interface CreateVerificationSignalParams {
 
 /**
  * Postgres-backed repository for the VerificationSignal aggregate (Meridian IDEA-31's
- * authoritative schema). Submission is a single atomic transaction: lock the branch row, assert
- * it is reviewable (submitted/verified), insert the signal, then fan out one unread
+ * authoritative schema). Submission is a single atomic transaction: lock the branch row, assert it
+ * is reviewable (submitted/verified), insert the signal, then fan out one unread
  * feedback_notification per stakeholder -- all-or-nothing, and the branch's own status/updated_at
  * are never mutated (Meridian IDEA-43's no-auto-transition rule).
  *
- * G11 SG5 workspace scoping (Meridian IDEA-98/IDEA-100, interim resolution captured in gap-report
- * IDEA-103): verification signals have no `stakeholderId`/caller-identity concept — `verifierName`
- * is intentionally broad free text (Meridian IDEA-21), so there is no membership check to make.
- * Instead, `params.workspaceId` (the request's `X-Workspace-Id` header) is compared directly
- * against the target branch's own `workspace_id`; a mismatch is treated as `not_found` (404),
- * mirroring `ChunkRepository.findById`'s cross-workspace-as-404 precedent, so a mismatched
- * workspace never leaks whether the branch id exists. The fan-out notifies only members of the
- * branch's workspace (`workspace_memberships`), not every stakeholder in the system.
+ * Meridian IDEA-139 now supplies a verified caller identity via
+ * `params.reportedByStakeholderId`, persisted separately from `verifierName`. `verifierName`
+ * remains intentionally broad untrusted free text (Meridian IDEA-21), not a stakeholder lookup or
+ * foreign key target. Cross-workspace requests still collapse to `not_found`, mirroring
+ * `ChunkRepository.findById`'s cross-workspace-as-404 precedent.
  */
 @Injectable()
 export class VerificationSignalRepository {
@@ -97,10 +97,26 @@ export class VerificationSignalRepository {
       }
 
       const result: QueryResult<VerificationSignalRow> = await client.query<VerificationSignalRow>(
-        `INSERT INTO verification_signals (id, workspace_id, branch_id, verifier_name, status, reason, created_at)
-         VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, now())
+        `INSERT INTO verification_signals (
+           id,
+           workspace_id,
+           branch_id,
+           reported_by_stakeholder_id,
+           verifier_name,
+           status,
+           reason,
+           created_at
+         )
+         VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, now())
          RETURNING *`,
-        [params.workspaceId, params.branchId, params.verifierName, params.status, params.reason ?? null],
+        [
+          params.workspaceId,
+          params.branchId,
+          params.reportedByStakeholderId,
+          params.verifierName,
+          params.status,
+          params.reason ?? null,
+        ],
       );
 
       const row = result.rows[0];
@@ -135,9 +151,9 @@ export class VerificationSignalRepository {
   }
 
   /**
-   * Lists verification signals for a branch ordered oldest-first (G09 SG1), scoped to
-   * `workspaceId` (G11 SG5). Deliberately unauthenticated beyond the workspace-header check,
-   * matching this codebase's existing GET /branches, GET /suggestions precedent.
+   * Lists verification signals for a branch ordered oldest-first, scoped to `workspaceId`. Read
+   * auth is enforced above this repository; persisted rows still expose both untrusted
+   * `verifierName` text and authenticated `reportedByStakeholderId` identity.
    */
   async findByBranchId(branchId: string, workspaceId: string): Promise<VerificationSignal[]> {
     const result: QueryResult<VerificationSignalRow> = await this.pool.query<VerificationSignalRow>(

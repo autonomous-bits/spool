@@ -2,14 +2,11 @@ import { BadRequestException } from '@nestjs/common';
 import { describe, expect, it } from 'vitest';
 import { parseCreateSuggestionRequest } from './create-suggestion-request.dto.js';
 
-const STAKEHOLDER_ID = '00000000-0000-0000-0000-000000000001';
-
 function chunkBody(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     label: 'ATOMIC-1',
     content: 'Some proposed content.',
     discipline: 'product',
-    stakeholderId: STAKEHOLDER_ID,
     ...overrides,
   };
 }
@@ -20,7 +17,6 @@ function edgeBody(overrides: Record<string, unknown> = {}): Record<string, unkno
     toChunkLabel: 'ATOMIC-2',
     relationshipType: 'refines',
     discipline: 'product',
-    stakeholderId: STAKEHOLDER_ID,
     ...overrides,
   };
 }
@@ -32,7 +28,6 @@ describe('parseCreateSuggestionRequest', () => {
     expect(parsed).toEqual({
       variant: { kind: 'chunk', label: 'ATOMIC-1', content: 'Some proposed content.' },
       discipline: 'product',
-      stakeholderId: STAKEHOLDER_ID,
     });
   });
 
@@ -47,7 +42,6 @@ describe('parseCreateSuggestionRequest', () => {
         relationshipType: 'refines',
       },
       discipline: 'product',
-      stakeholderId: STAKEHOLDER_ID,
     });
   });
 
@@ -56,9 +50,15 @@ describe('parseCreateSuggestionRequest', () => {
     expect(() => parseCreateSuggestionRequest(null)).toThrow(BadRequestException);
   });
 
-  it('rejects a missing stakeholderId', () => {
-    const body = chunkBody({ stakeholderId: undefined });
-    expect(() => parseCreateSuggestionRequest(body)).toThrow(BadRequestException);
+  it('ignores a client-supplied stakeholderId field', () => {
+    const parsed = parseCreateSuggestionRequest(
+      chunkBody({ stakeholderId: '00000000-0000-0000-0000-000000000001' }),
+    );
+
+    expect(parsed).toEqual({
+      variant: { kind: 'chunk', label: 'ATOMIC-1', content: 'Some proposed content.' },
+      discipline: 'product',
+    });
   });
 
   it('rejects an invalid discipline', () => {
@@ -75,7 +75,6 @@ describe('parseCreateSuggestionRequest', () => {
   it('rejects a body providing neither chunk nor edge fields', () => {
     const body = {
       discipline: 'product',
-      stakeholderId: STAKEHOLDER_ID,
     };
     expect(() => parseCreateSuggestionRequest(body)).toThrow(BadRequestException);
   });
@@ -94,7 +93,6 @@ describe('parseCreateSuggestionRequest', () => {
     const body = {
       fromChunkLabel: 'ATOMIC-1',
       discipline: 'product',
-      stakeholderId: STAKEHOLDER_ID,
     };
     expect(() => parseCreateSuggestionRequest(body)).toThrow(BadRequestException);
   });
@@ -116,7 +114,7 @@ describe('parseCreateSuggestionRequest', () => {
     ).toThrow(BadRequestException);
   });
 
-  it.each(['label', 'content', 'stakeholderId'])('rejects a blank %s in a chunk body', (field) => {
+  it.each(['label', 'content'])('rejects a blank %s in a chunk body', (field) => {
     expect(() => parseCreateSuggestionRequest(chunkBody({ [field]: '   ' }))).toThrow(
       BadRequestException,
     );

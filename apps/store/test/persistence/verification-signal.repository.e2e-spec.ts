@@ -94,6 +94,7 @@ describe('VerificationSignalRepository (containerized Postgres)', () => {
     const result = await verificationSignalRepository.create({
       branchId: branch.id,
       workspaceId: workspace.id,
+      reportedByStakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
       verifierName: 'ci-evaluator',
       status: 'pass',
       reason: 'all checks green',
@@ -146,6 +147,7 @@ describe('VerificationSignalRepository (containerized Postgres)', () => {
     const result = await verificationSignalRepository.create({
       branchId: branch.id,
       workspaceId: branchWorkspace.id,
+      reportedByStakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
       verifierName: 'human-reviewer',
       status: 'fail',
       reason: 'needs rework',
@@ -172,6 +174,7 @@ describe('VerificationSignalRepository (containerized Postgres)', () => {
     const result = await verificationSignalRepository.create({
       branchId: branch.id,
       workspaceId: otherWorkspace.id,
+      reportedByStakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
       verifierName: 'ci-evaluator',
       status: 'pass',
     });
@@ -189,6 +192,7 @@ describe('VerificationSignalRepository (containerized Postgres)', () => {
     const result = await verificationSignalRepository.create({
       branchId: '00000000-0000-0000-0000-00000000dead',
       workspaceId: workspace.id,
+      reportedByStakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
       verifierName: 'ci-evaluator',
       status: 'pass',
     });
@@ -205,6 +209,7 @@ describe('VerificationSignalRepository (containerized Postgres)', () => {
       verificationSignalRepository.create({
         branchId: branch.id,
         workspaceId: workspace.id,
+      reportedByStakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
         verifierName: tooLongVerifierName,
         status: 'pass',
       }),
@@ -228,6 +233,7 @@ describe('VerificationSignalRepository (containerized Postgres)', () => {
     const created = await verificationSignalRepository.create({
       branchId: branch.id,
       workspaceId: workspace.id,
+      reportedByStakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
       verifierName: 'ci-evaluator',
       status: 'pass',
     });

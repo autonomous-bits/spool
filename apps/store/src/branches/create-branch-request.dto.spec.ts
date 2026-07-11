@@ -6,7 +6,6 @@ function validBody(overrides: Record<string, unknown> = {}): Record<string, unkn
   return {
     name: 'feature-branch',
     discipline: 'product',
-    stakeholderId: '00000000-0000-0000-0000-000000000001',
     ...overrides,
   };
 }
@@ -18,8 +17,13 @@ describe('parseCreateBranchRequest', () => {
     expect(parsed).toEqual({
       name: 'feature-branch',
       discipline: 'product',
-      stakeholderId: '00000000-0000-0000-0000-000000000001',
     });
+  });
+
+  it('ignores a client-supplied stakeholderId field (authorship is claim-derived)', () => {
+    const parsed = parseCreateBranchRequest(validBody({ stakeholderId: 'client-supplied-id' }));
+
+    expect(parsed).not.toHaveProperty('stakeholderId');
   });
 
   it('rejects a non-object body', () => {
@@ -27,12 +31,12 @@ describe('parseCreateBranchRequest', () => {
     expect(() => parseCreateBranchRequest(null)).toThrow(BadRequestException);
   });
 
-  it.each(['name', 'stakeholderId'])('rejects a missing %s', (field) => {
+  it.each(['name'])('rejects a missing %s', (field) => {
     const body = validBody({ [field]: undefined });
     expect(() => parseCreateBranchRequest(body)).toThrow(BadRequestException);
   });
 
-  it.each(['name', 'stakeholderId'])('rejects a blank %s', (field) => {
+  it.each(['name'])('rejects a blank %s', (field) => {
     const body = validBody({ [field]: '   ' });
     expect(() => parseCreateBranchRequest(body)).toThrow(BadRequestException);
   });

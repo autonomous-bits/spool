@@ -33,8 +33,9 @@ function isValidClaims(
  * storage). Reuses the dependency-free HMAC codec in `../auth/hmac-token.js` — the same pattern
  * `SessionTokenService`/`OAuthStateService` use — but with its own secret and claim shape,
  * because this token authorizes downloading one specific blob rather than asserting stakeholder
- * identity. Carries `workspaceId` (G11 SG5) so `GET /artifacts/content/:token` can redeem the
- * token without re-checking the `X-Workspace-Id` header: the token was minted from an
+ * identity. Carries `workspaceId` so IDEA-139's one deliberate exception,
+ * `GET /artifacts/content/:token`, can redeem the token without a bearer token or
+ * `X-Workspace-Id` header: the capability token is minted from an already-authenticated,
  * already-scoped lookup at issuance time.
  */
 @Injectable()

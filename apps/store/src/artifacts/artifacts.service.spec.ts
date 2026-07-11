@@ -69,7 +69,6 @@ describe('ArtifactsService', () => {
         {
           content: Buffer.from('hello').toString('base64'),
           mimeType: 'text/plain',
-          stakeholderId,
         },
         WORKSPACE_ID,
         validClaims(),
@@ -96,7 +95,6 @@ describe('ArtifactsService', () => {
           {
             content: Buffer.from('hello').toString('base64'),
             mimeType: 'text/plain',
-            stakeholderId,
           },
           undefined,
           validClaims(),
@@ -113,7 +111,6 @@ describe('ArtifactsService', () => {
           {
             content: Buffer.from('hello').toString('base64'),
             mimeType: 'text/plain',
-            stakeholderId,
           },
           WORKSPACE_ID,
           validClaims(),
@@ -132,7 +129,6 @@ describe('ArtifactsService', () => {
           'ATOMIC-1',
           {
             artifactId: 'artifact-1',
-            stakeholderId,
           },
           WORKSPACE_ID,
           validClaims(),
@@ -147,7 +143,6 @@ describe('ArtifactsService', () => {
           'ATOMIC-1',
           {
             artifactId: 'artifact-1',
-            stakeholderId,
           },
           undefined,
           validClaims(),
@@ -175,7 +170,6 @@ describe('ArtifactsService', () => {
           'ATOMIC-1',
           {
             artifactId: 'artifact-1',
-            stakeholderId,
           },
           WORKSPACE_ID,
           validClaims(),
@@ -215,7 +209,6 @@ describe('ArtifactsService', () => {
         'ATOMIC-1',
         {
           artifactId: artifact.id,
-          stakeholderId,
         },
         WORKSPACE_ID,
         validClaims(),
@@ -228,6 +221,7 @@ describe('ArtifactsService', () => {
           chunkLabel: 'ATOMIC-1',
           artifactId: artifact.id,
           status: 'active',
+          createdByStakeholderId: stakeholderId,
           branchId: undefined,
         }),
       );
@@ -408,6 +402,7 @@ describe('ArtifactsService', () => {
         UnauthorizedException,
       );
       expect(artifactRepository.findById).not.toHaveBeenCalled();
+      expect(blobStore.createReadStream).not.toHaveBeenCalled();
     });
 
     it('throws NotFoundException when the verified artifact no longer exists', async () => {
@@ -420,6 +415,7 @@ describe('ArtifactsService', () => {
       await expect(service.streamArtifactContent('good-token')).rejects.toThrow(
         NotFoundException,
       );
+      expect(blobStore.createReadStream).not.toHaveBeenCalled();
     });
 
     it('does not require an X-Workspace-Id header, using the token-carried workspaceId instead', async () => {

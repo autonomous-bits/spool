@@ -1,10 +1,11 @@
 import { Module } from '@nestjs/common';
+import { AuthModule } from '../auth/auth.module.js';
 import { PersistenceModule } from '../persistence/persistence.module.js';
 import { VerificationSignalsController } from './verification-signals.controller.js';
 import { VerificationSignalsService } from './verification-signals.service.js';
 
 @Module({
-  imports: [PersistenceModule],
+  imports: [PersistenceModule, AuthModule],
   controllers: [VerificationSignalsController],
   providers: [VerificationSignalsService],
 })

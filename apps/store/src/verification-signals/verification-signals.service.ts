@@ -1,7 +1,9 @@
 import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import type { SessionTokenClaims } from '../auth/session-token.service.js';
 import { BranchLifecycleError } from '../domain/branch-lifecycle.js';
-import { WorkspaceScopeViolationError } from '../domain/workspace-scope.js';
+import { assertWorkspaceScope, WorkspaceScopeViolationError } from '../domain/workspace-scope.js';
 import { VerificationSignalRepository } from '../persistence/verification-signal.repository.js';
+import { WorkspaceRepository } from '../persistence/workspace.repository.js';
 import type { CreateVerificationSignalRequest } from './create-verification-signal-request.dto.js';
 import {
   toVerificationSignalResponse,
@@ -9,53 +11,63 @@ import {
 } from './verification-signal-response.dto.js';
 
 /**
- * Application service for verification-signal submission and reads (Meridian IDEA-21/IDEA-43/
- * IDEA-31), sitting between the HTTP controller and the `VerificationSignalRepository`
- * persistence layer. Submission is deliberately unauthenticated (mirrors `POST /suggestions`
- * precedent): IDEA-21's "agents, tools, or other humans" is broader than the registered-
- * stakeholder set, so there is no ActorContext/session-token to verify here.
+ * Application service for verification-signal submission and reads (Meridian IDEA-21/IDEA-31),
+ * sitting between the HTTP controller and the `VerificationSignalRepository` persistence layer.
+ * Meridian IDEA-139 now binds these routes to verified session tokens plus a live
+ * `workspace_memberships` check against `claims.stakeholderId`; an unexpired token from a removed
+ * member must still be rejected.
  *
- * G11 SG5 workspace scoping (interim resolution, Meridian gap-report IDEA-103): verification
- * signals have no `stakeholderId`/caller-identity concept (`verifierName` is intentionally
- * broad free text per IDEA-21), so neither the delegated tier's membership check nor the token
- * tier's claim check applies here. Instead this service only asserts the `X-Workspace-Id`
- * header is present; the actual scope enforcement -- comparing it against the target branch's
- * own `workspace_id` -- happens in `VerificationSignalRepository`, which folds the comparison
- * into the same atomic transaction/lookup as the rest of `create`/`findByBranchId`, and reuses
- * the existing `not_found` result kind so a mismatched workspace never leaks whether the branch
- * id exists.
+ * Meridian IDEA-21 still keeps `verifierName` as untrusted free text describing whichever agent,
+ * tool, or human produced the evaluation. Authenticated reporter identity is recorded separately as
+ * `reportedByStakeholderId`, derived only from verified token claims and never from request body
+ * fields.
  */
 @Injectable()
 export class VerificationSignalsService {
-  constructor(private readonly verificationSignalRepository: VerificationSignalRepository) {}
+  constructor(
+    private readonly verificationSignalRepository: VerificationSignalRepository,
+    private readonly workspaceRepository: WorkspaceRepository,
+  ) {}
 
-  private assertWorkspaceHeaderPresent(headerWorkspaceId: string | null | undefined): string {
-    if (
+  private async assertScope(
+    headerWorkspaceId: string | null | undefined,
+    claims: SessionTokenClaims,
+  ): Promise<string> {
+    const isMember =
       headerWorkspaceId === null ||
       headerWorkspaceId === undefined ||
       headerWorkspaceId.trim().length === 0
-    ) {
-      throw new ForbiddenException(
-        new WorkspaceScopeViolationError('missing X-Workspace-Id header').message,
-      );
+        ? false
+        : await this.workspaceRepository.isMember(headerWorkspaceId, claims.stakeholderId);
+
+    try {
+      assertWorkspaceScope(headerWorkspaceId, { workspaceIdClaim: claims.workspaceId, isMember });
+    } catch (error) {
+      if (error instanceof WorkspaceScopeViolationError) {
+        throw new ForbiddenException(error.message);
+      }
+      throw error;
     }
+
     return headerWorkspaceId;
   }
 
   /**
-   * Submits a verification signal against a branch. Only allowed while the branch is
-   * `submitted` or `verified` (Meridian IDEA-20/IDEA-43); never mutates the branch's own status.
+   * Submits a verification signal against a branch. Only allowed while the branch is `submitted`
+   * or `verified` (Meridian IDEA-20/IDEA-43); never mutates the branch's own status.
    */
   async create(
     branchId: string,
     request: CreateVerificationSignalRequest,
     headerWorkspaceId: string | null | undefined,
+    claims: SessionTokenClaims,
   ): Promise<VerificationSignalResponse> {
-    const workspaceId = this.assertWorkspaceHeaderPresent(headerWorkspaceId);
+    const workspaceId = await this.assertScope(headerWorkspaceId, claims);
 
     const result = await this.verificationSignalRepository.create({
       branchId,
       workspaceId,
+      reportedByStakeholderId: claims.stakeholderId,
       verifierName: request.verifierName,
       status: request.status,
       ...(request.reason === undefined ? {} : { reason: request.reason }),
@@ -76,15 +88,16 @@ export class VerificationSignalsService {
   }
 
   /**
-   * Lists verification signals for a branch ordered oldest-first (G09 SG1). Deliberately
-   * unauthenticated beyond the workspace-header check, matching this codebase's existing
-   * GET /branches, GET /suggestions precedent of unauthenticated reads.
+   * Lists verification signals for a branch ordered oldest-first. Per Meridian IDEA-139 this read
+   * path is authenticated exactly like writes; `verifierName` remains untrusted text, while
+   * `reportedByStakeholderId` is the authenticated caller identity persisted at submission time.
    */
   async findAllForBranch(
     branchId: string,
     headerWorkspaceId: string | null | undefined,
+    claims: SessionTokenClaims,
   ): Promise<VerificationSignalResponse[]> {
-    const workspaceId = this.assertWorkspaceHeaderPresent(headerWorkspaceId);
+    const workspaceId = await this.assertScope(headerWorkspaceId, claims);
 
     const signals = await this.verificationSignalRepository.findByBranchId(branchId, workspaceId);
     return signals.map(toVerificationSignalResponse);

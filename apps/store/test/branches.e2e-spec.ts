@@ -85,7 +85,6 @@ describe('Branches HTTP API (containerized Postgres)', () => {
       .send({
         name: uniqueName('e2e-branch'),
         discipline,
-        stakeholderId,
       });
 
     expect(createResponse.status).toBe(201);
@@ -133,7 +132,6 @@ describe('Branches HTTP API (containerized Postgres)', () => {
       .send({
         name: uniqueName('e2e-branch'),
         discipline: 'engineering',
-        stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
       });
 
     expect(createResponse.status).toBe(201);
@@ -524,7 +522,6 @@ describe('Branches HTTP API (containerized Postgres)', () => {
       .send({
         name: 'bad-vocab-branch',
         discipline: 'bogus',
-        stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
       });
 
     expect(response.status).toBe(400);
@@ -538,22 +535,6 @@ describe('Branches HTTP API (containerized Postgres)', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({
         discipline: 'engineering',
-        stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
-      });
-
-    expect(response.status).toBe(400);
-  });
-
-  it('POST /branches returns 400 for an unknown stakeholderId (FK violation on authorship attribution)', async () => {
-    const token = mintSessionToken(BOOTSTRAP_STAKEHOLDER_ID, 'engineering');
-    const response = await request(app.getHttpServer())
-      .post('/branches')
-      .set('X-Workspace-Id', WORKSPACE_ID)
-      .set('Authorization', `Bearer ${token}`)
-      .send({
-        name: uniqueName('e2e-unknown-stakeholder'),
-        discipline: 'engineering',
-        stakeholderId: '00000000-0000-0000-0000-0000000000ff',
       });
 
     expect(response.status).toBe(400);

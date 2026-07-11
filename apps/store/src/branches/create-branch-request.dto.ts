@@ -6,11 +6,15 @@ import { isDiscipline } from '../domain/types/vocabulary/discipline.js';
  * Validated shape of a `POST /branches` request body, per Meridian IDEA-52/IDEA-34 (branch
  * creation API). Stakeholder registration is out of scope for G02 (mirrors G01's precedent):
  * stakeholderId must already exist as a row in `stakeholders`.
+ *
+ * G17 SG2 (Meridian IDEA-24/IDEA-17, mirroring G16 SG5's IDEA-139 pattern): authorship
+ * attribution (`createdByStakeholderId`) is derived from the verified session token's
+ * `stakeholderId` claim, not a client-supplied body field — this interface intentionally has no
+ * `stakeholderId` field.
  */
 export interface CreateBranchRequest {
   name: string;
   discipline: Discipline;
-  stakeholderId: string;
 }
 
 function requireStringField(body: Record<string, unknown>, field: string): string {
@@ -35,7 +39,6 @@ export function parseCreateBranchRequest(body: unknown): CreateBranchRequest {
   const record = body as Record<string, unknown>;
 
   const name = requireStringField(record, 'name');
-  const stakeholderId = requireStringField(record, 'stakeholderId');
 
   const discipline = record.discipline;
   if (!isDiscipline(discipline)) {
@@ -45,6 +48,5 @@ export function parseCreateBranchRequest(body: unknown): CreateBranchRequest {
   return {
     name,
     discipline,
-    stakeholderId,
   } satisfies CreateBranchRequest;
 }

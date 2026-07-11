@@ -6,10 +6,13 @@ import { BadRequestException } from '@nestjs/common';
  * comes from the route param, not the body. `branchId` is optional, mirroring the edges/chunks
  * precedent: when present, the association is scoped to that draft branch; when absent, it is a
  * mainline association.
+ *
+ * G18 SG3 (Meridian IDEA-139): authorship attribution (`createdByStakeholderId`) is derived from
+ * the verified session token's `stakeholderId` claim, not a client-supplied body field — this
+ * interface intentionally has no `stakeholderId` field.
  */
 export interface CreateChunkArtifactRequest {
   artifactId: string;
-  stakeholderId: string;
   branchId?: string;
 }
 
@@ -34,15 +37,14 @@ export function parseCreateChunkArtifactRequest(body: unknown): CreateChunkArtif
   const record = body as Record<string, unknown>;
 
   const artifactId = requireStringField(record, 'artifactId');
-  const stakeholderId = requireStringField(record, 'stakeholderId');
 
   const branchIdValue = record.branchId;
   if (branchIdValue !== undefined) {
     if (typeof branchIdValue !== 'string' || branchIdValue.trim().length === 0) {
       throw new BadRequestException('branchId must be a non-empty string when provided');
     }
-    return { artifactId, stakeholderId, branchId: branchIdValue } satisfies CreateChunkArtifactRequest;
+    return { artifactId, branchId: branchIdValue } satisfies CreateChunkArtifactRequest;
   }
 
-  return { artifactId, stakeholderId } satisfies CreateChunkArtifactRequest;
+  return { artifactId } satisfies CreateChunkArtifactRequest;
 }

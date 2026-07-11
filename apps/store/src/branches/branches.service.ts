@@ -47,11 +47,11 @@ function toLifecycleConflict(error: BranchLifecycleError): ConflictException {
  * Application service for branch creation, submission, and retrieval (Meridian IDEA-52/IDEA-34),
  * sitting between the HTTP controller and the persistence/domain layers.
  *
- * G11 SG4 (Meridian IDEA-98/IDEA-100, two-tier auth): `create` and `findById` sit on the
- * delegated, tokenless tier (X-Workspace-Id validated against a workspace_memberships row for the
- * caller-declared stakeholderId). `submit`/`verify`/`reject`/`merge` already require a human
- * session token, so they additionally validate X-Workspace-Id against the token's workspaceId
- * claim (the token tier).
+ * G17 SG2 (Meridian IDEA-24/IDEA-17, mirroring G16 SG5's IDEA-139 pattern): every route sits on
+ * the single-tier, session-token-verified auth model — the request's `X-Workspace-Id` header is
+ * validated against a `workspace_memberships` row for `claims.stakeholderId` (the verified
+ * token's stakeholder, never a client-supplied value), and branch authorship attribution is
+ * likewise derived from `claims.stakeholderId`.
  */
 @Injectable()
 export class BranchesService {
@@ -95,10 +95,10 @@ export class BranchesService {
         workspaceId,
         name: request.name,
         discipline: request.discipline,
-        createdByStakeholderId: request.stakeholderId,
+        createdByStakeholderId: claims.stakeholderId,
       });
     } catch (error) {
-      // Domain invariants (blank name/discipline/stakeholderId) surfaced as 400s, not 500s.
+      // Domain invariants (blank name/discipline, etc.) surfaced as 400s, not 500s.
       const message = error instanceof Error ? error.message : 'Invalid branch';
       throw new BadRequestException(message);
     }
@@ -108,7 +108,7 @@ export class BranchesService {
       return toBranchResponse(created);
     } catch (error) {
       if (isPgErrorWithCode(error, FOREIGN_KEY_VIOLATION)) {
-        throw new BadRequestException(`Unknown stakeholderId: ${request.stakeholderId}`);
+        throw new BadRequestException(`Unknown stakeholderId: ${claims.stakeholderId}`);
       }
       if (isPgErrorWithCode(error, UNIQUE_VIOLATION)) {
         throw new BadRequestException(`Branch name already active: ${request.name}`);

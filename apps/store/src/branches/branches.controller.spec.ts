@@ -73,14 +73,12 @@ describe('BranchesController', () => {
     const result = await controller.create({
       name: 'feature-branch',
       discipline: 'product',
-      stakeholderId: 'stakeholder-1',
     }, 'Bearer signed-token', WORKSPACE_ID);
 
     expect(result).toEqual(expected);
     expect(service.create).toHaveBeenCalledWith({
       name: 'feature-branch',
       discipline: 'product',
-      stakeholderId: 'stakeholder-1',
     }, WORKSPACE_ID, claims);
   });
 

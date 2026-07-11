@@ -6,13 +6,11 @@ describe('parseCreateArtifactRequest', () => {
     const request = parseCreateArtifactRequest({
       content: Buffer.from('hello').toString('base64'),
       mimeType: 'text/plain',
-      stakeholderId: 'stakeholder-1',
     });
 
     expect(request).toEqual({
       content: Buffer.from('hello').toString('base64'),
       mimeType: 'text/plain',
-      stakeholderId: 'stakeholder-1',
     });
   });
 
@@ -21,21 +19,11 @@ describe('parseCreateArtifactRequest', () => {
   });
 
   it('throws BadRequestException for a missing content field', () => {
-    expect(() =>
-      parseCreateArtifactRequest({ mimeType: 'text/plain', stakeholderId: 'stakeholder-1' }),
-    ).toThrow('content');
+    expect(() => parseCreateArtifactRequest({ mimeType: 'text/plain' })).toThrow('content');
   });
 
   it('throws BadRequestException for a missing mimeType field', () => {
-    expect(() =>
-      parseCreateArtifactRequest({ content: 'aGVsbG8=', stakeholderId: 'stakeholder-1' }),
-    ).toThrow('mimeType');
-  });
-
-  it('throws BadRequestException for a missing stakeholderId field', () => {
-    expect(() =>
-      parseCreateArtifactRequest({ content: 'aGVsbG8=', mimeType: 'text/plain' }),
-    ).toThrow('stakeholderId');
+    expect(() => parseCreateArtifactRequest({ content: 'aGVsbG8=' })).toThrow('mimeType');
   });
 
   it('throws BadRequestException for non-base64 content', () => {
@@ -43,7 +31,6 @@ describe('parseCreateArtifactRequest', () => {
       parseCreateArtifactRequest({
         content: 'not base64!!',
         mimeType: 'text/plain',
-        stakeholderId: 'stakeholder-1',
       }),
     ).toThrow('base64');
   });

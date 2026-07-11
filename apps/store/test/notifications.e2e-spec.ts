@@ -111,6 +111,7 @@ describe('Notifications HTTP API (containerized Postgres)', () => {
     const signalResponse = await request(app.getHttpServer())
       .post(`/branches/${branchId}/verification-signals`)
       .set('X-Workspace-Id', WORKSPACE_ID)
+      .set('Authorization', authHeader(token))
       .send({ verifierName: 'ci-evaluator', status: 'pass' });
     expect(signalResponse.status).toBe(201);
   }
