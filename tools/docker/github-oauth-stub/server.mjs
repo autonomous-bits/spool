@@ -15,7 +15,8 @@ import { createServer } from 'node:http';
 /** @typedef {import('node:http').ServerResponse} ServerResponse */
 
 const GITHUB_LOGIN = process.env.OAUTH_STUB_GITHUB_LOGIN ?? 'spool-e2e-oauth-fixture';
-const ACCESS_TOKEN = 'stub-access-token';
+// Fixture-only value for this Docker-only OAuth stub (never a real credential); overridable via env for test isolation.
+const ACCESS_TOKEN = process.env.OAUTH_STUB_ACCESS_TOKEN ?? 'stub-access-token';
 const PORT = Number.parseInt(process.env.PORT ?? '4001', 10);
 
 /**

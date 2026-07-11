@@ -4,6 +4,8 @@ services:
     build:
       context: apps/store
       dockerfile: ./Dockerfile
+      additional_contexts:
+        certs: tools/docker/webhook-receiver-stub
     environment:
       NODE_ENV: production
       STORE_DB_HOST: postgres
@@ -20,8 +22,8 @@ services:
       GITHUB_USER_API_URL: http://github-oauth-stub:4001/user
       # Trusts the webhook-receiver-stub's self-signed cert (below) so DeliveryWorkerService's
       # outbound fetch (G14.SG3) can complete a genuine TLS handshake against it; the same cert
-      # is baked into this image too since apps/store/docker/ is inside the Dockerfile's COPY . .
-      # context (see apps/store/docker/webhook-receiver-stub/cert.pem).
+      # is baked into this image too via the "certs" additional build context below (see
+      # tools/docker/webhook-receiver-stub/cert.pem and apps/store/Dockerfile's COPY --from=certs).
       NODE_EXTRA_CA_CERTS: /usr/src/app/docker/webhook-receiver-stub/cert.pem
     ports:
       - 3002:3000
@@ -37,11 +39,11 @@ services:
 
   # Stands in for github.com's OAuth token-exchange endpoint and api.github.com's /user endpoint
   # for G04.SG5's Docker end-to-end exercise; a live interactive GitHub consent screen cannot be
-  # automated here. See apps/store/docker/github-oauth-stub/server.mjs.
+  # automated here. See tools/docker/github-oauth-stub/server.mjs.
   github-oauth-stub:
     image: spool-github-oauth-stub
     build:
-      context: apps/store/docker/github-oauth-stub
+      context: tools/docker/github-oauth-stub
     environment:
       PORT: "4001"
       OAUTH_STUB_GITHUB_LOGIN: spool-e2e-oauth-fixture
@@ -51,11 +53,11 @@ services:
   # TLS-terminating stand-in for a real downstream consumer's HTTPS webhook endpoint, used only
   # by G14.SG4's Docker end-to-end exercise (DeliverySubscription.url requires https://, so
   # DeliveryWorkerService's outbound fetch needs a genuine TLS handshake to exercise). See
-  # apps/store/docker/webhook-receiver-stub/server.mjs.
+  # tools/docker/webhook-receiver-stub/server.mjs.
   webhook-receiver-stub:
     image: spool-webhook-receiver-stub
     build:
-      context: apps/store/docker/webhook-receiver-stub
+      context: tools/docker/webhook-receiver-stub
     environment:
       PORT: "4443"
     ports:

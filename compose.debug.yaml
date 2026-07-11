@@ -29,7 +29,7 @@ services:
   github-oauth-stub:
     image: spool-github-oauth-stub
     build:
-      context: apps/store/docker/github-oauth-stub
+      context: tools/docker/github-oauth-stub
     environment:
       PORT: "4001"
       OAUTH_STUB_GITHUB_LOGIN: spool-e2e-oauth-fixture
