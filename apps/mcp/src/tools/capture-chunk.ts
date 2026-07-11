@@ -118,10 +118,10 @@ function extractErrorMessage(body: unknown, fallback: string): string {
  */
 export async function captureChunk(
   input: CaptureChunkInput,
-  harnessUrl: string,
+  storeUrl: string,
 ): Promise<CaptureChunkResult> {
   const { workspaceId, ...body } = input;
-  const response = await fetch(`${harnessUrl}/chunks`, {
+  const response = await fetch(`${storeUrl}/chunks`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-workspace-id': workspaceId },
     body: JSON.stringify(body),

@@ -63,9 +63,14 @@ export function encodeCursor(cursor: ChunkSearchCursor): string {
 
 export function decodeCursor(cursorStr: string): ChunkSearchCursor | undefined {
   try {
-    const parsed = JSON.parse(Buffer.from(cursorStr, 'base64url').toString('utf8'));
-    if (typeof parsed.tieBreakDate === 'string' && typeof parsed.tieBreakId === 'string') {
-      return parsed;
+    const parsed: unknown = JSON.parse(Buffer.from(cursorStr, 'base64url').toString('utf8'));
+    if (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      typeof (parsed as Record<string, unknown>).tieBreakDate === 'string' &&
+      typeof (parsed as Record<string, unknown>).tieBreakId === 'string'
+    ) {
+      return parsed as ChunkSearchCursor;
     }
   } catch {
     // ignore
@@ -230,12 +235,12 @@ export class ChunkRepository {
       conditions.push('branch_id IS NULL');
     } else {
       params.push(branchId);
-      conditions.push(`branch_id = $${params.length}`);
+      conditions.push(`branch_id = $${String(params.length)}`);
     }
 
     if (workspaceId !== undefined) {
       params.push(workspaceId);
-      conditions.push(`workspace_id = $${params.length}`);
+      conditions.push(`workspace_id = $${String(params.length)}`);
     }
 
     const result: QueryResult<ChunkRow> = await this.pool.query<ChunkRow>(
@@ -257,23 +262,23 @@ export class ChunkRepository {
 
     if (filters.discipline !== undefined) {
       params.push(filters.discipline);
-      conditions.push(`discipline = $${params.length}`);
+      conditions.push(`discipline = $${String(params.length)}`);
     }
     if (filters.chunkType !== undefined) {
       params.push(filters.chunkType);
-      conditions.push(`chunk_type = $${params.length}`);
+      conditions.push(`chunk_type = $${String(params.length)}`);
     }
     if (filters.status !== undefined) {
       params.push(filters.status);
-      conditions.push(`status = $${params.length}`);
+      conditions.push(`status = $${String(params.length)}`);
     }
     if (filters.contextKind !== undefined) {
       params.push(filters.contextKind);
-      conditions.push(`context_kind = $${params.length}`);
+      conditions.push(`context_kind = $${String(params.length)}`);
     }
     if (filters.branchId !== undefined) {
       params.push(filters.branchId);
-      conditions.push(`branch_id = $${params.length}`);
+      conditions.push(`branch_id = $${String(params.length)}`);
     } else {
       conditions.push('branch_id IS NULL');
     }
@@ -285,7 +290,7 @@ export class ChunkRepository {
       params.push(filters.q);
       qIdx = params.length;
       const tsExp = `to_tsvector('english', label || ' ' || content)`;
-      const qExp = `plainto_tsquery('english', $${qIdx})`;
+      const qExp = `plainto_tsquery('english', $${String(qIdx)})`;
       selectCols += `, ts_rank(${tsExp}, ${qExp}) AS rank`;
       conditions.push(`${tsExp} @@ ${qExp}`);
     }
@@ -299,18 +304,18 @@ export class ChunkRepository {
           const dIdx = params.length - 1;
           const iIdx = params.length;
           const tsExp = `to_tsvector('english', label || ' ' || content)`;
-          const qExp = `plainto_tsquery('english', $${qIdx})`;
+          const qExp = `plainto_tsquery('english', $${String(qIdx)})`;
           const rankExp = `ts_rank(${tsExp}, ${qExp})`;
           conditions.push(`(
-            ${rankExp} < $${rIdx}
-            OR (${rankExp} = $${rIdx} AND created_at < $${dIdx})
-            OR (${rankExp} = $${rIdx} AND created_at = $${dIdx} AND id < $${iIdx})
+            ${rankExp} < $${String(rIdx)}
+            OR (${rankExp} = $${String(rIdx)} AND created_at < $${String(dIdx)})
+            OR (${rankExp} = $${String(rIdx)} AND created_at = $${String(dIdx)} AND id < $${String(iIdx)})
           )`);
         } else {
           params.push(cursor.tieBreakDate, cursor.tieBreakId);
           const dIdx = params.length - 1;
           const iIdx = params.length;
-          conditions.push(`(created_at < $${dIdx} OR (created_at = $${dIdx} AND id < $${iIdx}))`);
+          conditions.push(`(created_at < $${String(dIdx)} OR (created_at = $${String(dIdx)} AND id < $${String(iIdx)}))`);
         }
       }
     }
@@ -323,7 +328,7 @@ export class ChunkRepository {
     params.push(actualLimit + 1);
     const limitIdx = params.length;
 
-    const query = `SELECT ${selectCols} FROM chunks WHERE ${conditions.join(' AND ')} ${orderClause} LIMIT $${limitIdx}`;
+    const query = `SELECT ${selectCols} FROM chunks WHERE ${conditions.join(' AND ')} ${orderClause} LIMIT $${String(limitIdx)}`;
 
     const result = await this.pool.query<ChunkRow & { rank?: number }>(query, params);
     const hasNext = result.rows.length > actualLimit;
@@ -368,13 +373,13 @@ export class ChunkRepository {
 
       if (branchId !== undefined) {
         edgeParams.push(branchId);
-        edgeConditions.push(`branch_id = $${edgeParams.length}`);
+        edgeConditions.push(`branch_id = $${String(edgeParams.length)}`);
       } else {
         edgeConditions.push('branch_id IS NULL');
       }
 
       edgeParams.push(Array.from(currentHopLabels));
-      edgeConditions.push(`(from_chunk_label = ANY($${edgeParams.length}) OR to_chunk_label = ANY($${edgeParams.length}))`);
+      edgeConditions.push(`(from_chunk_label = ANY($${String(edgeParams.length)}) OR to_chunk_label = ANY($${String(edgeParams.length)}))`);
 
       const edgesResult = await this.pool.query<{ id: string; from_chunk_label: string; to_chunk_label: string }>(
         `SELECT id, from_chunk_label, to_chunk_label FROM edges WHERE ${edgeConditions.join(' AND ')}`,
@@ -416,13 +421,13 @@ export class ChunkRepository {
 
     if (branchId !== undefined) {
       chunkParams.push(branchId);
-      chunkConditions.push(`branch_id = $${chunkParams.length}`);
+      chunkConditions.push(`branch_id = $${String(chunkParams.length)}`);
     } else {
       chunkConditions.push('branch_id IS NULL');
     }
 
     chunkParams.push(chunkLabels);
-    chunkConditions.push(`label = ANY($${chunkParams.length})`);
+    chunkConditions.push(`label = ANY($${String(chunkParams.length)})`);
 
     const chunksResult = await this.pool.query<ChunkRow>(
       `SELECT * FROM chunks WHERE ${chunkConditions.join(' AND ')}`,

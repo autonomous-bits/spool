@@ -368,8 +368,8 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
           .post('/chunks')
           .set('X-Workspace-Id', WORKSPACE_ID)
           .send({
-            label: `e2e-search-${uniqueSuffix}-${i}`,
-            content: `Searchable content ${uniqueSuffix} number ${i}`,
+            label: `e2e-search-${uniqueSuffix}-${String(i)}`,
+            content: `Searchable content ${uniqueSuffix} number ${String(i)}`,
             discipline: 'engineering',
             chunkType: 'feature',
             contextKind: 'permanent',
@@ -490,7 +490,7 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
 
       // Query A neighbourhood with depth 1
       const depth1 = await request(app.getHttpServer())
-        .get(`/chunks/${chunkIds[labels[0]]}/neighbourhood`)
+        .get(`/chunks/${String(chunkIds[labels[0]])}/neighbourhood`)
         .set('Authorization', `Bearer ${validToken}`)
         .set('X-Workspace-Id', WORKSPACE_ID)
         .query({ depth: 1 });
@@ -498,19 +498,19 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
       expect(depth1.status).toBe(200);
       expect(depth1.body.chunk.id).toBe(chunkIds[labels[0]]);
       expect(depth1.body.neighbours).toHaveLength(2); // A->B and C->A (incoming)
-      const neighbours1 = depth1.body.neighbours.map((n: any) => n.label).sort();
+      const neighbours1 = depth1.body.neighbours.map((n: { label: string }) => n.label).sort();
       expect(neighbours1).toEqual([labels[1], labels[2]].sort());
       
       // Query A neighbourhood with depth 2
       const depth2 = await request(app.getHttpServer())
-        .get(`/chunks/${chunkIds[labels[0]]}/neighbourhood`)
+        .get(`/chunks/${String(chunkIds[labels[0]])}/neighbourhood`)
         .set('Authorization', `Bearer ${validToken}`)
         .set('X-Workspace-Id', WORKSPACE_ID)
         .query({ depth: 2 });
 
       expect(depth2.status).toBe(200);
       expect(depth2.body.neighbours).toHaveLength(3); // B, C, and now D (from B)
-      const neighbours2 = depth2.body.neighbours.map((n: any) => n.label).sort();
+      const neighbours2 = depth2.body.neighbours.map((n: { label: string }) => n.label).sort();
       expect(neighbours2).toEqual([labels[1], labels[2], labels[3]].sort());
     });
 

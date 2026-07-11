@@ -72,7 +72,7 @@ function optionalNumberField(record: Record<string, unknown>, field: string): nu
   if (typeof record[field] !== 'number') {
     throw new SearchChunksValidationError(`${field} must be a number`, 400);
   }
-  return record[field] as number;
+  return record[field];
 }
 
 export function parseSearchChunksInput(body: unknown): SearchChunksInput {
@@ -119,7 +119,7 @@ function extractErrorMessage(body: unknown, fallback: string): string {
     typeof body === 'object' &&
     body !== null &&
     'message' in body &&
-    typeof (body as any).message === 'string'
+    typeof (body).message === 'string'
   ) {
     return (body as { message: string }).message;
   }
@@ -128,18 +128,16 @@ function extractErrorMessage(body: unknown, fallback: string): string {
 
 export async function searchChunks(
   input: SearchChunksInput,
-  harnessUrl: string,
+  storeUrl: string,
 ): Promise<SearchChunksResult> {
   const { sessionToken, workspaceId, ...queryParams } = input;
   
-  const url = new URL(`${harnessUrl}/chunks`);
+  const url = new URL(`${storeUrl}/chunks`);
   for (const [key, value] of Object.entries(queryParams)) {
-    if (value !== undefined) {
-      if (key === 'chunkType') {
-        url.searchParams.append('type', String(value));
-      } else {
-        url.searchParams.append(key, String(value));
-      }
+    if (key === 'chunkType') {
+      url.searchParams.append('type', String(value));
+    } else {
+      url.searchParams.append(key, String(value));
     }
   }
 

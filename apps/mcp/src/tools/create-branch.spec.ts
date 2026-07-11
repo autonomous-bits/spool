@@ -78,7 +78,7 @@ describe('createBranch', () => {
     vi.unstubAllGlobals();
   });
 
-  it('forwards the input to POST {harnessUrl}/branches and returns the created branch', async () => {
+  it('forwards the input to POST {storeUrl}/branches and returns the created branch', async () => {
     const expected: CreateBranchResult = {
       id: 'branch-1',
       name: input.name,
@@ -96,10 +96,10 @@ describe('createBranch', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await createBranch(input, 'http://harness.test');
+    const result = await createBranch(input, 'http://store.test');
 
     const { workspaceId, ...expectedBody } = input;
-    expect(fetchMock).toHaveBeenCalledWith('http://harness.test/branches', {
+    expect(fetchMock).toHaveBeenCalledWith('http://store.test/branches', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-workspace-id': workspaceId },
       body: JSON.stringify(expectedBody),
@@ -121,7 +121,7 @@ describe('createBranch', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(createBranch(input, 'http://harness.test')).rejects.toMatchObject({
+    await expect(createBranch(input, 'http://store.test')).rejects.toMatchObject({
       name: 'CreateBranchValidationError',
       statusCode: 400,
       message: 'Invalid discipline: "not-a-discipline"',
@@ -136,7 +136,7 @@ describe('createBranch', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(createBranch(input, 'http://harness.test')).rejects.toMatchObject({
+    await expect(createBranch(input, 'http://store.test')).rejects.toMatchObject({
       name: 'CreateBranchValidationError',
       statusCode: 400,
       message: 'Store rejected create-branch request (400)',

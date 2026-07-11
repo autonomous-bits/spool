@@ -91,7 +91,7 @@ describe('submitSuggestion', () => {
     vi.unstubAllGlobals();
   });
 
-  it('forwards the input to POST {harnessUrl}/suggestions and returns the created suggestion', async () => {
+  it('forwards the input to POST {storeUrl}/suggestions and returns the created suggestion', async () => {
     const expected: SubmitSuggestionResult = {
       id: 'suggestion-1',
       label: input.label ?? null,
@@ -115,10 +115,10 @@ describe('submitSuggestion', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await submitSuggestion(input, 'http://harness.test');
+    const result = await submitSuggestion(input, 'http://store.test');
 
     const { workspaceId, ...expectedBody } = input;
-    expect(fetchMock).toHaveBeenCalledWith('http://harness.test/suggestions', {
+    expect(fetchMock).toHaveBeenCalledWith('http://store.test/suggestions', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-workspace-id': workspaceId },
       body: JSON.stringify(expectedBody),
@@ -140,7 +140,7 @@ describe('submitSuggestion', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(submitSuggestion(input, 'http://harness.test')).rejects.toMatchObject({
+    await expect(submitSuggestion(input, 'http://store.test')).rejects.toMatchObject({
       name: 'SubmitSuggestionValidationError',
       statusCode: 400,
       message: 'Invalid discipline: "not-a-real-discipline"',
@@ -155,7 +155,7 @@ describe('submitSuggestion', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(submitSuggestion(input, 'http://harness.test')).rejects.toMatchObject({
+    await expect(submitSuggestion(input, 'http://store.test')).rejects.toMatchObject({
       name: 'SubmitSuggestionValidationError',
       statusCode: 502,
       message: 'Store rejected submit-suggestion request (502)',

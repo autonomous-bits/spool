@@ -4,6 +4,7 @@ import { verifySessionClaims } from '../auth/session-claims.helper.js';
 import type { ChunkResponse, NeighbourResponse } from './chunk-response.dto.js';
 import { parseCreateChunkRequest } from './create-chunk-request.dto.js';
 import { ChunksService } from './chunks.service.js';
+import type { SearchChunksFilters } from '../persistence/chunk.repository.js';
 
 function requireStakeholderId(value: string | undefined): string {
   if (typeof value !== 'string' || value.trim().length === 0) {
@@ -38,7 +39,7 @@ export class ChunksController {
     }
     const limit = limitStr !== undefined ? parseInt(limitStr, 10) : 20;
 
-    const filters: any = { workspaceId: headerWorkspaceId };
+    const filters: SearchChunksFilters = { workspaceId: headerWorkspaceId };
     if (discipline !== undefined) filters.discipline = discipline;
     if (chunkType !== undefined) filters.chunkType = chunkType;
     if (status !== undefined) filters.status = status;

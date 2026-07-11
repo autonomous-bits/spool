@@ -39,7 +39,7 @@ function readRawBody(req) {
     /** @type {Buffer[]} */
     const chunks = [];
     req.on('data', (/** @type {Buffer} */ chunk) => chunks.push(chunk));
-    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('end', () => { resolve(Buffer.concat(chunks)); });
     req.on('error', reject);
   });
 }
@@ -68,9 +68,10 @@ const server = createServer(
 
     if (req.method === 'POST' && url.pathname === '/webhook') {
       void readRawBody(req).then((raw) => {
+        /** @type {unknown} */
         let parsedBody;
         try {
-          parsedBody = JSON.parse(raw.toString('utf8'));
+          parsedBody = /** @type {unknown} */ (JSON.parse(raw.toString('utf8')));
         } catch {
           parsedBody = null;
         }

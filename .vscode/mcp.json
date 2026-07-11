@@ -1,0 +1,13 @@
+{
+  "servers": {
+    "spool": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["main.js"],
+      "cwd": "/Users/wernerswart/repos/spool/apps/mcp/dist",
+      "env": {
+        "SPOOL_STORE_URL": "http://localhost:3000"
+      }
+    }
+  }
+}

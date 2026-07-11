@@ -70,7 +70,7 @@ describe('createEdge', () => {
     vi.unstubAllGlobals();
   });
 
-  it('forwards the input to POST {harnessUrl}/edges and returns the created edge', async () => {
+  it('forwards the input to POST {storeUrl}/edges and returns the created edge', async () => {
     const expected: CreateEdgeResult = {
       id: 'edge-1',
       fromChunkLabel: input.fromChunkLabel,
@@ -93,10 +93,10 @@ describe('createEdge', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await createEdge(input, 'http://harness.test');
+    const result = await createEdge(input, 'http://store.test');
 
     const { workspaceId, ...expectedBody } = input;
-    expect(fetchMock).toHaveBeenCalledWith('http://harness.test/edges', {
+    expect(fetchMock).toHaveBeenCalledWith('http://store.test/edges', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-workspace-id': workspaceId },
       body: JSON.stringify(expectedBody),
@@ -118,7 +118,7 @@ describe('createEdge', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(createEdge(input, 'http://harness.test')).rejects.toMatchObject({
+    await expect(createEdge(input, 'http://store.test')).rejects.toMatchObject({
       name: 'CreateEdgeValidationError',
       statusCode: 400,
       message: 'Invalid type: "not-a-real-type"',
@@ -138,7 +138,7 @@ describe('createEdge', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(createEdge(input, 'http://harness.test')).rejects.toMatchObject({
+    await expect(createEdge(input, 'http://store.test')).rejects.toMatchObject({
       name: 'CreateEdgeValidationError',
       statusCode: 409,
     });
@@ -152,7 +152,7 @@ describe('createEdge', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(createEdge(input, 'http://harness.test')).rejects.toMatchObject({
+    await expect(createEdge(input, 'http://store.test')).rejects.toMatchObject({
       name: 'CreateEdgeValidationError',
       statusCode: 404,
       message: 'Store rejected create-edge request (404)',

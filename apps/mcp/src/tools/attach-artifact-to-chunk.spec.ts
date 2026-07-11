@@ -61,7 +61,7 @@ describe('attachArtifactToChunk', () => {
     vi.unstubAllGlobals();
   });
 
-  it('forwards the input to POST {harnessUrl}/chunks/:label/artifacts and returns the created association', async () => {
+  it('forwards the input to POST {storeUrl}/chunks/:label/artifacts and returns the created association', async () => {
     const expected: AttachArtifactToChunkResult = {
       id: 'assoc-1',
       chunkLabel: input.chunkLabel,
@@ -81,9 +81,9 @@ describe('attachArtifactToChunk', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await attachArtifactToChunk(input, 'http://harness.test');
+    const result = await attachArtifactToChunk(input, 'http://store.test');
 
-    expect(fetchMock).toHaveBeenCalledWith('http://harness.test/chunks/IDEA-1/artifacts', {
+    expect(fetchMock).toHaveBeenCalledWith('http://store.test/chunks/IDEA-1/artifacts', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-workspace-id': input.workspaceId },
       body: JSON.stringify({ artifactId: input.artifactId, stakeholderId: input.stakeholderId }),
@@ -113,9 +113,9 @@ describe('attachArtifactToChunk', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await attachArtifactToChunk(withBranch, 'http://harness.test');
+    await attachArtifactToChunk(withBranch, 'http://store.test');
 
-    expect(fetchMock).toHaveBeenCalledWith('http://harness.test/chunks/IDEA%2F1/artifacts', {
+    expect(fetchMock).toHaveBeenCalledWith('http://store.test/chunks/IDEA%2F1/artifacts', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-workspace-id': withBranch.workspaceId },
       body: JSON.stringify({
@@ -139,7 +139,7 @@ describe('attachArtifactToChunk', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(attachArtifactToChunk(input, 'http://harness.test')).rejects.toMatchObject({
+    await expect(attachArtifactToChunk(input, 'http://store.test')).rejects.toMatchObject({
       name: 'AttachArtifactToChunkValidationError',
       statusCode: 404,
       message: 'Chunk with label IDEA-1 not found in this scope',
@@ -154,7 +154,7 @@ describe('attachArtifactToChunk', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(attachArtifactToChunk(input, 'http://harness.test')).rejects.toMatchObject({
+    await expect(attachArtifactToChunk(input, 'http://store.test')).rejects.toMatchObject({
       name: 'AttachArtifactToChunkValidationError',
       statusCode: 502,
       message: 'Store rejected attach-artifact-to-chunk request (502)',

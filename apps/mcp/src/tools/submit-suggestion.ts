@@ -154,10 +154,10 @@ function extractErrorMessage(body: unknown, fallback: string): string {
  */
 export async function submitSuggestion(
   input: SubmitSuggestionInput,
-  harnessUrl: string,
+  storeUrl: string,
 ): Promise<SubmitSuggestionResult> {
   const { workspaceId, ...body } = input;
-  const response = await fetch(`${harnessUrl}/suggestions`, {
+  const response = await fetch(`${storeUrl}/suggestions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-workspace-id': workspaceId },
     body: JSON.stringify(body),

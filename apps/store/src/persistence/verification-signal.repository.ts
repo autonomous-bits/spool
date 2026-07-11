@@ -80,7 +80,7 @@ export class VerificationSignalRepository {
         [params.branchId],
       );
       const branchRow = branchResult.rows[0];
-      if (branchRow === undefined || branchRow.workspace_id !== params.workspaceId) {
+      if (branchRow?.workspace_id !== params.workspaceId) {
         await client.query('ROLLBACK');
         transactionOpen = false;
         return { kind: 'not_found' };

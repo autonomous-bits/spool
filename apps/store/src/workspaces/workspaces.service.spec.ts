@@ -74,7 +74,7 @@ describe('WorkspacesService', () => {
         createdAt: new Date(),
         updatedAt: new Date(),
       };
-      vi.mocked(workspaceRepository.createWithFirstMember).mockResolvedValue(created as never);
+      vi.mocked(workspaceRepository.createWithFirstMember).mockResolvedValue(created);
 
       const result = await service.create({ name: 'acme' }, validClaims());
 
@@ -195,7 +195,7 @@ describe('WorkspacesService', () => {
       };
       vi.mocked(workspaceRepository.addMember).mockResolvedValue({
         kind: 'added',
-        membership: membership as never,
+        membership: membership,
       });
 
       const result = await service.addMember(WORKSPACE_ID, TARGET_ID, WORKSPACE_ID, validClaims());

@@ -35,7 +35,7 @@ describe('MCP HTTP server', () => {
     await expect(response.json()).resolves.toEqual({
       status: 'ok',
       service: 'mcp',
-      harnessUrl: 'http://store.internal:3000',
+      storeUrl: 'http://store.internal:3000',
     });
   });
 

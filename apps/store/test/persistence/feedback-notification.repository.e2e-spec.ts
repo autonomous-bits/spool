@@ -176,7 +176,7 @@ describe('FeedbackNotificationRepository (containerized Postgres)', () => {
 
     const otherWorkspace = await workspaceRepository.createWithFirstMember(
       new Workspace({
-        name: `notification-find-workspace-${Date.now()}`,
+        name: `notification-find-workspace-${String(Date.now())}`,
         createdByStakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
       }),
     );
@@ -223,7 +223,7 @@ describe('FeedbackNotificationRepository (containerized Postgres)', () => {
 
     const otherWorkspace = await workspaceRepository.createWithFirstMember(
       new Workspace({
-        name: `notification-mark-workspace-${Date.now()}`,
+        name: `notification-mark-workspace-${String(Date.now())}`,
         createdByStakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
       }),
     );

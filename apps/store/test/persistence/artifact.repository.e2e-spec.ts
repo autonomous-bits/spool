@@ -90,7 +90,7 @@ describe('ArtifactRepository (containerized Postgres)', () => {
 
   it('findById returns undefined (not the row) when the id exists but in a different workspace', async () => {
     const otherWorkspace = await workspaceRepository.createWithFirstMember(
-      new Workspace({ name: `artifact-workspace-${Date.now()}`, createdByStakeholderId: BOOTSTRAP_STAKEHOLDER_ID }),
+      new Workspace({ name: `artifact-workspace-${String(Date.now())}`, createdByStakeholderId: BOOTSTRAP_STAKEHOLDER_ID }),
     );
     const created = await artifactRepository.create({
       workspaceId: WORKSPACE_ID,

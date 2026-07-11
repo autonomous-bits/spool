@@ -142,7 +142,7 @@ describe('SuggestionRepository (containerized Postgres)', () => {
     const workspaceRepository = new WorkspaceRepository(pool);
     const otherWorkspace = await workspaceRepository.createWithFirstMember(
       new Workspace({
-        name: `suggestion-workspace-${Date.now()}`,
+        name: `suggestion-workspace-${String(Date.now())}`,
         createdByStakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
       }),
     );

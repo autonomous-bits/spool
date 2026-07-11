@@ -90,10 +90,10 @@ function extractErrorMessage(body: unknown, fallback: string): string {
  */
 export async function createBranch(
   input: CreateBranchInput,
-  harnessUrl: string,
+  storeUrl: string,
 ): Promise<CreateBranchResult> {
   const { workspaceId, ...body } = input;
-  const response = await fetch(`${harnessUrl}/branches`, {
+  const response = await fetch(`${storeUrl}/branches`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-workspace-id': workspaceId },
     body: JSON.stringify(body),

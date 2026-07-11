@@ -74,7 +74,7 @@ describe('submitVerificationSignal', () => {
     vi.unstubAllGlobals();
   });
 
-  it('forwards the input to POST {harnessUrl}/branches/:branchId/verification-signals and returns the created signal', async () => {
+  it('forwards the input to POST {storeUrl}/branches/:branchId/verification-signals and returns the created signal', async () => {
     const expected: SubmitVerificationSignalResult = {
       id: 'signal-1',
       branchId: input.branchId,
@@ -90,10 +90,10 @@ describe('submitVerificationSignal', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await submitVerificationSignal(input, 'http://harness.test');
+    const result = await submitVerificationSignal(input, 'http://store.test');
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://harness.test/branches/branch-1/verification-signals',
+      'http://store.test/branches/branch-1/verification-signals',
       {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-workspace-id': input.workspaceId },
@@ -121,7 +121,7 @@ describe('submitVerificationSignal', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(submitVerificationSignal(input, 'http://harness.test')).rejects.toMatchObject({
+    await expect(submitVerificationSignal(input, 'http://store.test')).rejects.toMatchObject({
       name: 'SubmitVerificationSignalValidationError',
       statusCode: 409,
       message: 'Branch branch-1 is not reviewable',
@@ -142,7 +142,7 @@ describe('submitVerificationSignal', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(
-      submitVerificationSignal({ ...input, status: 'not-a-real-status' }, 'http://harness.test'),
+      submitVerificationSignal({ ...input, status: 'not-a-real-status' }, 'http://store.test'),
     ).rejects.toMatchObject({
       name: 'SubmitVerificationSignalValidationError',
       statusCode: 400,
@@ -158,7 +158,7 @@ describe('submitVerificationSignal', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(submitVerificationSignal(input, 'http://harness.test')).rejects.toMatchObject({
+    await expect(submitVerificationSignal(input, 'http://store.test')).rejects.toMatchObject({
       name: 'SubmitVerificationSignalValidationError',
       statusCode: 502,
       message: 'Store rejected submit-verification-signal request (502)',

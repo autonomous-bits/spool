@@ -127,7 +127,7 @@ describe('captureChunk', () => {
     vi.unstubAllGlobals();
   });
 
-  it('forwards the input to POST {harnessUrl}/chunks and returns the created chunk', async () => {
+  it('forwards the input to POST {storeUrl}/chunks and returns the created chunk', async () => {
     const expected: CaptureChunkResult = {
       id: 'chunk-1',
       label: input.label,
@@ -150,10 +150,10 @@ describe('captureChunk', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await captureChunk(input, 'http://harness.test');
+    const result = await captureChunk(input, 'http://store.test');
 
     const { workspaceId, ...expectedBody } = input;
-    expect(fetchMock).toHaveBeenCalledWith('http://harness.test/chunks', {
+    expect(fetchMock).toHaveBeenCalledWith('http://store.test/chunks', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-workspace-id': workspaceId },
       body: JSON.stringify(expectedBody),
@@ -186,10 +186,10 @@ describe('captureChunk', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await captureChunk(inputWithBranch, 'http://harness.test');
+    const result = await captureChunk(inputWithBranch, 'http://store.test');
 
     const { workspaceId, ...expectedBody } = inputWithBranch;
-    expect(fetchMock).toHaveBeenCalledWith('http://harness.test/chunks', {
+    expect(fetchMock).toHaveBeenCalledWith('http://store.test/chunks', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-workspace-id': workspaceId },
       body: JSON.stringify(expectedBody),
@@ -211,7 +211,7 @@ describe('captureChunk', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(captureChunk(input, 'http://harness.test')).rejects.toMatchObject({
+    await expect(captureChunk(input, 'http://store.test')).rejects.toMatchObject({
       name: 'CaptureChunkValidationError',
       statusCode: 400,
       message: 'Invalid discipline: "not-a-discipline"',
@@ -226,7 +226,7 @@ describe('captureChunk', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(captureChunk(input, 'http://harness.test')).rejects.toMatchObject({
+    await expect(captureChunk(input, 'http://store.test')).rejects.toMatchObject({
       name: 'CaptureChunkValidationError',
       statusCode: 400,
       message: 'Store rejected capture-chunk request (400)',

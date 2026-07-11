@@ -72,7 +72,7 @@ describe('uploadArtifact', () => {
     vi.unstubAllGlobals();
   });
 
-  it('forwards the input to POST {harnessUrl}/artifacts and returns the created artifact id', async () => {
+  it('forwards the input to POST {storeUrl}/artifacts and returns the created artifact id', async () => {
     const expected: UploadArtifactResult = {
       id: 'artifact-1',
       uri: 'file:///artifacts/artifact-1',
@@ -87,10 +87,10 @@ describe('uploadArtifact', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await uploadArtifact(input, 'http://harness.test');
+    const result = await uploadArtifact(input, 'http://store.test');
 
     const { workspaceId, ...expectedBody } = input;
-    expect(fetchMock).toHaveBeenCalledWith('http://harness.test/artifacts', {
+    expect(fetchMock).toHaveBeenCalledWith('http://store.test/artifacts', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-workspace-id': workspaceId },
       body: JSON.stringify(expectedBody),
@@ -112,7 +112,7 @@ describe('uploadArtifact', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(uploadArtifact(input, 'http://harness.test')).rejects.toMatchObject({
+    await expect(uploadArtifact(input, 'http://store.test')).rejects.toMatchObject({
       name: 'UploadArtifactValidationError',
       statusCode: 400,
       message: 'Unknown stakeholderId: stakeholder-1',
@@ -127,7 +127,7 @@ describe('uploadArtifact', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(uploadArtifact(input, 'http://harness.test')).rejects.toMatchObject({
+    await expect(uploadArtifact(input, 'http://store.test')).rejects.toMatchObject({
       name: 'UploadArtifactValidationError',
       statusCode: 502,
       message: 'Store rejected upload-artifact request (502)',

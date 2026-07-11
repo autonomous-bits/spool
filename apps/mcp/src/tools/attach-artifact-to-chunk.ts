@@ -114,10 +114,10 @@ function extractErrorMessage(body: unknown, fallback: string): string {
  */
 export async function attachArtifactToChunk(
   input: AttachArtifactToChunkInput,
-  harnessUrl: string,
+  storeUrl: string,
 ): Promise<AttachArtifactToChunkResult> {
   const { chunkLabel, workspaceId, ...body } = input;
-  const response = await fetch(`${harnessUrl}/chunks/${encodeURIComponent(chunkLabel)}/artifacts`, {
+  const response = await fetch(`${storeUrl}/chunks/${encodeURIComponent(chunkLabel)}/artifacts`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-workspace-id': workspaceId },
     body: JSON.stringify(body),

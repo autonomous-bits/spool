@@ -204,7 +204,7 @@ export class ChunksService {
       for (const neighbour of neighbours) {
         if (neighbour.discipline !== claims.discipline) {
           throw new ForbiddenException(
-            `Neighbour chunk discipline (${neighbour.discipline}) does not match token discipline (${claims.discipline})`,
+            `Neighbour chunk discipline (${neighbour.discipline}) does not match token discipline (${String(claims.discipline)})`,
           );
         }
       }

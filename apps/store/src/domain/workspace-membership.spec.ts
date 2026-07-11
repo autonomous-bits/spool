@@ -52,11 +52,11 @@ describe('deriveInitialMembership', () => {
 
 describe('assertCanAddMember', () => {
   it('rejects a non-member caller', () => {
-    expect(() => assertCanAddMember(false)).toThrow(WorkspaceMembershipRejectedError);
+    expect(() => { assertCanAddMember(false); }).toThrow(WorkspaceMembershipRejectedError);
   });
 
   it('allows any existing member to add another member', () => {
-    expect(() => assertCanAddMember(true)).not.toThrow();
+    expect(() => { assertCanAddMember(true); }).not.toThrow();
   });
 });
 

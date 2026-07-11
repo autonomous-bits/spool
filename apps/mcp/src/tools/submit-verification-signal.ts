@@ -115,10 +115,10 @@ function extractErrorMessage(body: unknown, fallback: string): string {
  */
 export async function submitVerificationSignal(
   input: SubmitVerificationSignalInput,
-  harnessUrl: string,
+  storeUrl: string,
 ): Promise<SubmitVerificationSignalResult> {
   const { branchId, verifierName, status, workspaceId, ...rest } = input;
-  const response = await fetch(`${harnessUrl}/branches/${encodeURIComponent(branchId)}/verification-signals`, {
+  const response = await fetch(`${storeUrl}/branches/${encodeURIComponent(branchId)}/verification-signals`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-workspace-id': workspaceId },
     body: JSON.stringify({ verifierName, status, ...rest }),

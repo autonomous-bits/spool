@@ -122,10 +122,10 @@ function extractErrorMessage(body: unknown, fallback: string): string {
  */
 export async function uploadArtifact(
   input: UploadArtifactInput,
-  harnessUrl: string,
+  storeUrl: string,
 ): Promise<UploadArtifactResult> {
   const { workspaceId, ...body } = input;
-  const response = await fetch(`${harnessUrl}/artifacts`, {
+  const response = await fetch(`${storeUrl}/artifacts`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-workspace-id': workspaceId },
     body: JSON.stringify(body),

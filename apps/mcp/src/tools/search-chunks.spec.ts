@@ -71,7 +71,7 @@ describe('search-chunks tool', () => {
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,
         json: vi.fn().mockResolvedValue(mockResult),
-      } as unknown as Response);
+      });
 
       const result = await searchChunks(
         { sessionToken: 'token-1', workspaceId: 'w-1', q: 'test' },
@@ -96,7 +96,7 @@ describe('search-chunks tool', () => {
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,
         json: vi.fn().mockResolvedValue(mockResult),
-      } as unknown as Response);
+      });
 
       await searchChunks(
         { sessionToken: 'token-1', workspaceId: 'w-1', chunkType: 'feature' },
@@ -114,7 +114,7 @@ describe('search-chunks tool', () => {
         ok: false,
         status: 403,
         json: vi.fn().mockResolvedValue({ message: 'Store said no' }),
-      } as unknown as Response);
+      });
 
       await expect(
         searchChunks({ sessionToken: 'token-1', workspaceId: 'w-1' }, 'http://localhost:3000'),
@@ -126,7 +126,7 @@ describe('search-chunks tool', () => {
         ok: false,
         status: 400,
         json: vi.fn().mockRejectedValue(new Error('unparseable')),
-      } as unknown as Response);
+      });
 
       await expect(
         searchChunks({ sessionToken: 'token-1', workspaceId: 'w-1' }, 'http://localhost:3000'),

@@ -146,7 +146,7 @@ describe('BranchRepository.merge (containerized Postgres)', () => {
   }
 
   async function listDeliveryAttempts(branchId: string): Promise<
-    Array<{ subscription_id: string; merge_event_id: string }>
+    { subscription_id: string; merge_event_id: string }[]
   > {
     const result = await pool.query<{ subscription_id: string; merge_event_id: string }>(
       `SELECT subscription_id, merge_event_id

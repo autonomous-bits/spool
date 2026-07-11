@@ -1,402 +1,262 @@
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import {
-  attachArtifactToChunk,
-  AttachArtifactToChunkValidationError,
-  parseAttachArtifactToChunkInput,
-} from './tools/attach-artifact-to-chunk.js';
-import { captureChunk, CaptureChunkValidationError, parseCaptureChunkInput } from './tools/capture-chunk.js';
-import { createBranch, CreateBranchValidationError, parseCreateBranchInput } from './tools/create-branch.js';
-import { createEdge, CreateEdgeValidationError, parseCreateEdgeInput } from './tools/create-edge.js';
-import {
-  submitSuggestion,
-  SubmitSuggestionValidationError,
-  parseSubmitSuggestionInput,
-} from './tools/submit-suggestion.js';
-import {
-  submitVerificationSignal,
-  SubmitVerificationSignalValidationError,
-  parseSubmitVerificationSignalInput,
-} from './tools/submit-verification-signal.js';
-import { uploadArtifact, UploadArtifactValidationError, parseUploadArtifactInput } from './tools/upload-artifact.js';
-import { searchChunks, SearchChunksValidationError, parseSearchChunksInput } from './tools/search-chunks.js';
-import { getNeighbourhood, GetNeighbourhoodValidationError, parseGetNeighbourhoodInput } from './tools/get-neighbourhood.js';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { z, type ZodRawShape } from 'zod';
+import { attachArtifactToChunk, parseAttachArtifactToChunkInput } from './tools/attach-artifact-to-chunk.js';
+import { captureChunk, parseCaptureChunkInput } from './tools/capture-chunk.js';
+import { createBranch, parseCreateBranchInput } from './tools/create-branch.js';
+import { createEdge, parseCreateEdgeInput } from './tools/create-edge.js';
+import { submitSuggestion, parseSubmitSuggestionInput } from './tools/submit-suggestion.js';
+import { submitVerificationSignal, parseSubmitVerificationSignalInput } from './tools/submit-verification-signal.js';
+import { uploadArtifact, parseUploadArtifactInput } from './tools/upload-artifact.js';
+import { searchChunks, parseSearchChunksInput } from './tools/search-chunks.js';
+import { getNeighbourhood, parseGetNeighbourhoodInput } from './tools/get-neighbourhood.js';
 
-interface McpHealthResponse {
-  status: 'ok';
-  service: 'mcp';
-  harnessUrl: string;
-}
-
-export function createMcpHealthResponse(
-  harnessUrl = process.env.HARNESS_URL ?? 'http://localhost:3000',
-): McpHealthResponse {
-  return {
-    status: 'ok',
-    service: 'mcp',
-    harnessUrl,
-  };
-}
-
-const CAPTURE_CHUNK_ROUTE = '/tools/capture-chunk';
-const CREATE_BRANCH_ROUTE = '/tools/create-branch';
-const CREATE_EDGE_ROUTE = '/tools/create-edge';
-const SUBMIT_SUGGESTION_ROUTE = '/tools/submit-suggestion';
-const SUBMIT_VERIFICATION_SIGNAL_ROUTE = '/tools/submit-verification-signal';
-const UPLOAD_ARTIFACT_ROUTE = '/tools/upload-artifact';
-const ATTACH_ARTIFACT_TO_CHUNK_ROUTE = '/tools/attach-artifact-to-chunk';
-const SEARCH_CHUNKS_ROUTE = '/tools/search-chunks';
-const GET_NEIGHBOURHOOD_ROUTE = '/tools/get-neighbourhood';
-// Bounds the in-memory body buffer for a single tool call (node-memory-management: avoid
-// unbounded buffering of untrusted input).
-const MAX_BODY_BYTES = 1_000_000;
+// Kept as `type` (not `interface`): the SDK's registerTool callback return type has an index
+// signature, and an `interface` here is not structurally assignable to it (TS2322).
+// eslint-disable-next-line @typescript-eslint/consistent-type-definitions
+type ToolTextContent = { type: 'text'; text: string };
+// eslint-disable-next-line @typescript-eslint/consistent-type-definitions
+export type ToolResult = { content: ToolTextContent[]; isError?: true };
 
 function logDiagnostic(level: 'info' | 'error', msg: string, extra?: Record<string, unknown>): void {
   process.stderr.write(`${JSON.stringify({ level, msg, ...extra })}\n`);
 }
 
-/** Generic 4xx error raised for malformed/oversized request bodies, before tool-specific parsing. */
-class RequestBodyError extends Error {
-  constructor(
-    message: string,
-    public readonly statusCode: number,
-  ) {
-    super(message);
-    this.name = 'RequestBodyError';
-  }
-}
-
-async function readRequestBody(request: IncomingMessage): Promise<string> {
-  const chunks: Buffer[] = [];
-  let totalBytes = 0;
-
-  for await (const chunk of request) {
-    const buffer = chunk as Buffer;
-    totalBytes += buffer.length;
-    if (totalBytes > MAX_BODY_BYTES) {
-      throw new RequestBodyError('Request body too large', 413);
-    }
-    chunks.push(buffer);
-  }
-
-  return Buffer.concat(chunks).toString('utf8');
-}
-
-function sendJson(response: ServerResponse, statusCode: number, body: unknown): void {
-  response.writeHead(statusCode, { 'content-type': 'application/json' });
-  response.end(JSON.stringify(body));
-}
-
-async function handleCaptureChunk(
-  request: IncomingMessage,
-  response: ServerResponse,
-  harnessUrl: string,
-): Promise<void> {
+/**
+ * Runs a tool's parse+business-logic pipeline and maps the outcome to the MCP tool-result
+ * contract (Meridian IDEA-137): success is `{ content: [...] }`, any thrown `*ValidationError`
+ * or upstream failure is `{ content: [...], isError: true }`. This is distinct from a
+ * protocol-level rejection by the SDK's own Zod `inputSchema`, which never reaches this
+ * function — the SDK returns its own error before the handler runs.
+ */
+async function runTool(toolName: string, fn: () => Promise<unknown>): Promise<ToolResult> {
   try {
-    const raw = await readRequestBody(request);
-    let parsedBody: unknown;
-    try {
-      parsedBody = raw.length === 0 ? undefined : JSON.parse(raw);
-    } catch {
-      throw new CaptureChunkValidationError('Request body must be valid JSON', 400);
-    }
-
-    const input = parseCaptureChunkInput(parsedBody);
-    const chunk = await captureChunk(input, harnessUrl);
-    sendJson(response, 201, chunk);
+    const result = await fn();
+    return { content: [{ type: 'text', text: JSON.stringify(result) }] };
   } catch (error) {
-    if (error instanceof RequestBodyError || error instanceof CaptureChunkValidationError) {
-      sendJson(response, error.statusCode, { message: error.message });
-      return;
-    }
-
-    const reason = error instanceof Error ? error.message : 'Unknown error';
-    logDiagnostic('error', 'capture-chunk tool call failed', { reason });
-    sendJson(response, 502, { message: 'Failed to reach the store' });
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    logDiagnostic('error', `${toolName} tool call failed`, { reason: message });
+    return { content: [{ type: 'text', text: message }], isError: true };
   }
 }
 
-async function handleCreateBranch(
-  request: IncomingMessage,
-  response: ServerResponse,
-  harnessUrl: string,
-): Promise<void> {
-  try {
-    const raw = await readRequestBody(request);
-    let parsedBody: unknown;
-    try {
-      parsedBody = raw.length === 0 ? undefined : JSON.parse(raw);
-    } catch {
-      throw new CreateBranchValidationError('Request body must be valid JSON', 400);
-    }
+const captureChunkInputSchema = {
+  label: z.string().min(1),
+  content: z.string().min(1),
+  discipline: z.string().min(1),
+  chunkType: z.string().min(1),
+  contextKind: z.string().min(1),
+  stakeholderId: z.string().min(1),
+  workspaceId: z.string().min(1),
+  branchId: z.string().min(1).optional(),
+} satisfies ZodRawShape;
 
-    const input = parseCreateBranchInput(parsedBody);
-    const branch = await createBranch(input, harnessUrl);
-    sendJson(response, 201, branch);
-  } catch (error) {
-    if (error instanceof RequestBodyError || error instanceof CreateBranchValidationError) {
-      sendJson(response, error.statusCode, { message: error.message });
-      return;
-    }
+const createBranchInputSchema = {
+  name: z.string().min(1),
+  discipline: z.string().min(1),
+  stakeholderId: z.string().min(1),
+  workspaceId: z.string().min(1),
+} satisfies ZodRawShape;
 
-    const reason = error instanceof Error ? error.message : 'Unknown error';
-    logDiagnostic('error', 'create-branch tool call failed', { reason });
-    sendJson(response, 502, { message: 'Failed to reach the store' });
-  }
-}
+const createEdgeInputSchema = {
+  fromChunkLabel: z.string().min(1),
+  toChunkLabel: z.string().min(1),
+  type: z.string().min(1),
+  discipline: z.string().min(1),
+  stakeholderId: z.string().min(1),
+  workspaceId: z.string().min(1),
+  branchId: z.string().min(1).optional(),
+} satisfies ZodRawShape;
 
-async function handleCreateEdge(
-  request: IncomingMessage,
-  response: ServerResponse,
-  harnessUrl: string,
-): Promise<void> {
-  try {
-    const raw = await readRequestBody(request);
-    let parsedBody: unknown;
-    try {
-      parsedBody = raw.length === 0 ? undefined : JSON.parse(raw);
-    } catch {
-      throw new CreateEdgeValidationError('Request body must be valid JSON', 400);
-    }
+const submitSuggestionInputSchema = {
+  discipline: z.string().min(1),
+  stakeholderId: z.string().min(1),
+  workspaceId: z.string().min(1),
+  label: z.string().min(1).optional(),
+  content: z.string().min(1).optional(),
+  fromChunkLabel: z.string().min(1).optional(),
+  toChunkLabel: z.string().min(1).optional(),
+  relationshipType: z.string().min(1).optional(),
+} satisfies ZodRawShape;
 
-    const input = parseCreateEdgeInput(parsedBody);
-    const edge = await createEdge(input, harnessUrl);
-    sendJson(response, 201, edge);
-  } catch (error) {
-    if (error instanceof RequestBodyError || error instanceof CreateEdgeValidationError) {
-      sendJson(response, error.statusCode, { message: error.message });
-      return;
-    }
+const submitVerificationSignalInputSchema = {
+  branchId: z.string().min(1),
+  verifierName: z.string().min(1),
+  status: z.string().min(1),
+  workspaceId: z.string().min(1),
+  reason: z.string().min(1).optional(),
+} satisfies ZodRawShape;
 
-    const reason = error instanceof Error ? error.message : 'Unknown error';
-    logDiagnostic('error', 'create-edge tool call failed', { reason });
-    sendJson(response, 502, { message: 'Failed to reach the store' });
-  }
-}
+const uploadArtifactInputSchema = {
+  content: z.string().min(1),
+  mimeType: z.string().min(1),
+  stakeholderId: z.string().min(1),
+  workspaceId: z.string().min(1),
+} satisfies ZodRawShape;
 
-async function handleSubmitSuggestion(
-  request: IncomingMessage,
-  response: ServerResponse,
-  harnessUrl: string,
-): Promise<void> {
-  try {
-    const raw = await readRequestBody(request);
-    let parsedBody: unknown;
-    try {
-      parsedBody = raw.length === 0 ? undefined : JSON.parse(raw);
-    } catch {
-      throw new SubmitSuggestionValidationError('Request body must be valid JSON', 400);
-    }
+const attachArtifactToChunkInputSchema = {
+  chunkLabel: z.string().min(1),
+  artifactId: z.string().min(1),
+  stakeholderId: z.string().min(1),
+  workspaceId: z.string().min(1),
+  branchId: z.string().min(1).optional(),
+} satisfies ZodRawShape;
 
-    const input = parseSubmitSuggestionInput(parsedBody);
-    const suggestion = await submitSuggestion(input, harnessUrl);
-    sendJson(response, 201, suggestion);
-  } catch (error) {
-    if (error instanceof RequestBodyError || error instanceof SubmitSuggestionValidationError) {
-      sendJson(response, error.statusCode, { message: error.message });
-      return;
-    }
+const searchChunksInputSchema = {
+  sessionToken: z.string().min(1),
+  workspaceId: z.string().min(1),
+  discipline: z.string().min(1).optional(),
+  chunkType: z.string().min(1).optional(),
+  status: z.string().min(1).optional(),
+  contextKind: z.string().min(1).optional(),
+  branchId: z.string().min(1).optional(),
+  q: z.string().min(1).optional(),
+  limit: z.number().optional(),
+  cursor: z.string().min(1).optional(),
+} satisfies ZodRawShape;
 
-    const reason = error instanceof Error ? error.message : 'Unknown error';
-    logDiagnostic('error', 'submit-suggestion tool call failed', { reason });
-    sendJson(response, 502, { message: 'Failed to reach the store' });
-  }
-}
+const getNeighbourhoodInputSchema = {
+  id: z.string().min(1),
+  sessionToken: z.string().min(1),
+  workspaceId: z.string().min(1),
+  depth: z.number().optional(),
+  branchId: z.string().min(1).optional(),
+} satisfies ZodRawShape;
 
-async function handleSubmitVerificationSignal(
-  request: IncomingMessage,
-  response: ServerResponse,
-  harnessUrl: string,
-): Promise<void> {
-  try {
-    const raw = await readRequestBody(request);
-    let parsedBody: unknown;
-    try {
-      parsedBody = raw.length === 0 ? undefined : JSON.parse(raw);
-    } catch {
-      throw new SubmitVerificationSignalValidationError('Request body must be valid JSON', 400);
-    }
+/**
+ * Builds the Spool MCP server (Meridian IDEA-137): a real stdio JSON-RPC `McpServer` exposing
+ * the 9 existing tool handlers with explicit Zod input schemas. Each handler still calls the
+ * tool's existing `parse*Input` function and business-logic function unchanged; only the
+ * transport and result-shaping are new.
+ */
+export function createMcpServer(storeUrl = process.env.SPOOL_STORE_URL ?? 'http://localhost:3000'): McpServer {
+  const server = new McpServer({ name: 'spool-mcp', version: '0.1.0' });
 
-    const input = parseSubmitVerificationSignalInput(parsedBody);
-    const signal = await submitVerificationSignal(input, harnessUrl);
-    sendJson(response, 201, signal);
-  } catch (error) {
-    if (error instanceof RequestBodyError || error instanceof SubmitVerificationSignalValidationError) {
-      sendJson(response, error.statusCode, { message: error.message });
-      return;
-    }
+  server.registerTool(
+    'capture-chunk',
+    {
+      title: 'Capture Chunk',
+      description:
+        'Captures a chunk on behalf of a human stakeholder by delegating to the store (tokenless, delegated auth tier).',
+      inputSchema: captureChunkInputSchema,
+    },
+    async (args) =>
+      runTool('capture-chunk', async () => {
+        const input = parseCaptureChunkInput(args);
+        return captureChunk(input, storeUrl);
+      }),
+  );
 
-    const reason = error instanceof Error ? error.message : 'Unknown error';
-    logDiagnostic('error', 'submit-verification-signal tool call failed', { reason });
-    sendJson(response, 502, { message: 'Failed to reach the store' });
-  }
-}
+  server.registerTool(
+    'create-branch',
+    {
+      title: 'Create Branch',
+      description: 'Creates a new branch for a discipline on behalf of a human stakeholder (tokenless, delegated auth tier).',
+      inputSchema: createBranchInputSchema,
+    },
+    async (args) =>
+      runTool('create-branch', async () => {
+        const input = parseCreateBranchInput(args);
+        return createBranch(input, storeUrl);
+      }),
+  );
 
-async function handleUploadArtifact(
-  request: IncomingMessage,
-  response: ServerResponse,
-  harnessUrl: string,
-): Promise<void> {
-  try {
-    const raw = await readRequestBody(request);
-    let parsedBody: unknown;
-    try {
-      parsedBody = raw.length === 0 ? undefined : JSON.parse(raw);
-    } catch {
-      throw new UploadArtifactValidationError('Request body must be valid JSON', 400);
-    }
+  server.registerTool(
+    'create-edge',
+    {
+      title: 'Create Edge',
+      description: 'Creates a typed relationship edge between two chunks (tokenless, delegated auth tier).',
+      inputSchema: createEdgeInputSchema,
+    },
+    async (args) =>
+      runTool('create-edge', async () => {
+        const input = parseCreateEdgeInput(args);
+        return createEdge(input, storeUrl);
+      }),
+  );
 
-    const input = parseUploadArtifactInput(parsedBody);
-    const artifact = await uploadArtifact(input, harnessUrl);
-    sendJson(response, 201, artifact);
-  } catch (error) {
-    if (error instanceof RequestBodyError || error instanceof UploadArtifactValidationError) {
-      sendJson(response, error.statusCode, { message: error.message });
-      return;
-    }
+  server.registerTool(
+    'submit-suggestion',
+    {
+      title: 'Submit Suggestion',
+      description: 'Submits a chunk or edge suggestion for later review (tokenless, delegated auth tier).',
+      inputSchema: submitSuggestionInputSchema,
+    },
+    async (args) =>
+      runTool('submit-suggestion', async () => {
+        const input = parseSubmitSuggestionInput(args);
+        return submitSuggestion(input, storeUrl);
+      }),
+  );
 
-    const reason = error instanceof Error ? error.message : 'Unknown error';
-    logDiagnostic('error', 'upload-artifact tool call failed', { reason });
-    sendJson(response, 502, { message: 'Failed to reach the store' });
-  }
-}
+  server.registerTool(
+    'submit-verification-signal',
+    {
+      title: 'Submit Verification Signal',
+      description: 'Submits a pass/fail verification signal for a branch (tokenless, delegated auth tier).',
+      inputSchema: submitVerificationSignalInputSchema,
+    },
+    async (args) =>
+      runTool('submit-verification-signal', async () => {
+        const input = parseSubmitVerificationSignalInput(args);
+        return submitVerificationSignal(input, storeUrl);
+      }),
+  );
 
-async function handleAttachArtifactToChunk(
-  request: IncomingMessage,
-  response: ServerResponse,
-  harnessUrl: string,
-): Promise<void> {
-  try {
-    const raw = await readRequestBody(request);
-    let parsedBody: unknown;
-    try {
-      parsedBody = raw.length === 0 ? undefined : JSON.parse(raw);
-    } catch {
-      throw new AttachArtifactToChunkValidationError('Request body must be valid JSON', 400);
-    }
+  server.registerTool(
+    'upload-artifact',
+    {
+      title: 'Upload Artifact',
+      description: 'Uploads a base64-encoded artifact on behalf of a human stakeholder (tokenless, delegated auth tier).',
+      inputSchema: uploadArtifactInputSchema,
+    },
+    async (args) =>
+      runTool('upload-artifact', async () => {
+        const input = parseUploadArtifactInput(args);
+        return uploadArtifact(input, storeUrl);
+      }),
+  );
 
-    const input = parseAttachArtifactToChunkInput(parsedBody);
-    const association = await attachArtifactToChunk(input, harnessUrl);
-    sendJson(response, 201, association);
-  } catch (error) {
-    if (error instanceof RequestBodyError || error instanceof AttachArtifactToChunkValidationError) {
-      sendJson(response, error.statusCode, { message: error.message });
-      return;
-    }
+  server.registerTool(
+    'attach-artifact-to-chunk',
+    {
+      title: 'Attach Artifact To Chunk',
+      description: 'Attaches a previously uploaded artifact to a chunk (tokenless, delegated auth tier).',
+      inputSchema: attachArtifactToChunkInputSchema,
+    },
+    async (args) =>
+      runTool('attach-artifact-to-chunk', async () => {
+        const input = parseAttachArtifactToChunkInput(args);
+        return attachArtifactToChunk(input, storeUrl);
+      }),
+  );
 
-    const reason = error instanceof Error ? error.message : 'Unknown error';
-    logDiagnostic('error', 'attach-artifact-to-chunk tool call failed', { reason });
-    sendJson(response, 502, { message: 'Failed to reach the store' });
-  }
-}
+  server.registerTool(
+    'search-chunks',
+    {
+      title: 'Search Chunks',
+      description: 'Searches chunks within a workspace; requires a human-authenticated session token.',
+      inputSchema: searchChunksInputSchema,
+    },
+    async (args) =>
+      runTool('search-chunks', async () => {
+        const input = parseSearchChunksInput(args);
+        return searchChunks(input, storeUrl);
+      }),
+  );
 
-async function handleSearchChunks(
-  request: IncomingMessage,
-  response: ServerResponse,
-  harnessUrl: string,
-): Promise<void> {
-  try {
-    const raw = await readRequestBody(request);
-    let parsedBody: unknown;
-    try {
-      parsedBody = raw.length === 0 ? undefined : JSON.parse(raw);
-    } catch {
-      throw new SearchChunksValidationError('Request body must be valid JSON', 400);
-    }
+  server.registerTool(
+    'get-neighbourhood',
+    {
+      title: 'Get Neighbourhood',
+      description: 'Returns a chunk and its typed-edge neighbours; requires a human-authenticated session token.',
+      inputSchema: getNeighbourhoodInputSchema,
+    },
+    async (args) =>
+      runTool('get-neighbourhood', async () => {
+        const input = parseGetNeighbourhoodInput(args);
+        return getNeighbourhood(input, storeUrl);
+      }),
+  );
 
-    const input = parseSearchChunksInput(parsedBody);
-    const result = await searchChunks(input, harnessUrl);
-    sendJson(response, 200, result);
-  } catch (error) {
-    if (error instanceof RequestBodyError || error instanceof SearchChunksValidationError) {
-      sendJson(response, error.statusCode, { message: error.message });
-      return;
-    }
-
-    const reason = error instanceof Error ? error.message : 'Unknown error';
-    logDiagnostic('error', 'search-chunks tool call failed', { reason });
-    sendJson(response, 502, { message: 'Failed to reach the store' });
-  }
-}
-
-async function handleGetNeighbourhood(
-  request: IncomingMessage,
-  response: ServerResponse,
-  harnessUrl: string,
-): Promise<void> {
-  try {
-    const raw = await readRequestBody(request);
-    let parsedBody: unknown;
-    try {
-      parsedBody = raw.length === 0 ? undefined : JSON.parse(raw);
-    } catch {
-      throw new GetNeighbourhoodValidationError('Request body must be valid JSON', 400);
-    }
-
-    const input = parseGetNeighbourhoodInput(parsedBody);
-    const result = await getNeighbourhood(input, harnessUrl);
-    sendJson(response, 200, result);
-  } catch (error) {
-    if (error instanceof RequestBodyError || error instanceof GetNeighbourhoodValidationError) {
-      sendJson(response, error.statusCode, { message: error.message });
-      return;
-    }
-
-    const reason = error instanceof Error ? error.message : 'Unknown error';
-    logDiagnostic('error', 'get-neighbourhood tool call failed', { reason });
-    sendJson(response, 502, { message: 'Failed to reach the store' });
-  }
-}
-
-export function createMcpHttpServer(
-  harnessUrl = process.env.HARNESS_URL ?? 'http://localhost:3000',
-): Server {
-  return createServer((request: IncomingMessage, response: ServerResponse) => {
-    if (request.method === 'POST' && request.url === CAPTURE_CHUNK_ROUTE) {
-      void handleCaptureChunk(request, response, harnessUrl);
-      return;
-    }
-
-    if (request.method === 'POST' && request.url === CREATE_BRANCH_ROUTE) {
-      void handleCreateBranch(request, response, harnessUrl);
-      return;
-    }
-
-    if (request.method === 'POST' && request.url === CREATE_EDGE_ROUTE) {
-      void handleCreateEdge(request, response, harnessUrl);
-      return;
-    }
-
-    if (request.method === 'POST' && request.url === SUBMIT_SUGGESTION_ROUTE) {
-      void handleSubmitSuggestion(request, response, harnessUrl);
-      return;
-    }
-
-    if (request.method === 'POST' && request.url === SUBMIT_VERIFICATION_SIGNAL_ROUTE) {
-      void handleSubmitVerificationSignal(request, response, harnessUrl);
-      return;
-    }
-
-    if (request.method === 'POST' && request.url === UPLOAD_ARTIFACT_ROUTE) {
-      void handleUploadArtifact(request, response, harnessUrl);
-      return;
-    }
-
-    if (request.method === 'POST' && request.url === ATTACH_ARTIFACT_TO_CHUNK_ROUTE) {
-      void handleAttachArtifactToChunk(request, response, harnessUrl);
-      return;
-    }
-
-    if (request.method === 'POST' && request.url === SEARCH_CHUNKS_ROUTE) {
-      void handleSearchChunks(request, response, harnessUrl);
-      return;
-    }
-
-    if (request.method === 'POST' && request.url === GET_NEIGHBOURHOOD_ROUTE) {
-      void handleGetNeighbourhood(request, response, harnessUrl);
-      return;
-    }
-
-    response.writeHead(200, { 'content-type': 'application/json' });
-    response.end(JSON.stringify(createMcpHealthResponse(harnessUrl)));
-  });
+  return server;
 }

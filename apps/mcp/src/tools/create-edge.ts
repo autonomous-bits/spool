@@ -125,10 +125,10 @@ function extractErrorMessage(body: unknown, fallback: string): string {
  */
 export async function createEdge(
   input: CreateEdgeInput,
-  harnessUrl: string,
+  storeUrl: string,
 ): Promise<CreateEdgeResult> {
   const { workspaceId, ...body } = input;
-  const response = await fetch(`${harnessUrl}/edges`, {
+  const response = await fetch(`${storeUrl}/edges`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-workspace-id': workspaceId },
     body: JSON.stringify(body),

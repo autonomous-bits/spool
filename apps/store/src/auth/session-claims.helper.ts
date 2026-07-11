@@ -1,5 +1,6 @@
 import { UnauthorizedException } from '@nestjs/common';
-import { InvalidSessionTokenError, SessionTokenService, type SessionTokenClaims } from './session-token.service.js';
+import type { SessionTokenService} from './session-token.service.js';
+import { InvalidSessionTokenError, type SessionTokenClaims } from './session-token.service.js';
 
 /**
  * Extracts and verifies a bearer session token from an `Authorization` header, shared by every

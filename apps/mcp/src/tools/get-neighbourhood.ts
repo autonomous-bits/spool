@@ -72,7 +72,7 @@ function optionalNumberField(record: Record<string, unknown>, field: string): nu
   if (typeof record[field] !== 'number') {
     throw new GetNeighbourhoodValidationError(`${field} must be a number`, 400);
   }
-  return record[field] as number;
+  return record[field];
 }
 
 export function parseGetNeighbourhoodInput(body: unknown): GetNeighbourhoodInput {
@@ -102,7 +102,7 @@ function extractErrorMessage(body: unknown, fallback: string): string {
     typeof body === 'object' &&
     body !== null &&
     'message' in body &&
-    typeof (body as any).message === 'string'
+    typeof (body).message === 'string'
   ) {
     return (body as { message: string }).message;
   }
@@ -111,15 +111,13 @@ function extractErrorMessage(body: unknown, fallback: string): string {
 
 export async function getNeighbourhood(
   input: GetNeighbourhoodInput,
-  harnessUrl: string,
+  storeUrl: string,
 ): Promise<GetNeighbourhoodResult> {
   const { id, sessionToken, workspaceId, ...queryParams } = input;
   
-  const url = new URL(`${harnessUrl}/chunks/${id}/neighbourhood`);
+  const url = new URL(`${storeUrl}/chunks/${id}/neighbourhood`);
   for (const [key, value] of Object.entries(queryParams)) {
-    if (value !== undefined) {
-      url.searchParams.append(key, String(value));
-    }
+    url.searchParams.append(key, String(value));
   }
 
   const response = await fetch(url.toString(), {

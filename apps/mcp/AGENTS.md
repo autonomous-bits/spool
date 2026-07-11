@@ -42,3 +42,27 @@ Build before relying on the local MCP server binary:
 ```sh
 pnpm build
 ```
+
+## Client configuration (stdio transport)
+
+`apps/mcp` is a real stdio JSON-RPC MCP server (Meridian IDEA-137): `main.ts` connects a
+`McpServer` to a `StdioServerTransport` over the process's stdin/stdout. There is no HTTP surface
+(no `GET /health`) — a client spawns `node dist/main.js` as a child process and speaks MCP over
+its stdio streams.
+
+Both the workspace-level `.mcp.json` (GitHub Copilot CLI) and `.vscode/mcp.json` (VS Code) at the
+repo root register a `spool` server entry with an explicit `cwd` pointing at the compiled output,
+since the entrypoint is resolved relative to the spawned process's working directory:
+
+```json
+{
+  "type": "stdio",
+  "command": "node",
+  "args": ["main.js"],
+  "cwd": "/absolute/path/to/spool/apps/mcp/dist",
+  "env": { "SPOOL_STORE_URL": "http://localhost:3000" }
+}
+```
+
+Run `pnpm --filter mcp build` (or `pnpm build` from the repo root) before starting a client that
+spawns this entrypoint, or it will run stale compiled code.

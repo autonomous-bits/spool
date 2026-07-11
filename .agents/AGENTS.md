@@ -19,6 +19,6 @@ The core domain model is tenant-scoped idea chunks plus typed relationships in P
 ## Local MCP configuration
 
 - This repository includes a workspace-level `.mcp.json` for GitHub Copilot CLI and a matching `.vscode/mcp.json` for VS Code compatibility.
-- The `spool` MCP server starts with `node apps/mcp/dist/main.js` and reads from the harness via `HARNESS_URL=http://localhost:3000`.
+- The `spool` MCP server starts with `node apps/mcp/dist/main.js` and reads from the store via `SPOOL_STORE_URL=http://localhost:3000`.
 - When MCP access is relevant, prefer the local `spool` server for Spool context.
 - If the MCP server binary is missing, build `apps/mcp` before relying on MCP tools.
