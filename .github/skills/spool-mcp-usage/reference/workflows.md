@@ -1,9 +1,11 @@
 # Common workflows
 
-Concrete tool sequences for the most frequent Spool MCP tasks. All examples assume you already
-hold a `workspaceId`, `stakeholderId` (for delegated tools), and, where noted, a `sessionToken`
-(for session tools) — load these from `.spool/context.json` (see SKILL.md) before starting any
-workflow below, and update that file whenever a step changes the branch state.
+Concrete tool sequences for the most frequent Spool MCP tasks. All examples assume the MCP
+process is already configured with `SPOOL_WORKSPACE_ID` (and, for headless/CI use, a
+`SPOOL_SESSION_TOKEN` override) — no tool call needs `workspaceId`, `stakeholderId`, or a session
+token as an argument. Load `currentBranchId`/`availableBranches` from `.spool/context.json` (see
+SKILL.md) before starting any workflow below, and update that file whenever a step changes the
+branch state.
 
 ## Capture a new idea chunk on a draft branch
 
@@ -49,7 +51,7 @@ that the store's own lifecycle logic consumes.
 
 ## Error handling
 
-Every delegated/session tool surfaces the store's own 4xx message unchanged (e.g. unknown
+Every `spool-*` tool surfaces the store's own 4xx message unchanged (e.g. unknown
 vocabulary value, missing workspace membership, unknown chunk/branch). Treat these as
 authoritative — do not retry with guessed valid values; surface the store's message to the human
 or re-query (e.g. `spool-search-chunks`) to find a valid target first.

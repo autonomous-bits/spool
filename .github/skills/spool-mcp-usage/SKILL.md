@@ -5,72 +5,85 @@ description: >
   branches/edges, submitting suggestions, uploading artifacts, and verifying branches. Use
   when an agent needs to call any `spool-*` MCP tool.
 metadata:
-  version: "1.0"
-  compatibility: "apps/mcp spool MCP server (stdio), local store at SPOOL_STORE_URL"
+  version: "2.0"
+  compatibility: "apps/mcp spool MCP server (stdio), unified process-level auth"
 ---
 
 # Spool MCP usage
 
-The `spool` MCP server (`apps/mcp`) exposes tools split across two auth tiers. Pick the right
-reference before calling a tool:
+All 9 `spool-*` tools authenticate identically. None of them accept `stakeholderId`,
+`workspaceId`, or `sessionToken` as a per-call input; every call goes through the MCP process's
+shared
+`storeFetch` helper (`apps/mcp/src/store-client.ts`), which injects `Authorization: Bearer
+<sessionToken>` and `X-Workspace-Id` on every request. Pick the right reference:
 
-- [Delegated (tokenless) tools](./reference/delegated-tools.md) — `spool-create-branch`,
-  `spool-capture-chunk`, `spool-create-edge`, `spool-submit-suggestion`,
-  `spool-submit-verification-signal`, `spool-upload-artifact`,
-  `spool-attach-artifact-to-chunk`. Require `stakeholderId` + `workspaceId`.
-- [Session (human-token) tools](./reference/session-tools.md) — `spool-search-chunks`,
-  `spool-get-neighbourhood`. Require a pre-obtained `sessionToken` + `workspaceId`.
+- [Write tools](./reference/write-tools.md) — `spool-create-branch`, `spool-capture-chunk`,
+  `spool-create-edge`, `spool-submit-suggestion`, `spool-submit-verification-signal`,
+  `spool-upload-artifact`, `spool-attach-artifact-to-chunk`.
+- [Read tools](./reference/read-tools.md) — `spool-search-chunks`, `spool-get-neighbourhood`.
 - [Common workflows](./reference/workflows.md) — end-to-end tool sequences for capturing
   chunks, relating chunks, submitting suggestions, attaching artifacts, and recording
   verification signals.
 
-## Prerequisite
+## Prerequisite: process-level auth, not per-call auth
 
-The store validates every call against a `workspace_memberships` row for `workspaceId` +
-`stakeholderId` (or the token's `workspaceId` claim). The workspace and the stakeholder's
-membership must already exist — no `spool-*` tool creates them. Use the **meridian** MCP
-server's `create_workspace`, `register_stakeholder`, and `add_workspace_member` tools first, or
-confirm the IDs with a human, or every `spool-*` call fails with a 403.
+The MCP process needs, at startup:
 
-## Local context cache (load before every `spool-*` call)
+- `SPOOL_WORKSPACE_ID` (required) — the workspace every tool call is scoped to for this process's
+  lifetime. There is no way to target a different workspace from a single running MCP server; a
+  different workspace means a different server config (see `.mcp.json`/`.vscode/mcp.json`).
+- `SPOOL_SESSION_TOKEN` (optional override) — set only for headless/CI contexts. When present, it
+  is used verbatim on every call and the interactive login below is skipped entirely.
 
-The repo root keeps a gitignored `.spool/context.json` cache with the IDs needed for delegated
-calls:
+Without an override, the server authenticates via GitHub OAuth (`apps/mcp/src/auth/login-flow.ts`):
+on first use (or once cached credentials expire and can't be refreshed) it opens a browser to the
+store's `/auth/github/login`, waits on a local loopback callback, exchanges the resulting pairing
+code at `/auth/github/pairing/exchange`, and caches the resulting session/refresh tokens in the OS
+keyring (`apps/mcp/src/auth/token-cache.ts`, service `spool-mcp`, keyed by store URL + workspace
+id). Subsequent calls reuse or silently refresh that cached token — no repeated browser prompts.
+
+The workspace itself (and the calling stakeholder's membership in it) must already exist — no
+`spool-*` tool creates either. Use the **meridian** MCP server's `create_workspace` and
+`add_workspace_member` tools, or the store's human-only workspace REST API (see the
+`spool-workspace-rest` skill), or confirm the IDs with a human first. A 403 from any `spool-*`
+call most often means the token's stakeholder isn't a member of `SPOOL_WORKSPACE_ID`.
+
+## Local context cache (branch tracking only)
+
+The repo root keeps a gitignored `.spool/context.json` cache for **branch bookkeeping only**
+(`workspaceId`/`stakeholderId` are process-level env config, not per-call/per-agent state, so
+they don't belong in this file):
 
 ```json
 {
-  "workspaceId": "...",
-  "workspaceName": "...",
-  "stakeholderId": "...",
-  "stakeholderName": "...",
   "currentBranchId": "... or null",
   "availableBranches": [{ "id": "...", "name": "...", "discipline": "...", "status": "..." }],
   "updatedAt": "..."
 }
 ```
 
-- **Always read `.spool/context.json` before making any `spool-*` MCP call.** Never guess or
-  re-derive `workspaceId`/`stakeholderId` from conversation history alone.
-- If the file is missing, empty, or its `workspaceId`/`stakeholderId` can't be confirmed still
-  valid, resolve them (ask the human, or query the store/meridian) before proceeding, then write
-  the resolved values back to the file.
+- Read it before scoping a new chunk/edge write to a branch, so you reuse an existing draft
+  branch instead of creating a redundant one.
 - After `spool-create-branch` succeeds, or after deliberately switching branches, update
   `currentBranchId` and refresh `availableBranches` in the file immediately — don't let it go
   stale.
 - This file is local scratch state (gitignored via `.spool/`), not committed content — never rely
-  on it being present in a fresh clone or CI, and never put secrets in it.
+  on it being present in a fresh clone or CI, and never put secrets (tokens) in it; tokens live
+  only in the OS keyring via the token cache, never in this file.
 
 ## Checklist
 
-- [ ] Load `.spool/context.json` first; resolve and persist `workspaceId`/`stakeholderId` if
-      missing or stale.
-- [ ] Confirm the tool's auth tier and gather `workspaceId` (+ `stakeholderId` or
-      `sessionToken`) before calling.
+- [ ] Confirm `SPOOL_WORKSPACE_ID` is set for the running MCP process (check `.mcp.json`); don't
+      look for a per-call `workspaceId`/`stakeholderId` argument — none of the tools take one.
+- [ ] If a call fails auth, don't ask for a token — either it's `SPOOL_SESSION_TOKEN` (env,
+      headless override) or the interactive GitHub login handles it; a 403 is a membership
+      problem, not a missing-credential problem.
 - [ ] Search or inspect existing chunks/edges first (`spool-search-chunks`,
       `spool-get-neighbourhood`) to avoid duplicating content.
-- [ ] Default to scoping new writes to a draft branch: use `currentBranchId` from the context
-      cache, or create one with `spool-create-branch` first, unless a branchless/mainline write
-      is explicitly requested. Update the context cache with the branch you used.
+- [ ] Default to scoping new writes to a draft branch: use `currentBranchId` from
+      `.spool/context.json`, or create one with `spool-create-branch` first, unless a
+      branchless/mainline write is explicitly requested. Update the context cache with the
+      branch you used.
 - [ ] Treat store-surfaced 4xx errors (vocabulary, membership, not-found) as authoritative —
       don't re-guess valid values.
 - [ ] Build `apps/mcp` (`pnpm --filter mcp build`) before relying on the local server binary.
