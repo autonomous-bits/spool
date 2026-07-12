@@ -11,6 +11,7 @@ const WATCHED_AREAS = ["apps/store", "apps/mcp"];
 const CHECKS = [
     ["build", "pnpm build"],
     ["typecheck", "pnpm typecheck"],
+    ["lint", "pnpm lint"],
     ["test", "pnpm test"],
 ];
 const QA_TIMEOUT_MS = 5 * 60 * 1000;
@@ -195,6 +196,7 @@ function buildFixPrompt(errors, attempt) {
         ``,
         `- \`pnpm build\``,
         `- \`pnpm typecheck\``,
+        `- \`pnpm lint\``,
         `- \`pnpm test\``,
         ``,
         `Use \`pnpm test:store\` or \`pnpm test:mcp\` for targeted follow-up when appropriate. Run the store locally with Docker Compose, not directly on the host, unless explicitly requested. Do not modify unrelated code or weaken assertions to make tests pass.`,
@@ -216,7 +218,7 @@ const session = await joinSession({
                     `CI Gate extension is active for ${PROJECT_NAME}: ${WATCHED_AREAS.join(", ")}.`,
                     ``,
                     `Automated behavior — DO NOT bypass:`,
-                    `1. After every \`task\` tool call returns, this extension automatically runs the Spool workspace checks: \`pnpm build\`, \`pnpm typecheck\`, and \`pnpm test\`.`,
+                    `1. After every \`task\` tool call returns, this extension automatically runs the Spool workspace checks: \`pnpm build\`, \`pnpm typecheck\`, \`pnpm lint\`, and \`pnpm test\`.`,
                     `2. If checks fail, you will receive a new user turn instructing you to dispatch a fix sub-agent. Do so immediately, without further confirmation, using the prompt provided.`,
                     `3. The \`task_complete\` tool is gated: it will be denied until the most recent QA run is clean.`,
                     ``,

@@ -44,7 +44,7 @@ function requireEnvVar(env: NodeJS.ProcessEnv, name: string): string {
 }
 
 function readOptionalSessionTokenOverride(env: NodeJS.ProcessEnv): string | undefined {
-  const value = env['SPOOL_SESSION_TOKEN'];
+  const value = env.SPOOL_SESSION_TOKEN;
   if (value === undefined) {
     return undefined;
   }

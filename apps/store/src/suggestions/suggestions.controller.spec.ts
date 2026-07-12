@@ -16,8 +16,6 @@ const claims = {
   workspaceId: WORKSPACE_ID,
 } satisfies SessionTokenClaims;
 
-const AUTH_HEADER = 'Bearer signed-token';
-
 describe('SuggestionsController', () => {
   let controller: SuggestionsController;
   let service: Pick<SuggestionsService, 'create' | 'accept' | 'reject' | 'findById' | 'findAll'>;

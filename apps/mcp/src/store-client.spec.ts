@@ -9,7 +9,7 @@ import {
 } from './store-client.js';
 
 function envWith(overrides: Partial<Record<string, string>>): NodeJS.ProcessEnv {
-  return { ...overrides } as NodeJS.ProcessEnv;
+  return { ...overrides };
 }
 
 type EnsureAuthenticatedImplementation = (
@@ -211,7 +211,7 @@ describe('storeFetch', () => {
 
     const ensureAuthenticatedMock = vi
       .fn<EnsureAuthenticatedImplementation>()
-      .mockImplementationOnce(async () => ({
+      .mockImplementationOnce(() => Promise.resolve({
         sessionToken: 'session-token-1',
         workspaceId: 'workspace-1',
       }))

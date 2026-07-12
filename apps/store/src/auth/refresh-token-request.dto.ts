@@ -9,7 +9,7 @@ export function parseRefreshTokenRequest(body: unknown): RefreshTokenRequest {
     throw new BadRequestException('Missing or invalid refreshToken');
   }
 
-  const refreshToken = (body as Record<string, unknown>)['refreshToken'];
+  const refreshToken = (body as Record<string, unknown>).refreshToken;
   if (typeof refreshToken !== 'string' || refreshToken.trim().length === 0) {
     throw new BadRequestException('Missing or invalid refreshToken');
   }

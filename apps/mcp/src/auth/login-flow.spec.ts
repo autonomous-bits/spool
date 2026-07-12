@@ -107,6 +107,7 @@ describe('ensureAuthenticated', () => {
 
     const refreshedToken = buildSessionToken(nowSeconds + 900);
     const fetchImpl = vi.fn<FetchImplementation>().mockImplementation(async (input, init) => {
+      await Promise.resolve();
       expect(new URL(String(input)).pathname).toBe('/auth/github/refresh');
       expect(getBodyJson(init)).toEqual({ refreshToken: 'refresh-expired' });
       return jsonResponse({
@@ -149,6 +150,7 @@ describe('ensureAuthenticated', () => {
 
     const pairedToken = buildSessionToken(nowSeconds + 1_200);
     const fetchImpl = vi.fn<FetchImplementation>().mockImplementation(async (input, init) => {
+      await Promise.resolve();
       const url = new URL(String(input));
       if (url.pathname === '/auth/github/refresh') {
         expect(getBodyJson(init)).toEqual({ refreshToken: 'refresh-expired' });
@@ -191,6 +193,7 @@ describe('ensureAuthenticated', () => {
     const pairedToken = buildSessionToken(nowSeconds + 1_500);
     const stderrMessages: string[] = [];
     const fetchImpl = vi.fn<FetchImplementation>().mockImplementation(async (input, init) => {
+      await Promise.resolve();
       const url = new URL(String(input));
       expect(url.pathname).toBe('/auth/github/pairing/exchange');
       expect(getBodyJson(init)).toEqual({ code: 'pairing-code-2' });
@@ -245,6 +248,7 @@ describe('ensureAuthenticated', () => {
     const tokenCache = createInMemoryTokenCache();
     let callbackUrl: string | undefined;
     const openImpl = vi.fn<OpenImplementation>().mockImplementation(async (loginUrl) => {
+      await Promise.resolve();
       callbackUrl = new URL(loginUrl).searchParams.get('cliRedirectUri') ?? undefined;
     });
 
@@ -276,6 +280,7 @@ describe('ensureAuthenticated', () => {
     const tokenCache = createInMemoryTokenCache();
     const pairedToken = buildSessionToken(nowSeconds + 1_800);
     const fetchImpl = vi.fn<FetchImplementation>().mockImplementation(async (input, init) => {
+      await Promise.resolve();
       const url = new URL(String(input));
       expect(url.pathname).toBe('/auth/github/pairing/exchange');
       expect(getBodyJson(init)).toEqual({ code: 'pairing-code-3' });
@@ -372,6 +377,7 @@ describe('ensureAuthenticated', () => {
   it('runs independent interactive authentications for different store and workspace keys', async () => {
     const tokenCache = createInMemoryTokenCache();
     const fetchImpl = vi.fn<FetchImplementation>().mockImplementation(async (input, init) => {
+      await Promise.resolve();
       const url = new URL(String(input));
       expect(url.pathname).toBe('/auth/github/pairing/exchange');
       const body = getBodyJson(init);
@@ -444,6 +450,7 @@ describe('ensureAuthenticated', () => {
 
     const pairedToken = buildSessionToken(nowSeconds + 1_000);
     const fetchImpl = vi.fn<FetchImplementation>().mockImplementation(async (input, init) => {
+      await Promise.resolve();
       const url = new URL(String(input));
       if (url.pathname === '/auth/github/refresh') {
         expect(getBodyJson(init)).toEqual({ refreshToken: 'refresh-expired' });
@@ -481,6 +488,7 @@ describe('ensureAuthenticated', () => {
   it('throws a clear error when the pairing exchange response body is malformed', async () => {
     const tokenCache = createInMemoryTokenCache();
     const fetchImpl = vi.fn<FetchImplementation>().mockImplementation(async (input, init) => {
+      await Promise.resolve();
       const url = new URL(String(input));
       expect(url.pathname).toBe('/auth/github/pairing/exchange');
       expect(getBodyJson(init)).toEqual({ code: 'pairing-code-5' });
@@ -508,6 +516,7 @@ describe('ensureAuthenticated', () => {
   it('uses an explicit pairing exchange expiresAt value instead of decoding the session token', async () => {
     const tokenCache = createInMemoryTokenCache();
     const fetchImpl = vi.fn<FetchImplementation>().mockImplementation(async (input, init) => {
+      await Promise.resolve();
       const url = new URL(String(input));
       expect(url.pathname).toBe('/auth/github/pairing/exchange');
       expect(getBodyJson(init)).toEqual({ code: 'pairing-code-explicit-expiry' });
@@ -541,6 +550,7 @@ describe('ensureAuthenticated', () => {
   it('falls back to the hard-coded TTL when the pairing exchange token expiry is unavailable', async () => {
     const tokenCache = createInMemoryTokenCache();
     const fetchImpl = vi.fn<FetchImplementation>().mockImplementation(async (input, init) => {
+      await Promise.resolve();
       const url = new URL(String(input));
       expect(url.pathname).toBe('/auth/github/pairing/exchange');
       expect(getBodyJson(init)).toEqual({ code: 'pairing-code-fallback-ttl' });

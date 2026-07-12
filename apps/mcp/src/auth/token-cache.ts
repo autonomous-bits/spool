@@ -67,9 +67,9 @@ function parseCachedCredentials(serialized: string): CachedCredentials {
     throw new TypeError('cached credentials must be a JSON object');
   }
 
-  const sessionToken = parsed['sessionToken'];
-  const sessionTokenExpiresAt = parsed['sessionTokenExpiresAt'];
-  const refreshToken = parsed['refreshToken'];
+  const sessionToken = parsed.sessionToken;
+  const sessionTokenExpiresAt = parsed.sessionTokenExpiresAt;
+  const refreshToken = parsed.refreshToken;
 
   if (typeof sessionToken !== 'string' || sessionToken.length === 0) {
     throw new TypeError('cached credentials.sessionToken must be a non-empty string');
@@ -155,16 +155,16 @@ export function createInMemoryTokenCache(): TokenCache {
   const entries = new Map<string, string>();
 
   return {
-    async load(storeUrl: string, workspaceId: string): Promise<CachedCredentials | undefined> {
+    load(storeUrl: string, workspaceId: string): Promise<CachedCredentials | undefined> {
       const cacheKey = `${DEFAULT_SERVICE_NAME}::${buildAccountName(storeUrl, workspaceId)}`;
       const serialized = entries.get(cacheKey);
       if (serialized === undefined) {
-        return undefined;
+        return Promise.resolve(undefined);
       }
-      return parseCachedCredentials(serialized);
+      return Promise.resolve(parseCachedCredentials(serialized));
     },
 
-    async save(storeUrl: string, workspaceId: string, credentials: CachedCredentials): Promise<void> {
+    save(storeUrl: string, workspaceId: string, credentials: CachedCredentials): Promise<void> {
       const cacheKey = `${DEFAULT_SERVICE_NAME}::${buildAccountName(storeUrl, workspaceId)}`;
       entries.set(
         cacheKey,
@@ -174,11 +174,13 @@ export function createInMemoryTokenCache(): TokenCache {
           refreshToken: credentials.refreshToken,
         } satisfies CachedCredentials),
       );
+      return Promise.resolve();
     },
 
-    async clear(storeUrl: string, workspaceId: string): Promise<void> {
+    clear(storeUrl: string, workspaceId: string): Promise<void> {
       const cacheKey = `${DEFAULT_SERVICE_NAME}::${buildAccountName(storeUrl, workspaceId)}`;
       entries.delete(cacheKey);
+      return Promise.resolve();
     },
   };
 }

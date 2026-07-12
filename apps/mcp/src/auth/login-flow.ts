@@ -1,5 +1,4 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import type { AddressInfo } from 'node:net';
 import process from 'node:process';
 import open from 'open';
 import type { TokenCache } from './token-cache.js';
@@ -132,7 +131,7 @@ async function safeReadResponseText(response: Response): Promise<string | undefi
 
 async function parseJsonResponse(response: Response, context: string): Promise<unknown> {
   try {
-    return (await response.json()) as unknown;
+    return (await response.json());
   } catch (error) {
     throw new AuthenticationError(`${context} returned invalid JSON: ${formatError(error)}`, {
       cause: error,
@@ -145,9 +144,9 @@ function parseRefreshResponse(body: unknown): RefreshResponse {
     throw new AuthenticationError('Refresh response body must be a JSON object');
   }
 
-  const sessionToken = body['sessionToken'];
-  const refreshToken = body['refreshToken'];
-  const expiresAt = body['expiresAt'];
+  const sessionToken = body.sessionToken;
+  const refreshToken = body.refreshToken;
+  const expiresAt = body.expiresAt;
 
   if (!isNonEmptyString(sessionToken)) {
     throw new AuthenticationError('Refresh response body is missing a non-empty sessionToken');
@@ -167,9 +166,9 @@ function parsePairingExchangeResponse(body: unknown): PairingExchangeResponse {
     throw new AuthenticationError('Pairing exchange response body must be a JSON object');
   }
 
-  const sessionToken = body['sessionToken'];
-  const refreshToken = body['refreshToken'];
-  const expiresAt = body['expiresAt'];
+  const sessionToken = body.sessionToken;
+  const refreshToken = body.refreshToken;
+  const expiresAt = body.expiresAt;
 
   if (!isNonEmptyString(sessionToken)) {
     throw new AuthenticationError('Pairing exchange response body is missing a non-empty sessionToken');
@@ -199,7 +198,7 @@ function parseTokenEnvelope(token: string): ParsedTokenEnvelope | undefined {
       return undefined;
     }
 
-    const exp = parsed['exp'];
+    const exp = parsed.exp;
     if (!isPositiveInteger(exp)) {
       return undefined;
     }
@@ -321,7 +320,7 @@ export async function createLoopbackCallbackServer(
     settled = true;
     rejectCode?.(
       new AuthenticationError(
-        `Timed out waiting for the GitHub login callback after ${Math.round(options.timeoutMs / 1_000)} seconds`,
+        `Timed out waiting for the GitHub login callback after ${Math.round(options.timeoutMs / 1_000).toString()} seconds`,
       ),
     );
     void closeServer(server).catch(() => {
@@ -330,7 +329,7 @@ export async function createLoopbackCallbackServer(
   }, options.timeoutMs);
 
   return {
-    callbackUrl: `http://${options.host}:${(address as AddressInfo).port}${options.path}`,
+    callbackUrl: `http://${options.host}:${address.port.toString()}${options.path}`,
     waitForCode: async (): Promise<string> => codePromise,
     close: async (): Promise<void> => {
       if (timeout !== undefined) {
@@ -451,7 +450,7 @@ async function runInteractiveLogin(
       const responseText = await safeReadResponseText(response);
       const responseSuffix = responseText === undefined ? '' : `: ${responseText}`;
       throw new AuthenticationError(
-        `Interactive GitHub login failed: pairing-code exchange was rejected with HTTP ${response.status}${responseSuffix}. ` +
+        `Interactive GitHub login failed: pairing-code exchange was rejected with HTTP ${response.status.toString()}${responseSuffix}. ` +
           'Set SPOOL_SESSION_TOKEN to bypass interactive login in headless/CI contexts.',
       );
     }

@@ -44,12 +44,14 @@ describe('RefreshTokenService', () => {
   let pool: Pick<Pool, 'connect'>;
   let client: PoolClient;
   let clientQuery: ReturnType<typeof vi.fn<PoolClient['query']>>;
+  let clientRelease: ReturnType<typeof vi.fn<PoolClient['release']>>;
 
   beforeEach(async () => {
     clientQuery = vi.fn<PoolClient['query']>();
+    clientRelease = vi.fn<PoolClient['release']>();
     client = {
       query: clientQuery,
-      release: vi.fn<PoolClient['release']>(),
+      release: clientRelease,
     } as PoolClient;
     pool = {
       connect: vi.fn<Pool['connect']>().mockResolvedValue(client),
@@ -157,7 +159,7 @@ describe('RefreshTokenService', () => {
         [service.hashToken('old-refresh-token')],
       );
       expect(clientQuery).toHaveBeenNthCalledWith(3, 'COMMIT');
-      expect(client.release).toHaveBeenCalled();
+      expect(clientRelease).toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }

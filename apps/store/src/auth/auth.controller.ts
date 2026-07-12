@@ -51,11 +51,11 @@ export class AuthController {
     @Query('code') code: unknown,
     @Query('state') state: unknown,
     @Res({ passthrough: true }) response: RedirectResponse,
-  ): Promise<SessionTokenResponse | void> {
+  ): Promise<SessionTokenResponse | undefined> {
     const result = await this.authService.handleCallback(code, state);
     if (result.kind === 'redirect') {
       response.redirect(302, result.redirectUrl);
-      return;
+      return undefined;
     }
 
     return toSessionTokenResponse(result);

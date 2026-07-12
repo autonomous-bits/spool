@@ -9,7 +9,7 @@ export function parsePairingCodeExchangeRequest(body: unknown): PairingCodeExcha
     throw new BadRequestException('Missing or invalid code');
   }
 
-  const code = (body as Record<string, unknown>)['code'];
+  const code = (body as Record<string, unknown>).code;
   if (typeof code !== 'string' || code.trim().length === 0) {
     throw new BadRequestException('Missing or invalid code');
   }

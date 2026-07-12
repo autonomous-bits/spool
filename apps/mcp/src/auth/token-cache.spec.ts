@@ -22,14 +22,15 @@ function createStubKeyring(): TokenCacheKeyringClient {
   const entries = new Map<string, string>();
 
   return {
-    async getPassword(service: string, account: string): Promise<string | undefined> {
-      return entries.get(`${service}::${account}`);
+    getPassword(service: string, account: string): Promise<string | undefined> {
+      return Promise.resolve(entries.get(`${service}::${account}`));
     },
-    async setPassword(service: string, account: string, password: string): Promise<void> {
+    setPassword(service: string, account: string, password: string): Promise<void> {
       entries.set(`${service}::${account}`, password);
+      return Promise.resolve();
     },
-    async deletePassword(service: string, account: string): Promise<boolean> {
-      return entries.delete(`${service}::${account}`);
+    deletePassword(service: string, account: string): Promise<boolean> {
+      return Promise.resolve(entries.delete(`${service}::${account}`));
     },
   };
 }
@@ -125,14 +126,14 @@ describe('createTokenCache', () => {
   it('returns undefined and logs a warning when the stored value is malformed', async () => {
     const logger = { warn: vi.fn<(message: string) => void>() };
     const keyring: TokenCacheKeyringClient = {
-      async getPassword(): Promise<string> {
-        return '{"sessionToken":"ok","sessionTokenExpiresAt":"wrong-type"}';
+      getPassword(): Promise<string> {
+        return Promise.resolve('{"sessionToken":"ok","sessionTokenExpiresAt":"wrong-type"}');
       },
-      async setPassword(): Promise<void> {
-        throw new Error('not used in this test');
+      setPassword(): Promise<void> {
+        return Promise.reject(new Error('not used in this test'));
       },
-      async deletePassword(): Promise<boolean> {
-        return false;
+      deletePassword(): Promise<boolean> {
+        return Promise.resolve(false);
       },
     };
     const cache = createTokenCache({ keyring, logger });
