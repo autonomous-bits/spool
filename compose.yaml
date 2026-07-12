@@ -16,10 +16,20 @@ services:
       # Meridian IDEA-85: local-filesystem artifact blob storage on a Docker-named-volume,
       # accessed exclusively through the ArtifactBlobStore port (G08).
       ARTIFACT_BLOB_STORE_PATH: /usr/src/app/artifact-data
+      # Real GitHub OAuth App credentials (see repo-root .env, gitignored) — required because
+      # the initial /authorize redirect always targets real github.com (see below), unlike the
+      # token-exchange/user-lookup calls which are stubbed for Docker e2e.
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET}
       # Points HttpGithubOAuthClient's token-exchange/user-lookup calls at the local stub
       # (github-oauth-stub) below instead of live github.com, per G04.SG5's Docker e2e scope note.
       GITHUB_OAUTH_TOKEN_URL: http://github-oauth-stub:4001/login/oauth/access_token
       GITHUB_USER_API_URL: http://github-oauth-stub:4001/user
+      # auth-config.ts's default redirect_uri assumes the store's own listen port (3000), but
+      # this service is only reachable from the host via the published port below (3002:3000).
+      # Without this override, the redirect_uri sent to GitHub (and echoed back in the token
+      # exchange) points at the wrong port and login/token-exchange fails.
+      GITHUB_OAUTH_REDIRECT_URI: http://localhost:3002/auth/github/callback
       # Trusts the webhook-receiver-stub's self-signed cert (below) so DeliveryWorkerService's
       # outbound fetch (G14.SG3) can complete a genuine TLS handshake against it; the same cert
       # is baked into this image too via the "certs" additional build context below (see

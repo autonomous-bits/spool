@@ -29,18 +29,22 @@ function setExitCode(exitCode: number): void {
  * meridian/apps/mcp/src/main.ts's shutdown pattern: idempotent close on stdin end/close and
  * SIGINT/SIGTERM, non-zero exit only when the shutdown itself fails.
  *
- * Validates the host-held session token/workspace id (G19 SG1/SG2) before the server connects
- * its transport or registers any tool handler, so a missing/malformed `SPOOL_SESSION_TOKEN`/
- * `SPOOL_WORKSPACE_ID` fails fast instead of surfacing on the first `tools/call`.
+ * `loadStoreCredentials()` validates that `SPOOL_WORKSPACE_ID` (and, if set, `SPOOL_SESSION_TOKEN`)
+ * is present and well-formed before the transport connects, so malformed env vars still fail fast.
+ * The network/interactive authentication preflight (`runStartupAuthentication`) runs after
+ * `server.connect()` instead of before it: interactive GitHub login can take minutes, and running
+ * it ahead of connect() blocks the MCP initialize handshake long enough for clients' own connection
+ * timeouts to report "Failed to connect to MCP server" even though the process is alive and only
+ * waiting on the user.
  */
 async function runCli(): Promise<void> {
   const credentials = loadStoreCredentials();
-  await runStartupAuthentication({ storeUrl, credentials });
 
   const server = createMcpServer(storeUrl);
   const transport = new StdioServerTransport();
 
   await server.connect(transport);
+  await runStartupAuthentication({ storeUrl, credentials });
 
   let shuttingDown = false;
 
