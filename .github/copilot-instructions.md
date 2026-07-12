@@ -6,7 +6,6 @@ Spool is a TypeScript/NestJS monorepo for turning stakeholder chat into approved
 - `apps/mcp`: MCP server for agent-facing harness interactions. Allows agents discover, managage, and approve idea chunks and relationships.
 - `tools/`: shared scripts, codegen utilities, and CLI helpers used across the monorepo. Not application code — do not import from here in `apps/`.
 - `config/`: shared environment configuration (e.g. env templates, common runtime settings) consumed by apps and Docker Compose. Not secrets — use `.env` files for those.
-- `docs/product`: functional roadmap and deliverable specs for the harness.
 - `docs/architecture`: system architecture and engineering constraints.
 
 The core domain model is tenant-scoped idea chunks plus typed relationships in Postgres. Documents are generated projections from the graph, not the source of truth. The chunk lifecycle is `draft -> approved -> promoted`.
