@@ -31,7 +31,9 @@ describe('get-neighbourhood tool', () => {
     });
 
     it('throws when body is not an object', () => {
-      expect(() => parseGetNeighbourhoodInput('not-an-object')).toThrow(GetNeighbourhoodValidationError);
+      expect(() => parseGetNeighbourhoodInput('not-an-object')).toThrow(
+        GetNeighbourhoodValidationError,
+      );
       expect(() => parseGetNeighbourhoodInput(null)).toThrow(GetNeighbourhoodValidationError);
     });
 
@@ -41,7 +43,9 @@ describe('get-neighbourhood tool', () => {
     });
 
     it('throws when depth is not a number', () => {
-      expect(() => parseGetNeighbourhoodInput({ id: 'i', depth: '2' })).toThrow(GetNeighbourhoodValidationError);
+      expect(() => parseGetNeighbourhoodInput({ id: 'i', depth: '2' })).toThrow(
+        GetNeighbourhoodValidationError,
+      );
     });
   });
 
@@ -64,10 +68,7 @@ describe('get-neighbourhood tool', () => {
         json: vi.fn().mockResolvedValue(mockResult),
       });
 
-      const result = await getNeighbourhood(
-        { id: 'chunk-123', depth: 2 },
-        'http://localhost:3000',
-      );
+      const result = await getNeighbourhood({ id: 'chunk-123', depth: 2 }, 'http://localhost:3000');
 
       expect(result).toEqual(mockResult);
       expect(global.fetch).toHaveBeenCalledWith(
@@ -75,7 +76,7 @@ describe('get-neighbourhood tool', () => {
         expect.objectContaining({
           method: 'GET',
           headers: {
-            authorization: `Bearer test-session-token`,
+            authorization: 'Bearer test-session-token',
             'x-workspace-id': 'test-workspace-id',
           },
         }),
@@ -89,9 +90,9 @@ describe('get-neighbourhood tool', () => {
         json: vi.fn().mockResolvedValue({ message: 'Store said no' }),
       });
 
-      await expect(
-        getNeighbourhood({ id: 'chunk-123' }, 'http://localhost:3000'),
-      ).rejects.toThrow('Store said no');
+      await expect(getNeighbourhood({ id: 'chunk-123' }, 'http://localhost:3000')).rejects.toThrow(
+        'Store said no',
+      );
     });
 
     it('falls back to a generic error message if store body is malformed', async () => {
@@ -101,9 +102,9 @@ describe('get-neighbourhood tool', () => {
         json: vi.fn().mockRejectedValue(new Error('unparseable')),
       });
 
-      await expect(
-        getNeighbourhood({ id: 'chunk-123' }, 'http://localhost:3000'),
-      ).rejects.toThrow('Store rejected get-neighbourhood request (400)');
+      await expect(getNeighbourhood({ id: 'chunk-123' }, 'http://localhost:3000')).rejects.toThrow(
+        'Store rejected get-neighbourhood request (400)',
+      );
     });
   });
 });

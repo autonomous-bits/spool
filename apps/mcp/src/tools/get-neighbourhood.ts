@@ -7,7 +7,7 @@
  * 8 MCP tools.
  */
 
-import { getStoreAuthHeaders } from '../store-client.js';
+import { storeFetch } from '../store-client.js';
 
 export interface GetNeighbourhoodInput {
   id: string;
@@ -94,13 +94,13 @@ export function parseGetNeighbourhoodInput(body: unknown): GetNeighbourhoodInput
   const result: GetNeighbourhoodInput = {
     id: requireStringField(record, 'id'),
   };
-  
+
   const depth = optionalNumberField(record, 'depth');
   if (depth !== undefined) result.depth = depth;
-  
+
   const branchId = optionalStringField(record, 'branchId');
   if (branchId !== undefined) result.branchId = branchId;
-  
+
   return result;
 }
 
@@ -109,7 +109,7 @@ function extractErrorMessage(body: unknown, fallback: string): string {
     typeof body === 'object' &&
     body !== null &&
     'message' in body &&
-    typeof (body).message === 'string'
+    typeof body.message === 'string'
   ) {
     return (body as { message: string }).message;
   }
@@ -121,22 +121,24 @@ export async function getNeighbourhood(
   storeUrl: string,
 ): Promise<GetNeighbourhoodResult> {
   const { id, ...queryParams } = input;
-  
+
   const url = new URL(`${storeUrl}/chunks/${id}/neighbourhood`);
   for (const [key, value] of Object.entries(queryParams)) {
     url.searchParams.append(key, String(value));
   }
 
-  const response = await fetch(url.toString(), {
+  const response = await storeFetch(storeUrl, url, {
     method: 'GET',
-    headers: { ...getStoreAuthHeaders() },
   });
 
   const payload: unknown = await response.json().catch(() => undefined);
 
   if (!response.ok) {
     throw new GetNeighbourhoodValidationError(
-      extractErrorMessage(payload, `Store rejected get-neighbourhood request (${String(response.status)})`),
+      extractErrorMessage(
+        payload,
+        `Store rejected get-neighbourhood request (${String(response.status)})`,
+      ),
       response.status,
     );
   }

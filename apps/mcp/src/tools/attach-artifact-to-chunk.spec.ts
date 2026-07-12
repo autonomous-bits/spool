@@ -24,18 +24,19 @@ describe('parseAttachArtifactToChunkInput', () => {
   });
 
   it('rejects a non-object body', () => {
-    expect(() => parseAttachArtifactToChunkInput('nope')).toThrow(AttachArtifactToChunkValidationError);
-    expect(() => parseAttachArtifactToChunkInput(null)).toThrow(AttachArtifactToChunkValidationError);
+    expect(() => parseAttachArtifactToChunkInput('nope')).toThrow(
+      AttachArtifactToChunkValidationError,
+    );
+    expect(() => parseAttachArtifactToChunkInput(null)).toThrow(
+      AttachArtifactToChunkValidationError,
+    );
   });
 
-  it.each(['chunkLabel', 'artifactId'])(
-    'rejects a missing %s, never inventing one',
-    (field) => {
-      const body: Record<string, unknown> = { ...validBody };
-      Reflect.deleteProperty(body, field);
-      expect(() => parseAttachArtifactToChunkInput(body)).toThrow(new RegExp(field));
-    },
-  );
+  it.each(['chunkLabel', 'artifactId'])('rejects a missing %s, never inventing one', (field) => {
+    const body: Record<string, unknown> = { ...validBody };
+    Reflect.deleteProperty(body, field);
+    expect(() => parseAttachArtifactToChunkInput(body)).toThrow(new RegExp(field));
+  });
 
   it('rejects a blank required field', () => {
     const body = { ...validBody, artifactId: '   ' };
@@ -101,7 +102,11 @@ describe('attachArtifactToChunk', () => {
   });
 
   it('forwards branchId when provided and URL-encodes the chunk label', async () => {
-    const withBranch: AttachArtifactToChunkInput = { ...input, chunkLabel: 'IDEA/1', branchId: 'branch-1' };
+    const withBranch: AttachArtifactToChunkInput = {
+      ...input,
+      chunkLabel: 'IDEA/1',
+      branchId: 'branch-1',
+    };
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 201,

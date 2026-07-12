@@ -7,6 +7,7 @@ import { AuthService } from './auth.service.js';
 import { GITHUB_OAUTH_CLIENT } from './github-oauth-client.js';
 import { HttpGithubOAuthClient } from './http-github-oauth-client.js';
 import { OAuthStateService } from './oauth-state.service.js';
+import { RefreshTokenService } from './refresh-token.service.js';
 import { SessionTokenService } from './session-token.service.js';
 
 @Module({
@@ -17,6 +18,7 @@ import { SessionTokenService } from './session-token.service.js';
     { provide: GITHUB_OAUTH_CLIENT, useClass: HttpGithubOAuthClient },
     AuthService,
     OAuthStateService,
+    RefreshTokenService,
     SessionTokenService,
   ],
   exports: [SessionTokenService],

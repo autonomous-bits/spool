@@ -99,7 +99,7 @@ describe('store migrations (containerized Postgres)', () => {
     const migrationRows = await pool.query<{ count: string }>(
       'SELECT COUNT(*)::text AS count FROM schema_migrations',
     );
-    expect(migrationRows.rows[0]?.count).toBe('16');
+    expect(migrationRows.rows[0]?.count).toBe('18');
   });
 
   it('creates the suggestions table with the expected columns', async () => {
@@ -346,5 +346,68 @@ describe('store migrations (containerized Postgres)', () => {
     expect(byName.get('idx_feedback_notifications_stakeholder')).toContain(
       '(workspace_id, stakeholder_id, status)',
     );
+  });
+
+  it('creates the refresh_tokens table with the expected columns', async () => {
+    const result = await pool.query<{ column_name: string }>(
+      `SELECT column_name FROM information_schema.columns WHERE table_name = 'refresh_tokens'`,
+    );
+    const columns = result.rows.map((row) => row.column_name).sort();
+
+    expect(columns).toEqual(
+      [
+        'created_at',
+        'expires_at',
+        'id',
+        'replaced_by_id',
+        'revoked_at',
+        'stakeholder_id',
+        'token_hash',
+        'workspace_id',
+      ].sort(),
+    );
+  });
+
+  it('creates refresh_tokens indexes and foreign keys for stakeholder, workspace, and replacement chaining', async () => {
+    const indexes = await pool.query<{ indexname: string; indexdef: string }>(
+      `SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'refresh_tokens'`,
+    );
+    const byName = new Map(indexes.rows.map((row) => [row.indexname, row.indexdef]));
+
+    expect(byName.has('idx_refresh_tokens_token_hash')).toBe(true);
+    expect(byName.get('idx_refresh_tokens_token_hash')).toContain('(token_hash)');
+    expect(byName.has('idx_refresh_tokens_stakeholder')).toBe(true);
+    expect(byName.get('idx_refresh_tokens_stakeholder')).toContain('(stakeholder_id)');
+
+    const constraints = await pool.query<{ conname: string; confrelid: string }>(
+      `SELECT conname, confrelid::regclass::text AS confrelid
+         FROM pg_constraint
+        WHERE conrelid = 'refresh_tokens'::regclass
+          AND contype = 'f'`,
+    );
+    const foreignKeys = new Map(constraints.rows.map((row) => [row.conname, row.confrelid]));
+
+    expect(foreignKeys.get('refresh_tokens_stakeholder_id_fkey')).toBe('stakeholders');
+    expect(foreignKeys.get('refresh_tokens_workspace_id_fkey')).toBe('workspaces');
+    expect(foreignKeys.get('refresh_tokens_replaced_by_id_fkey')).toBe('refresh_tokens');
+  });
+
+  it('creates the pairing_codes table with the expected columns and lookup index', async () => {
+    const columnsResult = await pool.query<{ column_name: string }>(
+      `SELECT column_name FROM information_schema.columns WHERE table_name = 'pairing_codes'`,
+    );
+    const columns = columnsResult.rows.map((row) => row.column_name).sort();
+
+    expect(columns).toEqual(
+      ['code_hash', 'consumed_at', 'expires_at', 'id', 'refresh_token', 'session_token'].sort(),
+    );
+
+    const indexes = await pool.query<{ indexname: string; indexdef: string }>(
+      `SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'pairing_codes'`,
+    );
+    const byName = new Map(indexes.rows.map((row) => [row.indexname, row.indexdef]));
+
+    expect(byName.has('idx_pairing_codes_code_hash')).toBe(true);
+    expect(byName.get('idx_pairing_codes_code_hash')).toContain('(code_hash)');
   });
 });

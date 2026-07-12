@@ -12,6 +12,7 @@ function buildConfig(overrides: Partial<AuthConfig> = {}): AuthConfig {
     githubUserApiUrl: 'https://api.github.com/user',
     sessionTokenSecret: 'session-secret',
     sessionTokenMaxAgeSeconds: 900,
+    refreshTokenMaxAgeSeconds: 2_592_000,
     oauthStateSecret: 'state-secret',
     oauthStateMaxAgeSeconds: 600,
     ...overrides,

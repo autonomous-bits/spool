@@ -13,7 +13,7 @@
  * `branchId` path parameter. `status` is only required to be a non-empty string here so the store
  * remains the authoritative source for vocabulary validation.
  */
-import { getStoreAuthHeaders } from '../store-client.js';
+import { storeFetch } from '../store-client.js';
 
 export interface SubmitVerificationSignalInput {
   branchId: string;
@@ -74,7 +74,10 @@ export function parseSubmitVerificationSignalInput(body: unknown): SubmitVerific
   const reasonValue = record.reason;
   if (reasonValue !== undefined) {
     if (typeof reasonValue !== 'string') {
-      throw new SubmitVerificationSignalValidationError('reason must be a string when provided', 400);
+      throw new SubmitVerificationSignalValidationError(
+        'reason must be a string when provided',
+        400,
+      );
     }
     return {
       branchId,
@@ -114,11 +117,15 @@ export async function submitVerificationSignal(
   storeUrl: string,
 ): Promise<SubmitVerificationSignalResult> {
   const { branchId, verifierName, status, ...rest } = input;
-  const response = await fetch(`${storeUrl}/branches/${encodeURIComponent(branchId)}/verification-signals`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', ...getStoreAuthHeaders() },
-    body: JSON.stringify({ verifierName, status, ...rest }),
-  });
+  const response = await storeFetch(
+    storeUrl,
+    `/branches/${encodeURIComponent(branchId)}/verification-signals`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ verifierName, status, ...rest }),
+    },
+  );
 
   const payload: unknown = await response.json().catch(() => undefined);
 

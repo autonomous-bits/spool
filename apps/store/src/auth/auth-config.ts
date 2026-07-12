@@ -7,6 +7,8 @@ export interface AuthConfig {
   githubUserApiUrl: string;
   sessionTokenSecret: string;
   sessionTokenMaxAgeSeconds: number;
+  refreshTokenMaxAgeSeconds: number;
+  pairingCodeMaxAgeSeconds: number;
   oauthStateSecret: string;
   oauthStateMaxAgeSeconds: number;
 }
@@ -38,6 +40,14 @@ export function loadAuthConfig(env: NodeJS.ProcessEnv = process.env): AuthConfig
     env.SESSION_TOKEN_MAX_AGE_SECONDS ?? '900',
     10,
   );
+  const refreshTokenMaxAgeSeconds = Number.parseInt(
+    env.REFRESH_TOKEN_MAX_AGE_SECONDS ?? '2592000',
+    10,
+  );
+  const pairingCodeMaxAgeSeconds = Number.parseInt(
+    env.PAIRING_CODE_MAX_AGE_SECONDS ?? '120',
+    10,
+  );
   const oauthStateSecret = env.OAUTH_STATE_SECRET ?? 'dev-oauth-state-secret';
   const oauthStateMaxAgeSeconds = Number.parseInt(env.OAUTH_STATE_MAX_AGE_SECONDS ?? '600', 10);
 
@@ -50,6 +60,8 @@ export function loadAuthConfig(env: NodeJS.ProcessEnv = process.env): AuthConfig
     githubUserApiUrl,
     sessionTokenSecret,
     sessionTokenMaxAgeSeconds,
+    refreshTokenMaxAgeSeconds,
+    pairingCodeMaxAgeSeconds,
     oauthStateSecret,
     oauthStateMaxAgeSeconds,
   } satisfies AuthConfig;

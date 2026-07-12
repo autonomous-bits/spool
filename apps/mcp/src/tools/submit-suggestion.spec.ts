@@ -68,7 +68,11 @@ describe('parseSubmitSuggestionInput', () => {
   });
 
   it('does not itself validate the relationshipType/discipline vocabulary (defers to the store)', () => {
-    const body = { ...edgeBody, relationshipType: 'not-a-real-type', discipline: 'not-a-real-discipline' };
+    const body = {
+      ...edgeBody,
+      relationshipType: 'not-a-real-type',
+      discipline: 'not-a-real-discipline',
+    };
     expect(parseSubmitSuggestionInput(body)).toEqual(body);
   });
 });

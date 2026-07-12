@@ -10,7 +10,7 @@
  * them.
  */
 
-import { getStoreAuthHeaders } from '../store-client.js';
+import { storeFetch } from '../store-client.js';
 
 /** Untrusted-input shape mirroring the store's `CreateEdgeRequest` (apps/store/src/edges). */
 export interface CreateEdgeInput {
@@ -102,7 +102,7 @@ function extractErrorMessage(body: unknown, fallback: string): string {
     typeof body === 'object' &&
     body !== null &&
     'message' in body &&
-    typeof (body).message === 'string'
+    typeof body.message === 'string'
   ) {
     return (body as { message: string }).message;
   }
@@ -118,9 +118,9 @@ export async function createEdge(
   input: CreateEdgeInput,
   storeUrl: string,
 ): Promise<CreateEdgeResult> {
-  const response = await fetch(`${storeUrl}/edges`, {
+  const response = await storeFetch(storeUrl, '/edges', {
     method: 'POST',
-    headers: { 'content-type': 'application/json', ...getStoreAuthHeaders() },
+    headers: { 'content-type': 'application/json' },
     body: JSON.stringify(input),
   });
 
@@ -128,7 +128,10 @@ export async function createEdge(
 
   if (!response.ok) {
     throw new CreateEdgeValidationError(
-      extractErrorMessage(payload, `Store rejected create-edge request (${String(response.status)})`),
+      extractErrorMessage(
+        payload,
+        `Store rejected create-edge request (${String(response.status)})`,
+      ),
       response.status,
     );
   }

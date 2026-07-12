@@ -73,7 +73,7 @@ describe('search-chunks tool', () => {
         expect.objectContaining({
           method: 'GET',
           headers: {
-            authorization: `Bearer test-session-token`,
+            authorization: 'Bearer test-session-token',
             'x-workspace-id': 'test-workspace-id',
           },
         }),

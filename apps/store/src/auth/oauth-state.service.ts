@@ -10,23 +10,54 @@ export class InvalidOAuthStateError extends Error {
   }
 }
 
+export class InvalidCliRedirectUriError extends Error {
+  constructor(reason: string) {
+    super(`Invalid cliRedirectUri: ${reason}`);
+    this.name = 'InvalidCliRedirectUriError';
+  }
+}
+
+function validateCliRedirectUri(cliRedirectUri: string): string {
+  let url: URL;
+  try {
+    url = new URL(cliRedirectUri);
+  } catch {
+    throw new InvalidCliRedirectUriError('must be a valid absolute URL');
+  }
+
+  if (url.protocol !== 'http:') {
+    throw new InvalidCliRedirectUriError('must use the http:// scheme');
+  }
+
+  if (url.hostname !== '127.0.0.1' && url.hostname !== 'localhost') {
+    throw new InvalidCliRedirectUriError('must target localhost or 127.0.0.1');
+  }
+
+  return cliRedirectUri;
+}
+
 /**
  * Issues and verifies the GitHub OAuth `state` CSRF parameter as a self-contained, HMAC-signed,
  * short-lived token (Meridian IDEA-81: "validate state"). The store has no server-side session
  * store to look `state` up against, so `state` carries its own integrity and expiry instead of
  * being a bare random value checked against stored server state.
  *
- * G11 SG2 (Meridian IDEA-92/IDEA-101): `state` also round-trips the optional `workspaceId` query
- * param a caller supplied to `GET /auth/github/login`, so the callback can recover it after the
- * GitHub redirect round-trip without a server-side session store.
+ * G11 SG2 (Meridian IDEA-92/IDEA-101): `state` also round-trips the optional `workspaceId` and
+ * loopback-only `cliRedirectUri` query params a caller supplied to `GET /auth/github/login`, so
+ * the callback can recover them after the GitHub redirect round-trip without a server-side session
+ * store.
  */
 @Injectable()
 export class OAuthStateService {
   constructor(@Inject(AUTH_CONFIG) private readonly config: AuthConfig) {}
 
-  issue(workspaceId?: string): string {
+  issue(workspaceId?: string, cliRedirectUri?: string): string {
     return signHmacToken(
-      { workspaceId: workspaceId ?? null },
+      {
+        workspaceId: workspaceId ?? null,
+        cliRedirectUri:
+          cliRedirectUri === undefined ? null : validateCliRedirectUri(cliRedirectUri),
+      },
       this.config.oauthStateSecret,
       this.config.oauthStateMaxAgeSeconds,
     );
@@ -34,9 +65,9 @@ export class OAuthStateService {
 
   /**
    * Throws `InvalidOAuthStateError` if `state` is missing, malformed, tampered with, or expired.
-   * Returns the `workspaceId` embedded at `issue()` time (`null` if none was supplied).
+   * Returns the claims embedded at `issue()` time (`null` if omitted).
    */
-  verify(state: string | undefined): { workspaceId: string | null } {
+  verify(state: string | undefined): { workspaceId: string | null; cliRedirectUri: string | null } {
     if (state === undefined || state.trim().length === 0) {
       throw new InvalidOAuthStateError('missing state parameter');
     }
@@ -56,6 +87,23 @@ export class OAuthStateService {
       throw new InvalidOAuthStateError('state payload has an invalid workspaceId claim');
     }
 
-    return { workspaceId };
+    const cliRedirectUriClaim = claims.cliRedirectUri;
+    if (cliRedirectUriClaim !== null && typeof cliRedirectUriClaim !== 'string') {
+      throw new InvalidOAuthStateError('state payload has an invalid cliRedirectUri claim');
+    }
+
+    let cliRedirectUri: string | null = cliRedirectUriClaim;
+    if (cliRedirectUri !== null) {
+      try {
+        cliRedirectUri = validateCliRedirectUri(cliRedirectUri);
+      } catch (error) {
+        if (error instanceof InvalidCliRedirectUriError) {
+          throw new InvalidOAuthStateError('state payload has an invalid cliRedirectUri claim');
+        }
+        throw error;
+      }
+    }
+
+    return { workspaceId, cliRedirectUri };
   }
 }

@@ -6,7 +6,7 @@
  * derives authorship from the verified token's `stakeholderId` claim.
  */
 
-import { getStoreAuthHeaders } from '../store-client.js';
+import { storeFetch } from '../store-client.js';
 
 /** Untrusted-input shape mirroring the store's `CreateChunkRequest` (apps/store/src/chunks). */
 export interface CaptureChunkInput {
@@ -98,7 +98,7 @@ function extractErrorMessage(body: unknown, fallback: string): string {
     typeof body === 'object' &&
     body !== null &&
     'message' in body &&
-    typeof (body).message === 'string'
+    typeof body.message === 'string'
   ) {
     return (body as { message: string }).message;
   }
@@ -114,9 +114,9 @@ export async function captureChunk(
   input: CaptureChunkInput,
   storeUrl: string,
 ): Promise<CaptureChunkResult> {
-  const response = await fetch(`${storeUrl}/chunks`, {
+  const response = await storeFetch(storeUrl, '/chunks', {
     method: 'POST',
-    headers: { 'content-type': 'application/json', ...getStoreAuthHeaders() },
+    headers: { 'content-type': 'application/json' },
     body: JSON.stringify(input),
   });
 
@@ -124,7 +124,10 @@ export async function captureChunk(
 
   if (!response.ok) {
     throw new CaptureChunkValidationError(
-      extractErrorMessage(payload, `Store rejected capture-chunk request (${String(response.status)})`),
+      extractErrorMessage(
+        payload,
+        `Store rejected capture-chunk request (${String(response.status)})`,
+      ),
       response.status,
     );
   }

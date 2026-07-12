@@ -6,7 +6,7 @@
  * id, and the store derives authorship from the verified token's `stakeholderId` claim.
  */
 
-import { getStoreAuthHeaders } from '../store-client.js';
+import { storeFetch } from '../store-client.js';
 
 /** Untrusted-input shape mirroring the store's `CreateBranchRequest` (apps/store/src/branches). */
 export interface CreateBranchInput {
@@ -69,7 +69,7 @@ function extractErrorMessage(body: unknown, fallback: string): string {
     typeof body === 'object' &&
     body !== null &&
     'message' in body &&
-    typeof (body).message === 'string'
+    typeof body.message === 'string'
   ) {
     return (body as { message: string }).message;
   }
@@ -86,9 +86,9 @@ export async function createBranch(
   input: CreateBranchInput,
   storeUrl: string,
 ): Promise<CreateBranchResult> {
-  const response = await fetch(`${storeUrl}/branches`, {
+  const response = await storeFetch(storeUrl, '/branches', {
     method: 'POST',
-    headers: { 'content-type': 'application/json', ...getStoreAuthHeaders() },
+    headers: { 'content-type': 'application/json' },
     body: JSON.stringify(input),
   });
 
@@ -96,7 +96,10 @@ export async function createBranch(
 
   if (!response.ok) {
     throw new CreateBranchValidationError(
-      extractErrorMessage(payload, `Store rejected create-branch request (${String(response.status)})`),
+      extractErrorMessage(
+        payload,
+        `Store rejected create-branch request (${String(response.status)})`,
+      ),
       response.status,
     );
   }

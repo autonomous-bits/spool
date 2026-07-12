@@ -9,6 +9,8 @@ import { DeliverySubscriptionRepository } from '../../src/persistence/delivery-s
 import { WorkspaceRepository } from '../../src/persistence/workspace.repository.js';
 import { setUpTestDatabase, type TestDatabase } from '../support/test-database.js';
 
+const FULL_QUEUE_CLAIM_LIMIT = 1_000_000;
+
 describe('DeliveryAttemptRepository (containerized Postgres)', () => {
   let database: TestDatabase;
   let pool: Pool;
@@ -68,6 +70,11 @@ describe('DeliveryAttemptRepository (containerized Postgres)', () => {
     return id;
   }
 
+  async function claimAttempt(id: string): Promise<void> {
+    const claimed = await repository.claimBatch(FULL_QUEUE_CLAIM_LIMIT);
+    expect(claimed.find((attempt) => attempt.id === id)).toBeDefined();
+  }
+
   describe('createPending', () => {
     it('inserts a new pending delivery attempt', async () => {
       const subscriptionId = await seedSubscription();
@@ -114,7 +121,7 @@ describe('DeliveryAttemptRepository (containerized Postgres)', () => {
       const subscriptionId = await seedSubscription();
       const id = await seedPending(subscriptionId);
 
-      const claimed = await repository.claimBatch(10);
+      const claimed = await repository.claimBatch(FULL_QUEUE_CLAIM_LIMIT);
       const ours = claimed.find((a) => a.id === id);
 
       expect(ours).toBeDefined();
@@ -128,7 +135,7 @@ describe('DeliveryAttemptRepository (containerized Postgres)', () => {
       const future = new Date(Date.now() + 60_000);
       const id = await seedPending(subscriptionId, { nextRetryAt: future });
 
-      const claimed = await repository.claimBatch(10);
+      const claimed = await repository.claimBatch(FULL_QUEUE_CLAIM_LIMIT);
 
       expect(claimed.map((a) => a.id)).not.toContain(id);
     });
@@ -144,7 +151,7 @@ describe('DeliveryAttemptRepository (containerized Postgres)', () => {
         createdAt: new Date(),
       });
 
-      const claimed = await repository.claimBatch(10);
+      const claimed = await repository.claimBatch(FULL_QUEUE_CLAIM_LIMIT);
       const claimedIds = claimed.map((a) => a.id);
 
       // The older row isn't due yet, so it never falls through to let the newer row jump the
@@ -159,14 +166,14 @@ describe('DeliveryAttemptRepository (containerized Postgres)', () => {
       const olderId = await seedPending(subscriptionId, { createdAt: new Date(Date.now() - 5_000) });
       const newerId = await seedPending(subscriptionId, { createdAt: new Date() });
 
-      const firstClaim = await repository.claimBatch(10);
+      const firstClaim = await repository.claimBatch(FULL_QUEUE_CLAIM_LIMIT);
       const firstClaimIds = firstClaim.map((a) => a.id);
       expect(firstClaimIds).toContain(olderId);
       expect(firstClaimIds).not.toContain(newerId);
 
       // The older row is now in_progress; a second poll tick must not claim the newer row for
       // the same subscription while one is still in flight.
-      const secondClaim = await repository.claimBatch(10);
+      const secondClaim = await repository.claimBatch(FULL_QUEUE_CLAIM_LIMIT);
       expect(secondClaim.map((a) => a.id)).not.toContain(newerId);
     });
 
@@ -186,7 +193,7 @@ describe('DeliveryAttemptRepository (containerized Postgres)', () => {
     it('transitions an in_progress attempt to succeeded', async () => {
       const subscriptionId = await seedSubscription();
       const id = await seedPending(subscriptionId);
-      await repository.claimBatch(10);
+      await claimAttempt(id);
 
       const result = await repository.markSucceeded(id);
 
@@ -207,7 +214,7 @@ describe('DeliveryAttemptRepository (containerized Postgres)', () => {
     it('requeues to pending with next_retry_at set when given a future date (retry-eligible)', async () => {
       const subscriptionId = await seedSubscription();
       const id = await seedPending(subscriptionId);
-      await repository.claimBatch(10);
+      await claimAttempt(id);
       const retryAt = new Date(Date.now() + 2_000);
 
       const result = await repository.markFailed(id, retryAt);
@@ -219,7 +226,7 @@ describe('DeliveryAttemptRepository (containerized Postgres)', () => {
     it('terminalizes to failed when given null', async () => {
       const subscriptionId = await seedSubscription();
       const id = await seedPending(subscriptionId);
-      await repository.claimBatch(10);
+      await claimAttempt(id);
 
       const result = await repository.markFailed(id, null);
 
@@ -238,21 +245,22 @@ describe('DeliveryAttemptRepository (containerized Postgres)', () => {
     it('supports a full 3-attempt retry-then-terminal sequence', async () => {
       const subscriptionId = await seedSubscription();
       const id = await seedPending(subscriptionId);
+      const claimLimit = 1_000;
 
-      const firstClaim = await repository.claimBatch(10);
+      const firstClaim = await repository.claimBatch(claimLimit);
       expect(firstClaim.find((a) => a.id === id)?.attemptCount).toBe(1);
       await repository.markFailed(id, new Date(Date.now() - 1)); // already due, for the test's sake
 
-      const secondClaim = await repository.claimBatch(10);
+      const secondClaim = await repository.claimBatch(claimLimit);
       expect(secondClaim.find((a) => a.id === id)?.attemptCount).toBe(2);
       await repository.markFailed(id, new Date(Date.now() - 1));
 
-      const thirdClaim = await repository.claimBatch(10);
+      const thirdClaim = await repository.claimBatch(claimLimit);
       expect(thirdClaim.find((a) => a.id === id)?.attemptCount).toBe(3);
       const terminal = await repository.markFailed(id, null);
       expect(terminal?.status).toBe('failed');
 
-      const fourthClaim = await repository.claimBatch(10);
+      const fourthClaim = await repository.claimBatch(claimLimit);
       expect(fourthClaim.map((a) => a.id)).not.toContain(id);
     });
   });

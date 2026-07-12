@@ -36,18 +36,15 @@ describe('parseSubmitVerificationSignalInput', () => {
     );
   });
 
-  it.each(['branchId', 'verifierName', 'status'])(
-    'rejects a missing or blank %s',
-    (field) => {
-      const missing: Record<string, unknown> = { ...validBody };
-      Reflect.deleteProperty(missing, field);
-      expect(() => parseSubmitVerificationSignalInput(missing)).toThrow(new RegExp(field));
+  it.each(['branchId', 'verifierName', 'status'])('rejects a missing or blank %s', (field) => {
+    const missing: Record<string, unknown> = { ...validBody };
+    Reflect.deleteProperty(missing, field);
+    expect(() => parseSubmitVerificationSignalInput(missing)).toThrow(new RegExp(field));
 
-      expect(() =>
-        parseSubmitVerificationSignalInput({ ...validBody, [field]: '   ' }),
-      ).toThrow(new RegExp(field));
-    },
-  );
+    expect(() => parseSubmitVerificationSignalInput({ ...validBody, [field]: '   ' })).toThrow(
+      new RegExp(field),
+    );
+  });
 
   it('does not itself validate the status vocabulary (defers to the store)', () => {
     const body = { ...validBody, status: 'not-a-real-status' };

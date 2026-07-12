@@ -1,30 +1,26 @@
-/**
- * Shared host-held session-token + workspace-id client (Meridian IDEA-81, G19 SG2). Every one of
- * the 9 MCP tools gets its `Authorization`/`X-Workspace-Id` store headers from this one helper
- * instead of accepting a stakeholder/workspace id (or session token) as per-call tool input and
- * deriving the headers itself.
- *
- * `SPOOL_SESSION_TOKEN`/`SPOOL_WORKSPACE_ID` are read once and memoized for the lifetime of the
- * process, validated fail-fast per the session-token lifecycle contract documented in
- * `apps/mcp/AGENTS.md` (G19 SG1): a missing, empty, or otherwise malformed value throws a
- * `StoreClientConfigError` naming only the variable, never its value, before any store call is
- * attempted. `main.ts` calls `loadStoreCredentials()` at startup, before the MCP server connects
- * its transport or registers any tool handler, so the process fails fast rather than deferring
- * the failure to the first `tools/call`.
- *
- * Trade-off (deliberate, not a gap): because one process-held token + workspace pair now backs
- * every tool call for the lifetime of this MCP process, per-agent audit attribution collapses to
- * a single stakeholder identity per process/workspace -- see `apps/mcp/AGENTS.md`'s restart/
- * rotation story for how a fresh identity is obtained (an external process restart with a new
- * `pnpm dev:session-token`-issued token), not any in-process refresh or retry.
- */
+import {
+  ensureAuthenticated,
+  type AuthenticatedStoreSession,
+  type EnsureAuthenticatedOptions,
+  type FetchImplementation,
+} from './auth/login-flow.js';
+import { createTokenCache, type TokenCache } from './auth/token-cache.js';
 
-export interface StoreCredentials {
-  sessionToken: string;
+export interface StoreClientConfig {
+  sessionTokenOverride?: string;
   workspaceId: string;
 }
 
-/** Raised when `SPOOL_SESSION_TOKEN`/`SPOOL_WORKSPACE_ID` are missing or malformed at startup. */
+export interface StoreFetchOptions {
+  env?: NodeJS.ProcessEnv;
+  tokenCache?: TokenCache;
+  fetchImpl?: FetchImplementation;
+  ensureAuthenticatedImpl?: (
+    options: EnsureAuthenticatedOptions,
+  ) => Promise<AuthenticatedStoreSession>;
+}
+
+/** Raised when required store-client env vars are missing or malformed. */
 export class StoreClientConfigError extends Error {
   constructor(message: string) {
     super(message);
@@ -32,9 +28,11 @@ export class StoreClientConfigError extends Error {
   }
 }
 
-let cachedCredentials: StoreCredentials | undefined;
+const INVALIDATED_SESSION_TOKEN_EXPIRES_AT = 1;
+const INVALIDATED_SESSION_TOKEN_VALUE = 'invalidated-session-token';
 
-/** Reads and validates one env var by name, never including its (potentially secret) value in the thrown message. */
+let cachedConfig: StoreClientConfig | undefined;
+
 function requireEnvVar(env: NodeJS.ProcessEnv, name: string): string {
   const value = env[name];
   if (typeof value !== 'string' || value.trim().length === 0) {
@@ -45,37 +43,115 @@ function requireEnvVar(env: NodeJS.ProcessEnv, name: string): string {
   return value;
 }
 
-/**
- * Reads and validates `SPOOL_SESSION_TOKEN`/`SPOOL_WORKSPACE_ID` once, memoizing the result for
- * the lifetime of the process. Call this at startup (see `main.ts`) so a missing/malformed env
- * var fails fast before any tool handler is registered or any `tools/call` is accepted, per G19
- * SG1. Subsequent calls (e.g. from `getStoreAuthHeaders`) reuse the cached value without
- * re-reading `process.env`.
- */
-export function loadStoreCredentials(env: NodeJS.ProcessEnv = process.env): StoreCredentials {
-  if (cachedCredentials) {
-    return cachedCredentials;
+function readOptionalSessionTokenOverride(env: NodeJS.ProcessEnv): string | undefined {
+  const value = env['SPOOL_SESSION_TOKEN'];
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value.trim().length === 0) {
+    throw new StoreClientConfigError(
+      'SPOOL_SESSION_TOKEN environment variable is empty; unset it to use interactive login or set it to a non-empty override token',
+    );
+  }
+  return value;
+}
+
+export function loadStoreCredentials(env: NodeJS.ProcessEnv = process.env): StoreClientConfig {
+  if (cachedConfig !== undefined) {
+    return cachedConfig;
   }
 
-  const credentials: StoreCredentials = {
-    sessionToken: requireEnvVar(env, 'SPOOL_SESSION_TOKEN'),
+  const sessionTokenOverride = readOptionalSessionTokenOverride(env);
+  cachedConfig = {
     workspaceId: requireEnvVar(env, 'SPOOL_WORKSPACE_ID'),
-  };
-  cachedCredentials = credentials;
-  return credentials;
+    ...(sessionTokenOverride === undefined ? {} : { sessionTokenOverride }),
+  } satisfies StoreClientConfig;
+  return cachedConfig;
 }
 
-/**
- * Builds the two headers every store call needs from the host-held credentials, so none of the
- * 9 MCP tools construct an `Authorization`/`X-Workspace-Id` pair themselves or accept a
- * stakeholder/workspace id/session token from the caller in order to do so.
- */
-export function getStoreAuthHeaders(env: NodeJS.ProcessEnv = process.env): Record<string, string> {
-  const { sessionToken, workspaceId } = loadStoreCredentials(env);
-  return { authorization: `Bearer ${sessionToken}`, 'x-workspace-id': workspaceId };
+function buildStoreUrl(storeUrl: string, path: string | URL): string {
+  return path instanceof URL ? path.toString() : new URL(path, storeUrl).toString();
 }
 
-/** Test-only: clears the memoized credentials so each test starts from a clean cache. */
+function buildHeaders(
+  headersInit: RequestInit['headers'],
+  sessionToken: string,
+  workspaceId: string,
+): Record<string, string> {
+  const headers = new Headers(headersInit);
+  headers.set('authorization', 'Bearer ' + sessionToken);
+  headers.set('x-workspace-id', workspaceId);
+  return Object.fromEntries(headers.entries());
+}
+
+async function invalidateCachedSessionToken(
+  tokenCache: TokenCache,
+  storeUrl: string,
+  workspaceId: string,
+): Promise<void> {
+  const cachedCredentials = await tokenCache.load(storeUrl, workspaceId);
+  if (cachedCredentials === undefined) {
+    return;
+  }
+
+  await tokenCache.save(storeUrl, workspaceId, {
+    sessionToken: INVALIDATED_SESSION_TOKEN_VALUE,
+    sessionTokenExpiresAt: INVALIDATED_SESSION_TOKEN_EXPIRES_AT,
+    refreshToken: cachedCredentials.refreshToken,
+  });
+}
+
+async function resolveSessionToken(
+  storeUrl: string,
+  config: StoreClientConfig,
+  options: Required<StoreFetchOptions>,
+): Promise<string> {
+  if (config.sessionTokenOverride !== undefined) {
+    return config.sessionTokenOverride;
+  }
+
+  const authenticated = await options.ensureAuthenticatedImpl({
+    storeUrl,
+    workspaceId: config.workspaceId,
+    tokenCache: options.tokenCache,
+    fetchImpl: options.fetchImpl,
+  });
+  return authenticated.sessionToken;
+}
+
+export async function storeFetch(
+  storeUrl: string,
+  path: string | URL,
+  init: RequestInit = {},
+  options: StoreFetchOptions = {},
+): Promise<Response> {
+  const resolvedOptions = {
+    env: options.env ?? process.env,
+    tokenCache: options.tokenCache ?? createTokenCache(),
+    fetchImpl: options.fetchImpl ?? fetch,
+    ensureAuthenticatedImpl: options.ensureAuthenticatedImpl ?? ensureAuthenticated,
+  } satisfies Required<StoreFetchOptions>;
+
+  const config = loadStoreCredentials(resolvedOptions.env);
+  const requestUrl = buildStoreUrl(storeUrl, path);
+  const firstSessionToken = await resolveSessionToken(storeUrl, config, resolvedOptions);
+  const firstResponse = await resolvedOptions.fetchImpl(requestUrl, {
+    ...init,
+    headers: buildHeaders(init.headers, firstSessionToken, config.workspaceId),
+  });
+
+  if (firstResponse.status !== 401 || config.sessionTokenOverride !== undefined) {
+    return firstResponse;
+  }
+
+  await invalidateCachedSessionToken(resolvedOptions.tokenCache, storeUrl, config.workspaceId);
+  const retriedSessionToken = await resolveSessionToken(storeUrl, config, resolvedOptions);
+  return resolvedOptions.fetchImpl(requestUrl, {
+    ...init,
+    headers: buildHeaders(init.headers, retriedSessionToken, config.workspaceId),
+  });
+}
+
 export function resetStoreCredentialsForTests(): void {
-  cachedCredentials = undefined;
+  cachedConfig = undefined;
 }

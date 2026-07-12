@@ -15,7 +15,7 @@
  * "body too large" -- gives the calling agent an unambiguous, non-crashing error to react to.
  */
 
-import { getStoreAuthHeaders } from '../store-client.js';
+import { storeFetch } from '../store-client.js';
 
 /** Untrusted-input shape mirroring the store's `CreateArtifactRequest` (apps/store/src/artifacts). */
 export interface UploadArtifactInput {
@@ -102,7 +102,7 @@ function extractErrorMessage(body: unknown, fallback: string): string {
     typeof body === 'object' &&
     body !== null &&
     'message' in body &&
-    typeof (body).message === 'string'
+    typeof body.message === 'string'
   ) {
     return (body as { message: string }).message;
   }
@@ -118,9 +118,9 @@ export async function uploadArtifact(
   input: UploadArtifactInput,
   storeUrl: string,
 ): Promise<UploadArtifactResult> {
-  const response = await fetch(`${storeUrl}/artifacts`, {
+  const response = await storeFetch(storeUrl, '/artifacts', {
     method: 'POST',
-    headers: { 'content-type': 'application/json', ...getStoreAuthHeaders() },
+    headers: { 'content-type': 'application/json' },
     body: JSON.stringify(input),
   });
 
@@ -128,7 +128,10 @@ export async function uploadArtifact(
 
   if (!response.ok) {
     throw new UploadArtifactValidationError(
-      extractErrorMessage(payload, `Store rejected upload-artifact request (${String(response.status)})`),
+      extractErrorMessage(
+        payload,
+        `Store rejected upload-artifact request (${String(response.status)})`,
+      ),
       response.status,
     );
   }

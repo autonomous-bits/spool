@@ -17,7 +17,7 @@
  * (`fromChunkLabel`/`toChunkLabel`/`relationshipType`) field groups must be provided; the store
  * is the authoritative enforcer of that XOR shape (`check_suggestion_type`).
  */
-import { getStoreAuthHeaders } from '../store-client.js';
+import { storeFetch } from '../store-client.js';
 
 export interface SubmitSuggestionInput {
   discipline: string;
@@ -131,7 +131,7 @@ function extractErrorMessage(body: unknown, fallback: string): string {
     typeof body === 'object' &&
     body !== null &&
     'message' in body &&
-    typeof (body).message === 'string'
+    typeof body.message === 'string'
   ) {
     return (body as { message: string }).message;
   }
@@ -148,9 +148,9 @@ export async function submitSuggestion(
   input: SubmitSuggestionInput,
   storeUrl: string,
 ): Promise<SubmitSuggestionResult> {
-  const response = await fetch(`${storeUrl}/suggestions`, {
+  const response = await storeFetch(storeUrl, '/suggestions', {
     method: 'POST',
-    headers: { 'content-type': 'application/json', ...getStoreAuthHeaders() },
+    headers: { 'content-type': 'application/json' },
     body: JSON.stringify(input),
   });
 
@@ -158,7 +158,10 @@ export async function submitSuggestion(
 
   if (!response.ok) {
     throw new SubmitSuggestionValidationError(
-      extractErrorMessage(payload, `Store rejected submit-suggestion request (${String(response.status)})`),
+      extractErrorMessage(
+        payload,
+        `Store rejected submit-suggestion request (${String(response.status)})`,
+      ),
       response.status,
     );
   }

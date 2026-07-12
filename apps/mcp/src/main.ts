@@ -3,6 +3,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { createMcpServer } from './server.js';
 import { loadStoreCredentials } from './store-client.js';
+import { runStartupAuthentication } from './startup-auth.js';
 
 const storeUrl = process.env.SPOOL_STORE_URL ?? 'http://localhost:3000';
 
@@ -33,7 +34,8 @@ function setExitCode(exitCode: number): void {
  * `SPOOL_WORKSPACE_ID` fails fast instead of surfacing on the first `tools/call`.
  */
 async function runCli(): Promise<void> {
-  loadStoreCredentials();
+  const credentials = loadStoreCredentials();
+  await runStartupAuthentication({ storeUrl, credentials });
 
   const server = createMcpServer(storeUrl);
   const transport = new StdioServerTransport();

@@ -16,7 +16,7 @@
  * param) because this tool speaks to a single MCP route and forwards it into the store's
  * `:label` path segment itself.
  */
-import { getStoreAuthHeaders } from '../store-client.js';
+import { storeFetch } from '../store-client.js';
 
 export interface AttachArtifactToChunkInput {
   chunkLabel: string;
@@ -75,7 +75,10 @@ export function parseAttachArtifactToChunkInput(body: unknown): AttachArtifactTo
   const branchIdValue = record.branchId;
   if (branchIdValue !== undefined) {
     if (typeof branchIdValue !== 'string' || branchIdValue.trim().length === 0) {
-      throw new AttachArtifactToChunkValidationError('branchId must be a non-empty string when provided', 400);
+      throw new AttachArtifactToChunkValidationError(
+        'branchId must be a non-empty string when provided',
+        400,
+      );
     }
     return {
       chunkLabel,
@@ -92,7 +95,7 @@ function extractErrorMessage(body: unknown, fallback: string): string {
     typeof body === 'object' &&
     body !== null &&
     'message' in body &&
-    typeof (body).message === 'string'
+    typeof body.message === 'string'
   ) {
     return (body as { message: string }).message;
   }
@@ -110,11 +113,15 @@ export async function attachArtifactToChunk(
   storeUrl: string,
 ): Promise<AttachArtifactToChunkResult> {
   const { chunkLabel, ...body } = input;
-  const response = await fetch(`${storeUrl}/chunks/${encodeURIComponent(chunkLabel)}/artifacts`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', ...getStoreAuthHeaders() },
-    body: JSON.stringify(body),
-  });
+  const response = await storeFetch(
+    storeUrl,
+    `/chunks/${encodeURIComponent(chunkLabel)}/artifacts`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+  );
 
   const payload: unknown = await response.json().catch(() => undefined);
 

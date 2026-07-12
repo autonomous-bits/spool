@@ -12,12 +12,14 @@ import { FeedbackNotificationRepository } from './feedback-notification.reposito
 import { LocalFileBlobStore } from './local-file-blob-store.js';
 import { loadLocalFileBlobStoreConfig } from './local-file-blob-store-config.js';
 import { LOCAL_FILE_BLOB_STORE_CONFIG } from './local-file-blob-store-config.token.js';
+import { PairingCodeRepository } from './pairing-code.repository.js';
+import { PG_POOL } from './pg-pool.token.js';
+import { RefreshTokenRepository } from './refresh-token.repository.js';
 import { StakeholderRepository } from './stakeholder.repository.js';
 import { SuggestionRepository } from './suggestion.repository.js';
 import { VerificationSignalRepository } from './verification-signal.repository.js';
 import { WorkspaceRepository } from './workspace.repository.js';
 import { loadDatabaseConfig } from './database-config.js';
-import { PG_POOL } from './pg-pool.token.js';
 
 /**
  * Wraps the shared `pg.Pool` in an injectable provider that closes on application shutdown, per
@@ -61,6 +63,8 @@ class PgPoolProvider implements OnApplicationShutdown {
     FeedbackNotificationRepository,
     WorkspaceRepository,
     DeliverySubscriptionRepository,
+    RefreshTokenRepository,
+    PairingCodeRepository,
   ],
   exports: [
     PG_POOL,
@@ -77,6 +81,8 @@ class PgPoolProvider implements OnApplicationShutdown {
     FeedbackNotificationRepository,
     WorkspaceRepository,
     DeliverySubscriptionRepository,
+    RefreshTokenRepository,
+    PairingCodeRepository,
   ],
 })
 // eslint-disable-next-line @typescript-eslint/no-extraneous-class -- NestJS module classes are intentionally empty; behavior comes entirely from the @Module decorator.

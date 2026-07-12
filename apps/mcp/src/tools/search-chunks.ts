@@ -7,7 +7,7 @@
  * 8 MCP tools.
  */
 
-import { getStoreAuthHeaders } from '../store-client.js';
+import { storeFetch } from '../store-client.js';
 
 export interface SearchChunksInput {
   discipline?: string;
@@ -117,7 +117,7 @@ function extractErrorMessage(body: unknown, fallback: string): string {
     typeof body === 'object' &&
     body !== null &&
     'message' in body &&
-    typeof (body).message === 'string'
+    typeof body.message === 'string'
   ) {
     return (body as { message: string }).message;
   }
@@ -137,16 +137,18 @@ export async function searchChunks(
     }
   }
 
-  const response = await fetch(url.toString(), {
+  const response = await storeFetch(storeUrl, url, {
     method: 'GET',
-    headers: { ...getStoreAuthHeaders() },
   });
 
   const payload: unknown = await response.json().catch(() => undefined);
 
   if (!response.ok) {
     throw new SearchChunksValidationError(
-      extractErrorMessage(payload, `Store rejected search-chunks request (${String(response.status)})`),
+      extractErrorMessage(
+        payload,
+        `Store rejected search-chunks request (${String(response.status)})`,
+      ),
       response.status,
     );
   }
