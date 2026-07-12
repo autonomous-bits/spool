@@ -58,12 +58,10 @@ credentials before `spoolstore` will start, even for local development.
    docker compose up --build spoolstore
    ```
 
-Locally, Docker Compose also runs a `github-oauth-stub` service that stands in for GitHub's
-token-exchange and `/user` endpoints (`GITHUB_OAUTH_TOKEN_URL`, `GITHUB_USER_API_URL` in
-`compose.yaml`), so you don't need to complete a live GitHub consent screen — the initial
-`/authorize` redirect still targets real github.com, which is why real `GITHUB_CLIENT_ID`/
-`GITHUB_CLIENT_SECRET` values are required, but the callback is handled by the stub and always
-resolves to a fixture stakeholder (`spool-e2e-oauth-fixture`).
+With plain `docker compose up --build spoolstore` (using `compose.yaml`), the OAuth flow runs
+end-to-end against real `github.com`/`api.github.com` — you'll need to click through a real
+GitHub consent screen in your browser at `http://localhost:3002/auth/github/login` (or whichever
+route initiates `/authorize`), and the resulting session is tied to your actual GitHub identity.
 
 To mint a session token for local testing without manually driving the OAuth redirect/callback
 flow yourself, use the dev helper:
@@ -76,19 +74,32 @@ See `tools/dev-session-token/README.md` for available options (including `--crea
 
 ### Local stub services under `tools/docker`
 
-Docker Compose runs two stand-ins for services `spoolstore` would otherwise depend on live,
-external HTTPS endpoints for. They exist so the full stack (including Docker end-to-end
-exercises) runs deterministically offline, without live third-party consent screens or
-production webhook endpoints:
+`tools/docker` contains two stand-ins for services `spoolstore` would otherwise depend on live,
+external HTTPS endpoints for:
 
 - `github-oauth-stub` (`tools/docker/github-oauth-stub`) — stands in for github.com's OAuth
   token-exchange endpoint and api.github.com's `/user` endpoint, since a live interactive GitHub
-  consent screen can't be automated in tests.
+  consent screen can't be automated in tests. It always resolves to a fixture stakeholder
+  (`spool-e2e-oauth-fixture`), skipping the real consent screen.
 - `webhook-receiver-stub` (`tools/docker/webhook-receiver-stub`) — a TLS-terminating stand-in for
   a real downstream consumer's HTTPS webhook endpoint. `DeliverySubscription.url` requires
   `https://`, so `DeliveryWorkerService`'s outbound fetch needs a genuine TLS handshake to
   exercise, which is why this stub (unlike `github-oauth-stub`) terminates real TLS rather than
   plain HTTP.
+
+**When to use which compose file:**
+
+- `compose.yaml` (default, `docker compose up --build spoolstore`) — runs the full OAuth
+  authorization-code flow against real GitHub (no `github-oauth-stub`), plus
+  `webhook-receiver-stub` for webhook delivery. Use this for regular local development and for
+  manually testing a real end-to-end GitHub login with your own OAuth App.
+- `compose.debug.yaml` (`docker compose -f compose.debug.yaml up --build spoolstore`) — runs
+  `github-oauth-stub` instead of real GitHub (`GITHUB_OAUTH_TOKEN_URL`/`GITHUB_USER_API_URL`
+  point at it) so you can exercise auth-dependent flows without a live consent screen, along with
+  the Node inspector on port 9229. It omits `webhook-receiver-stub`. Use this when debugging or
+  when you want to skip the GitHub consent screen entirely; real `GITHUB_CLIENT_ID`/
+  `GITHUB_CLIENT_SECRET` are not required in this mode since the token-exchange/user-lookup calls
+  never reach real GitHub.
 
 #### Generating the webhook-receiver-stub's TLS cert/key
 
