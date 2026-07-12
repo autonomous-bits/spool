@@ -4,3 +4,5 @@ packages:
 allowBuilds:
   '@swc/core': true
   esbuild: true
+overrides:
+  multer: "2.2.0"
