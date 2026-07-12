@@ -74,6 +74,44 @@ pnpm dev:session-token
 
 See `tools/dev-session-token/README.md` for available options (including `--create-branch`).
 
+### Local stub services under `tools/docker`
+
+Docker Compose runs two stand-ins for services `spoolstore` would otherwise depend on live,
+external HTTPS endpoints for. They exist so the full stack (including Docker end-to-end
+exercises) runs deterministically offline, without live third-party consent screens or
+production webhook endpoints:
+
+- `github-oauth-stub` (`tools/docker/github-oauth-stub`) — stands in for github.com's OAuth
+  token-exchange endpoint and api.github.com's `/user` endpoint, since a live interactive GitHub
+  consent screen can't be automated in tests.
+- `webhook-receiver-stub` (`tools/docker/webhook-receiver-stub`) — a TLS-terminating stand-in for
+  a real downstream consumer's HTTPS webhook endpoint. `DeliverySubscription.url` requires
+  `https://`, so `DeliveryWorkerService`'s outbound fetch needs a genuine TLS handshake to
+  exercise, which is why this stub (unlike `github-oauth-stub`) terminates real TLS rather than
+  plain HTTP.
+
+#### Generating the webhook-receiver-stub's TLS cert/key
+
+`webhook-receiver-stub` needs a `cert.pem`/`key.pem` pair to terminate TLS. These are
+self-signed, gitignored (`*.pem`), and **not committed** — generate your own locally:
+
+```sh
+cd tools/docker/webhook-receiver-stub
+openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem -days 825 -nodes \
+  -subj "/CN=webhook-receiver-stub" \
+  -addext "subjectAltName=DNS:webhook-receiver-stub,DNS:localhost"
+chmod 600 key.pem
+```
+
+`spoolstore` trusts this same cert via `NODE_EXTRA_CA_CERTS` (it's baked into the `spoolstore`
+image too, via the `certs` additional build context in `compose.yaml`), so
+`DeliveryWorkerService` can complete a genuine TLS handshake against the stub.
+
+Never commit `key.pem` or `cert.pem` — they're already covered by `.gitignore`, but double-check
+before committing docker/webhook-receiver-stub changes. If a private key is ever accidentally
+committed or pushed, treat it as compromised and regenerate a fresh pair with the command above,
+even if the exposing commit is later rewritten out of history.
+
 ## Making changes
 
 1. Create a branch off `main` with a descriptive name.
