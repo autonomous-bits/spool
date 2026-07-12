@@ -8,3 +8,4 @@ coverage/
 *.pem
 .spool/
 docs/goals/
+.DS_Store
