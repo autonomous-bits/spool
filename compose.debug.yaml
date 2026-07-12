@@ -14,16 +14,24 @@ services:
       ARTIFACT_BLOB_STORE_PATH: /usr/src/app/artifact-data
       GITHUB_OAUTH_TOKEN_URL: http://github-oauth-stub:4001/login/oauth/access_token
       GITHUB_USER_API_URL: http://github-oauth-stub:4001/user
+      # Trusts the webhook-receiver-stub's self-signed cert (bind-mounted below) so
+      # DeliveryWorkerService's outbound fetch (G14.SG3) can complete a genuine TLS handshake
+      # against it. Mounted at runtime rather than baked in at build time, since this cert is a
+      # gitignored, locally-generated test fixture (see CONTRIBUTING.md) irrelevant to compose.yaml.
+      NODE_EXTRA_CA_CERTS: /usr/src/app/docker/webhook-receiver-stub/cert.pem
     ports:
       - 3000:3000
       - 9229:9229
     command: ["node", "--inspect=0.0.0.0:9229", "./dist/main.js"]
     volumes:
       - spoolstore-artifact-data:/usr/src/app/artifact-data
+      - ./tools/docker/webhook-receiver-stub/cert.pem:/usr/src/app/docker/webhook-receiver-stub/cert.pem:ro
     depends_on:
       postgres:
         condition: service_healthy
       github-oauth-stub:
+        condition: service_started
+      webhook-receiver-stub:
         condition: service_started
 
   github-oauth-stub:
@@ -35,6 +43,19 @@ services:
       OAUTH_STUB_GITHUB_LOGIN: spool-e2e-oauth-fixture
     ports:
       - 4001:4001
+
+  # TLS-terminating stand-in for a real downstream consumer's HTTPS webhook endpoint, used only
+  # by G14.SG4's Docker end-to-end exercise (DeliverySubscription.url requires https://, so
+  # DeliveryWorkerService's outbound fetch needs a genuine TLS handshake to exercise). See
+  # tools/docker/webhook-receiver-stub/server.mjs.
+  webhook-receiver-stub:
+    image: spool-webhook-receiver-stub
+    build:
+      context: tools/docker/webhook-receiver-stub
+    environment:
+      PORT: "4443"
+    ports:
+      - 4443:4443
 
   postgres:
     image: postgres:16-alpine

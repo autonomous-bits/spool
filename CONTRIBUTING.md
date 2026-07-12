@@ -90,14 +90,16 @@ external HTTPS endpoints for:
 **When to use which compose file:**
 
 - `compose.yaml` (default, `docker compose up --build spoolstore`) — runs the full OAuth
-  authorization-code flow against real GitHub (no `github-oauth-stub`), plus
-  `webhook-receiver-stub` for webhook delivery. Use this for regular local development and for
-  manually testing a real end-to-end GitHub login with your own OAuth App.
+  authorization-code flow against real GitHub (no `github-oauth-stub`). It omits
+  `webhook-receiver-stub`. Use this for regular local development and for manually testing a real
+  end-to-end GitHub login with your own OAuth App.
 - `compose.debug.yaml` (`docker compose -f compose.debug.yaml up --build spoolstore`) — runs
   `github-oauth-stub` instead of real GitHub (`GITHUB_OAUTH_TOKEN_URL`/`GITHUB_USER_API_URL`
   point at it) so you can exercise auth-dependent flows without a live consent screen, along with
-  the Node inspector on port 9229. It omits `webhook-receiver-stub`. Use this when debugging or
-  when you want to skip the GitHub consent screen entirely; real `GITHUB_CLIENT_ID`/
+  the Node inspector on port 9229. It also runs `webhook-receiver-stub` (with `NODE_EXTRA_CA_CERTS`
+  set to trust it), so use this compose file when exercising `DeliveryWorkerService`'s outbound
+  webhook TLS handshake (G14). Use this when debugging or when you want to skip the GitHub
+  consent screen entirely; real `GITHUB_CLIENT_ID`/
   `GITHUB_CLIENT_SECRET` are not required in this mode since the token-exchange/user-lookup calls
   never reach real GitHub.
 
@@ -114,8 +116,8 @@ openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem -days 825 -node
 chmod 600 key.pem
 ```
 
-`spoolstore` trusts this same cert via `NODE_EXTRA_CA_CERTS` (it's baked into the `spoolstore`
-image too, via the `certs` additional build context in `compose.yaml`), so
+`spoolstore` trusts this same cert via `NODE_EXTRA_CA_CERTS` (bind-mounted into the container by
+`compose.debug.yaml`, the only compose file that runs `webhook-receiver-stub`), so
 `DeliveryWorkerService` can complete a genuine TLS handshake against the stub.
 
 Never commit `key.pem` or `cert.pem` — they're already covered by `.gitignore`, but double-check

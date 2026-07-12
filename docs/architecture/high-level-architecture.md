@@ -123,8 +123,8 @@ tables, delivery subscriptions/attempts, refresh tokens, and pairing codes. This
 the order tenancy and auth were layered onto an initially single-tenant schema.
 
 **Runtime.** The store runs as a container (`apps/store/Dockerfile`) alongside Postgres via Docker
-Compose (`compose.yaml`), not directly on the host, per Constitution Principle II. Compose also
-provisions two stub services used only for local/e2e verification: a GitHub OAuth stub
+Compose (`compose.yaml`), not directly on the host, per Constitution Principle II. `compose.debug.yaml`
+additionally provisions two stub services used only for local/e2e verification: a GitHub OAuth stub
 (`github-oauth-stub`) that stands in for `github.com`'s token exchange and `/user` endpoint, and a
 TLS-terminating webhook receiver stub (`webhook-receiver-stub`) that the delivery worker calls to
 prove a genuine outbound HTTPS handshake. `docker compose up --build` copies the host's
