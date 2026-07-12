@@ -84,4 +84,9 @@ detail on structure and testing conventions. Tests use **Vitest**, not Jest.
 
 ## License
 
-UNLICENSED — private/internal project (see `package.json`).
+Copyright (C) 2026 autonomous-bits
+
+Licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0-only) — see
+`NOTICE` for the project's copyright/permission notice and `package.json`. Unlike plain GPLv3,
+the AGPL requires anyone who runs a modified version of Spool as a network service to make that
+modified source available to the service's users, closing the "SaaS loophole."
