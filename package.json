@@ -21,6 +21,7 @@
     "test:mcp": "vitest run --project mcp",
     "test:coverage": "vitest run --coverage",
     "dev:session-token": "node tools/dev-session-token/get-dev-session-token.mjs",
+    "onboard:user": "node tools/onboard-user/onboard-user.mjs",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
