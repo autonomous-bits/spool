@@ -9,3 +9,4 @@ coverage/
 .spool/
 docs/goals/
 .DS_Store
+.mcp.json
