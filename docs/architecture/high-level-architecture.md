@@ -116,11 +116,12 @@ to pull business logic into generic service layers — new behavior is added ins
 owns the capability.
 
 **Persistence.** All domain data is tenant-scoped in Postgres. Schema evolves through sequential,
-numbered SQL migrations under `apps/store/src/persistence/migrations/` (currently `0001`–`0018`),
+numbered SQL migrations under `apps/store/src/persistence/migrations/` (currently `0001`–`0019`),
 covering chunk capture, stakeholders, branches, edges, OAuth/session fixtures, suggestions,
 artifacts, verification signals, feedback notifications, workspaces, workspace-scoping of prior
-tables, delivery subscriptions/attempts, refresh tokens, and pairing codes. This sequence reflects
-the order tenancy and auth were layered onto an initially single-tenant schema.
+tables, delivery subscriptions/attempts, refresh tokens, pairing codes, and a per-workspace
+stakeholder-discipline allow-list. This sequence reflects the order tenancy and auth were layered
+onto an initially single-tenant schema.
 
 **Runtime.** The store runs as a container (`apps/store/Dockerfile`) alongside Postgres via Docker
 Compose (`compose.yaml`), not directly on the host, per Constitution Principle II. `compose.debug.yaml`
@@ -163,8 +164,12 @@ and their owning slices, rather than being validated only at the controller/DTO 
   redirect-based OAuth dance.
 - **Lifecycle and branching.** Chunks move `draft -> approved -> promoted`. Authoring happens on
   branches scoped to a discipline; branch state moves `draft -> submitted -> verified` (or back to
-  `draft` on rejection). Submission requires the actor's discipline to match the branch; any human
-  stakeholder can verify or reject regardless of discipline.
+  `draft` on rejection). Submission (and other discipline-scoped writes/reads, e.g. branch-scoped
+  chunk search and neighbourhood queries) requires a per-request `activeDiscipline` that is checked
+  against the caller's per-workspace allow-list (`stakeholder_disciplines`, managed via
+  `POST`/`DELETE /workspaces/:id/stakeholders/:stakeholderId/disciplines`) rather than a fixed
+  discipline baked into the session token; any human stakeholder can verify or reject regardless
+  of discipline.
 - **Delivery.** Downstream systems register HTTPS webhook subscriptions
   (`delivery-subscriptions/`); a background worker (`delivery/`) executes outbound delivery
   attempts against those subscriptions asynchronously from the request path.
