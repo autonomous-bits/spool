@@ -145,7 +145,6 @@ describe('GitHub OAuth login/callback HTTP API (containerized Postgres)', () => 
 
     const claims = sessionTokenService.verify(callbackResponse.body.sessionToken as string);
     expect(claims.stakeholderId).toBe(stakeholderId);
-    expect(claims.discipline).toBe('engineering');
   });
 
   it('GET /auth/github/callback returns 401 for an unknown GitHub login', async () => {

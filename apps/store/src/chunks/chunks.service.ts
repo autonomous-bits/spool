@@ -1,8 +1,11 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { resolveHumanActorContext } from '../auth/resolve-human-actor.helper.js';
 import { Chunk } from '../domain/chunk.js';
 import { assertWorkspaceScope, WorkspaceScopeViolationError } from '../domain/workspace-scope.js';
 import { BranchRepository } from '../persistence/branch.repository.js';
 import { ChunkRepository } from '../persistence/chunk.repository.js';
+import { StakeholderDisciplineRepository } from '../persistence/stakeholder-discipline.repository.js';
+import { StakeholderRepository } from '../persistence/stakeholder.repository.js';
 import { WorkspaceRepository } from '../persistence/workspace.repository.js';
 import type { SearchChunksFilters } from '../persistence/chunk.repository.js';
 import type { SessionTokenClaims } from '../auth/session-token.service.js';
@@ -35,6 +38,8 @@ export class ChunksService {
     private readonly chunkRepository: ChunkRepository,
     private readonly branchRepository: BranchRepository,
     private readonly workspaceRepository: WorkspaceRepository,
+    private readonly stakeholderDisciplineRepository: StakeholderDisciplineRepository,
+    private readonly stakeholderRepository: StakeholderRepository,
   ) {}
 
   /**
@@ -136,19 +141,25 @@ export class ChunksService {
     limit: number,
     claims: SessionTokenClaims,
     cursor?: string,
+    activeDiscipline?: string,
   ): Promise<{ chunks: ChunkResponse[]; nextCursor: string | null }> {
     await this.assertScope(filters.workspaceId, claims);
 
     if (filters.branchId !== undefined) {
-      if (claims.discipline === null) {
-        throw new BadRequestException('Discipline is required to query a branch-scoped chunk');
-      }
-      const branch = await this.branchRepository.findById(filters.branchId, filters.workspaceId);
-      if (branch !== undefined && branch.discipline !== claims.discipline) {
-        throw new ForbiddenException(
-          `Branch discipline (${branch.discipline}) does not match token discipline (${claims.discipline})`,
-        );
-      }
+      // G21 SG4 (Meridian IDEA-142/IDEA-143): the per-request `activeDiscipline` query param
+      // replaces the interim branch-discipline stand-in — validated (400) and allow-list-checked
+      // (403) via the shared `resolveHumanActorContext` resolution path, required whenever a
+      // branch-scoped search is requested (regardless of whether the branch id itself resolves).
+      await resolveHumanActorContext(
+        this.stakeholderRepository,
+        this.stakeholderDisciplineRepository,
+        claims,
+        {
+          requireDiscipline: true,
+          actionDescription: 'search chunks scoped to a branch',
+          activeDiscipline,
+        },
+      );
     }
 
     const result = await this.chunkRepository.search(filters, limit, cursor);
@@ -164,18 +175,30 @@ export class ChunksService {
     claims: SessionTokenClaims,
     depth: number,
     branchId?: string,
+    activeDiscipline?: string,
   ): Promise<{ chunk: ChunkResponse; neighbours: NeighbourResponse[] }> {
     const workspaceId = await this.assertScope(headerWorkspaceId, claims);
 
+    let branchDiscipline: string | undefined;
     if (branchId !== undefined) {
-      if (claims.discipline === null) {
-        throw new BadRequestException('Discipline is required to query a branch-scoped chunk');
-      }
+      // G21 SG4: see the identical comment in search() — the client-supplied `activeDiscipline`
+      // is validated/allow-list-checked via `resolveHumanActorContext`. The branch's own
+      // persisted discipline is looked up separately, purely to filter returned neighbours by
+      // content discipline (unrelated to actor authorization).
+      await resolveHumanActorContext(
+        this.stakeholderRepository,
+        this.stakeholderDisciplineRepository,
+        claims,
+        {
+          requireDiscipline: true,
+          actionDescription: 'view a branch-scoped chunk neighbourhood',
+          activeDiscipline,
+        },
+      );
+
       const branch = await this.branchRepository.findById(branchId, workspaceId);
-      if (branch !== undefined && branch.discipline !== claims.discipline) {
-        throw new ForbiddenException(
-          `Branch discipline (${branch.discipline}) does not match token discipline (${claims.discipline})`,
-        );
+      if (branch !== undefined) {
+        branchDiscipline = branch.discipline;
       }
     }
 
@@ -186,11 +209,11 @@ export class ChunksService {
 
     const neighbours = await this.chunkRepository.getNeighbourhood(chunk.label, workspaceId, depth, branchId);
 
-    if (branchId !== undefined) {
+    if (branchId !== undefined && branchDiscipline !== undefined) {
       for (const neighbour of neighbours) {
-        if (neighbour.discipline !== claims.discipline) {
+        if (neighbour.discipline !== branchDiscipline) {
           throw new ForbiddenException(
-            `Neighbour chunk discipline (${neighbour.discipline}) does not match token discipline (${String(claims.discipline)})`,
+            `Neighbour chunk discipline (${neighbour.discipline}) does not match branch discipline (${branchDiscipline})`,
           );
         }
       }

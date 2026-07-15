@@ -10,6 +10,7 @@ import { SessionTokenService } from '../auth/session-token.service.js';
 import { verifySessionClaims } from '../auth/session-claims.helper.js';
 import type { BranchResponse } from './branch-response.dto.js';
 import { parseCreateBranchRequest } from './create-branch-request.dto.js';
+import { parseSubmitBranchRequest } from './submit-branch-request.dto.js';
 import { BranchesService } from './branches.service.js';
 
 @Controller('branches')
@@ -33,11 +34,13 @@ export class BranchesController {
   @Post(':id/submit')
   async submit(
     @Param('id') id: string,
+    @Body() body: unknown,
     @Headers('authorization') authorizationHeader: unknown,
     @Headers('x-workspace-id') workspaceId: string | undefined,
   ): Promise<BranchResponse> {
     const claims = verifySessionClaims(authorizationHeader, this.sessionTokenService);
-    return this.branches.submit(id, workspaceId, claims);
+    const { activeDiscipline } = parseSubmitBranchRequest(body);
+    return this.branches.submit(id, workspaceId, claims, activeDiscipline);
   }
 
   @Post(':id/verify')

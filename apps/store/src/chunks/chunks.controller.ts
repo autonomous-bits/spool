@@ -25,6 +25,7 @@ export class ChunksController {
     @Query('q') q?: string,
     @Query('limit') limitStr?: string,
     @Query('cursor') cursor?: string,
+    @Query('activeDiscipline') activeDiscipline?: string,
   ): Promise<{ chunks: ChunkResponse[]; nextCursor: string | null }> {
     const claims = verifySessionClaims(authorizationHeader, this.sessionTokenService);
     if (headerWorkspaceId === undefined || headerWorkspaceId.trim().length === 0) {
@@ -45,6 +46,7 @@ export class ChunksController {
       isNaN(limit) ? 20 : limit,
       claims,
       cursor,
+      activeDiscipline,
     );
   }
 
@@ -76,6 +78,7 @@ export class ChunksController {
     @Headers('x-workspace-id') headerWorkspaceId: string | undefined,
     @Query('depth') depthStr?: string,
     @Query('branchId') branchId?: string,
+    @Query('activeDiscipline') activeDiscipline?: string,
   ): Promise<{ chunk: ChunkResponse; neighbours: NeighbourResponse[] }> {
     const claims = verifySessionClaims(authorizationHeader, this.sessionTokenService);
     const depth = depthStr !== undefined ? parseInt(depthStr, 10) : 1;
@@ -85,6 +88,6 @@ export class ChunksController {
     if (depth > 5) {
       throw new BadRequestException('depth cannot exceed 5');
     }
-    return this.chunks.getNeighbourhood(id, headerWorkspaceId, claims, depth, branchId);
+    return this.chunks.getNeighbourhood(id, headerWorkspaceId, claims, depth, branchId, activeDiscipline);
   }
 }

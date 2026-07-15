@@ -26,7 +26,7 @@ describe('Edges HTTP API (containerized Postgres)', () => {
     app = moduleRef.createNestApplication();
     await app.init();
     sessionTokenService = moduleRef.get(SessionTokenService);
-    defaultToken = mintSessionToken(BOOTSTRAP_STAKEHOLDER_ID, 'engineering');
+    defaultToken = mintSessionToken(BOOTSTRAP_STAKEHOLDER_ID);
   });
 
   afterAll(async () => {
@@ -34,10 +34,9 @@ describe('Edges HTTP API (containerized Postgres)', () => {
     await database.close();
   });
 
-  function mintSessionToken(stakeholderId: string, discipline: string | null): string {
+  function mintSessionToken(stakeholderId: string): string {
     return sessionTokenService.sign({
       stakeholderId,
-      discipline,
       authTime: Math.floor(Date.now() / 1000),
       workspaceId: WORKSPACE_ID,
     });

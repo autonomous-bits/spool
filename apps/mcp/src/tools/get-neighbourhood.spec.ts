@@ -13,11 +13,13 @@ describe('get-neighbourhood tool', () => {
         id: 'chunk-123',
         depth: 2,
         branchId: 'branch-123',
+        activeDiscipline: 'product',
       });
       expect(result).toEqual({
         id: 'chunk-123',
         depth: 2,
         branchId: 'branch-123',
+        activeDiscipline: 'product',
       });
     });
 
@@ -80,6 +82,24 @@ describe('get-neighbourhood tool', () => {
             'x-workspace-id': 'test-workspace-id',
           },
         }),
+      );
+    });
+
+    it('forwards activeDiscipline as a query parameter for branch-scoped calls', async () => {
+      const mockResult = { chunk: { id: 'chunk-123' }, neighbours: [] };
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue(mockResult),
+      });
+
+      await getNeighbourhood(
+        { id: 'chunk-123', branchId: 'branch-123', activeDiscipline: 'design' },
+        'http://localhost:3000',
+      );
+
+      expect(global.fetch).toHaveBeenCalledWith(
+        'http://localhost:3000/chunks/chunk-123/neighbourhood?branchId=branch-123&activeDiscipline=design',
+        expect.anything(),
       );
     });
 

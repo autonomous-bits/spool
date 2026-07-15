@@ -13,6 +13,7 @@ import { assertWorkspaceScope, WorkspaceScopeViolationError } from '../domain/wo
 import { resolveHumanActorContext } from '../auth/resolve-human-actor.helper.js';
 import type { BranchResponse } from '../branches/branch-response.dto.js';
 import { toBranchResponse } from '../branches/branch-response.dto.js';
+import { StakeholderDisciplineRepository } from '../persistence/stakeholder-discipline.repository.js';
 import { StakeholderRepository } from '../persistence/stakeholder.repository.js';
 import { SuggestionRepository } from '../persistence/suggestion.repository.js';
 import { WorkspaceRepository } from '../persistence/workspace.repository.js';
@@ -52,6 +53,7 @@ export class SuggestionsService {
     private readonly suggestionRepository: SuggestionRepository,
     private readonly stakeholderRepository: StakeholderRepository,
     private readonly workspaceRepository: WorkspaceRepository,
+    private readonly stakeholderDisciplineRepository: StakeholderDisciplineRepository,
   ) {}
 
   private assertScopeFacts(
@@ -145,10 +147,12 @@ export class SuggestionsService {
   ): Promise<BranchResponse> {
     const workspaceId = await this.assertScope(headerWorkspaceId, claims);
 
-    const actor = await resolveHumanActorContext(this.stakeholderRepository, claims, {
-      requireDiscipline: false,
-      actionDescription: 'accept a suggestion',
-    });
+    const actor = await resolveHumanActorContext(
+      this.stakeholderRepository,
+      this.stakeholderDisciplineRepository,
+      claims,
+      { requireDiscipline: false, actionDescription: 'accept a suggestion' },
+    );
     assertIsHumanActor(actor);
 
     let result;
@@ -190,10 +194,12 @@ export class SuggestionsService {
   ): Promise<SuggestionResponse> {
     const workspaceId = await this.assertScope(headerWorkspaceId, claims);
 
-    const actor = await resolveHumanActorContext(this.stakeholderRepository, claims, {
-      requireDiscipline: false,
-      actionDescription: 'reject a suggestion',
-    });
+    const actor = await resolveHumanActorContext(
+      this.stakeholderRepository,
+      this.stakeholderDisciplineRepository,
+      claims,
+      { requireDiscipline: false, actionDescription: 'reject a suggestion' },
+    );
     assertIsHumanActor(actor);
 
     const result = await this.suggestionRepository.reject(

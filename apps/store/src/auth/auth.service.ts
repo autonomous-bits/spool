@@ -153,7 +153,6 @@ export class AuthService {
     const authTime = nowSeconds();
     const sessionToken = this.sessionTokenService.sign({
       stakeholderId: stakeholder.id,
-      discipline: stakeholder.discipline,
       authTime,
       workspaceId,
     });
@@ -213,7 +212,6 @@ export class AuthService {
       const authTime = nowSeconds();
       const sessionToken = this.sessionTokenService.sign({
         stakeholderId: rotated.stakeholderId,
-        discipline: stakeholder.discipline,
         authTime,
         workspaceId: rotated.workspaceId,
       });

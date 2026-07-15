@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { AuthConfig } from './auth-config.js';
+import { signHmacToken } from './hmac-token.js';
 import { InvalidSessionTokenError, SessionTokenService } from './session-token.service.js';
 
 function buildConfig(overrides: Partial<AuthConfig> = {}): AuthConfig {
@@ -22,25 +23,23 @@ function buildConfig(overrides: Partial<AuthConfig> = {}): AuthConfig {
 describe('SessionTokenService', () => {
   it('mints a token whose verify() returns the signed claims', () => {
     const service = new SessionTokenService(buildConfig());
-    const token = service.sign({ stakeholderId: 'stakeholder-1', discipline: 'engineering', authTime: 100, workspaceId: 'workspace-1' });
+    const token = service.sign({ stakeholderId: 'stakeholder-1', authTime: 100, workspaceId: 'workspace-1' });
 
     const claims = service.verify(token);
 
     expect(claims).toEqual({
       stakeholderId: 'stakeholder-1',
-      discipline: 'engineering',
       authTime: 100,
       workspaceId: 'workspace-1',
     });
   });
 
-  it('mints a verifiable token for a null-discipline stakeholder', () => {
+  it('mints a verifiable token for a workspace-less bootstrap claim', () => {
     const service = new SessionTokenService(buildConfig());
-    const token = service.sign({ stakeholderId: 'stakeholder-1', discipline: null, authTime: 100, workspaceId: null });
+    const token = service.sign({ stakeholderId: 'stakeholder-1', authTime: 100, workspaceId: null });
 
     expect(service.verify(token)).toEqual({
       stakeholderId: 'stakeholder-1',
-      discipline: null,
       authTime: 100,
       workspaceId: null,
     });
@@ -49,7 +48,7 @@ describe('SessionTokenService', () => {
   it('throws InvalidSessionTokenError for a token signed with a different secret', () => {
     const service = new SessionTokenService(buildConfig());
     const otherService = new SessionTokenService(buildConfig({ sessionTokenSecret: 'other-secret' }));
-    const token = otherService.sign({ stakeholderId: 'stakeholder-1', discipline: null, authTime: 100, workspaceId: null });
+    const token = otherService.sign({ stakeholderId: 'stakeholder-1', authTime: 100, workspaceId: null });
 
     expect(() => service.verify(token)).toThrow(InvalidSessionTokenError);
   });
@@ -59,7 +58,7 @@ describe('SessionTokenService', () => {
     try {
       vi.setSystemTime(0);
       const service = new SessionTokenService(buildConfig({ sessionTokenMaxAgeSeconds: 60 }));
-      const token = service.sign({ stakeholderId: 'stakeholder-1', discipline: null, authTime: 0, workspaceId: null });
+      const token = service.sign({ stakeholderId: 'stakeholder-1', authTime: 0, workspaceId: null });
 
       vi.setSystemTime(61_000);
 
@@ -72,5 +71,21 @@ describe('SessionTokenService', () => {
   it('throws InvalidSessionTokenError for a structurally invalid token', () => {
     const service = new SessionTokenService(buildConfig());
     expect(() => service.verify('garbage')).toThrow(InvalidSessionTokenError);
+  });
+
+  it('G21 SG3: still verifies a pre-rewrite token that carries a raw discipline claim, ignoring it', () => {
+    const config = buildConfig();
+    const service = new SessionTokenService(config);
+    const preRewriteToken = signHmacToken(
+      { stakeholderId: 'stakeholder-1', discipline: 'engineering', authTime: 100, workspaceId: 'workspace-1' },
+      config.sessionTokenSecret,
+      config.sessionTokenMaxAgeSeconds,
+    );
+
+    expect(service.verify(preRewriteToken)).toEqual({
+      stakeholderId: 'stakeholder-1',
+      authTime: 100,
+      workspaceId: 'workspace-1',
+    });
   });
 });

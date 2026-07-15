@@ -158,7 +158,6 @@ describe('AuthService', () => {
     expect(sessionTokenService.sign).toHaveBeenCalledWith(
       expect.objectContaining({
         stakeholderId: 'stakeholder-1',
-        discipline: 'engineering',
         workspaceId: null,
       }),
     );
@@ -312,7 +311,6 @@ describe('AuthService', () => {
       expect(stakeholderRepository.findById).toHaveBeenCalledWith('stakeholder-1');
       expect(sessionTokenService.sign).toHaveBeenCalledWith({
         stakeholderId: 'stakeholder-1',
-        discipline: 'engineering',
         authTime,
         workspaceId: 'workspace-1',
       });

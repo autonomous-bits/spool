@@ -1,7 +1,8 @@
-import { UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SessionTokenService, type SessionTokenClaims } from '../auth/session-token.service.js';
+import type { StakeholderDisciplineResponse } from './stakeholder-discipline-response.dto.js';
 import type { WorkspaceMembershipResponse } from './workspace-membership-response.dto.js';
 import type { WorkspaceResponse } from './workspace-response.dto.js';
 import { WorkspacesController } from './workspaces.controller.js';
@@ -15,7 +16,10 @@ const claims = {
 
 describe('WorkspacesController', () => {
   let controller: WorkspacesController;
-  let service: Pick<WorkspacesService, 'create' | 'addMember'>;
+  let service: Pick<
+    WorkspacesService,
+    'create' | 'addMember' | 'assignDiscipline' | 'revokeDiscipline'
+  >;
   let sessionTokenService: Pick<SessionTokenService, 'verify'>;
 
   beforeEach(async () => {
@@ -27,7 +31,12 @@ describe('WorkspacesController', () => {
           useValue: {
             create: vi.fn(),
             addMember: vi.fn(),
-          } satisfies Pick<WorkspacesService, 'create' | 'addMember'>,
+            assignDiscipline: vi.fn(),
+            revokeDiscipline: vi.fn(),
+          } satisfies Pick<
+            WorkspacesService,
+            'create' | 'addMember' | 'assignDiscipline' | 'revokeDiscipline'
+          >,
         },
         {
           provide: SessionTokenService,
@@ -69,9 +78,9 @@ describe('WorkspacesController', () => {
   });
 
   it('rejects create with a malformed Authorization header', async () => {
-    await expect(
-      controller.create({ name: 'acme' }, 'Token signed-token'),
-    ).rejects.toThrow(UnauthorizedException);
+    await expect(controller.create({ name: 'acme' }, 'Token signed-token')).rejects.toThrow(
+      UnauthorizedException,
+    );
     expect(sessionTokenService.verify).not.toHaveBeenCalled();
     expect(service.create).not.toHaveBeenCalled();
   });
@@ -94,14 +103,105 @@ describe('WorkspacesController', () => {
 
     expect(result).toEqual(expected);
     expect(sessionTokenService.verify).toHaveBeenCalledWith('signed-token');
-    expect(service.addMember).toHaveBeenCalledWith('workspace-1', 'stakeholder-2', '00000000-0000-0000-0000-00000000d0fa', claims);
+    expect(service.addMember).toHaveBeenCalledWith(
+      'workspace-1',
+      'stakeholder-2',
+      '00000000-0000-0000-0000-00000000d0fa',
+      claims,
+    );
   });
 
   it('rejects add-member with a missing Authorization header', async () => {
     await expect(
-      controller.addMember('workspace-1', { stakeholderId: 'stakeholder-2' }, undefined, '00000000-0000-0000-0000-00000000d0fa'),
+      controller.addMember(
+        'workspace-1',
+        { stakeholderId: 'stakeholder-2' },
+        undefined,
+        '00000000-0000-0000-0000-00000000d0fa',
+      ),
     ).rejects.toThrow(UnauthorizedException);
     expect(sessionTokenService.verify).not.toHaveBeenCalled();
     expect(service.addMember).not.toHaveBeenCalled();
+  });
+
+  it('verifies the bearer token, parses the body, and delegates assign-discipline', async () => {
+    const expected = {
+      workspaceId: 'workspace-1',
+      stakeholderId: 'stakeholder-2',
+      discipline: 'security',
+      createdAt: '2026-07-15T07:00:00.000Z',
+    } satisfies StakeholderDisciplineResponse;
+    vi.mocked(sessionTokenService.verify).mockReturnValue(claims);
+    vi.mocked(service.assignDiscipline).mockResolvedValue(expected);
+
+    const result = await controller.assignDiscipline(
+      'workspace-1',
+      'stakeholder-2',
+      { discipline: 'security' },
+      'Bearer signed-token',
+      'workspace-1',
+    );
+
+    expect(result).toEqual(expected);
+    expect(service.assignDiscipline).toHaveBeenCalledWith(
+      'workspace-1',
+      'stakeholder-2',
+      'security',
+      'workspace-1',
+      claims,
+    );
+  });
+
+  it('rejects assign-discipline with an invalid discipline body before calling the service', async () => {
+    vi.mocked(sessionTokenService.verify).mockReturnValue(claims);
+
+    await expect(
+      controller.assignDiscipline(
+        'workspace-1',
+        'stakeholder-2',
+        { discipline: 'finance' },
+        'Bearer signed-token',
+        'workspace-1',
+      ),
+    ).rejects.toThrow(BadRequestException);
+    expect(service.assignDiscipline).not.toHaveBeenCalled();
+  });
+
+  it('verifies the bearer token, parses the path param, and delegates revoke-discipline', async () => {
+    vi.mocked(sessionTokenService.verify).mockReturnValue(claims);
+    vi.mocked(service.revokeDiscipline).mockResolvedValue(undefined);
+
+    await expect(
+      controller.revokeDiscipline(
+        'workspace-1',
+        'stakeholder-2',
+        'security',
+        'Bearer signed-token',
+        'workspace-1',
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(service.revokeDiscipline).toHaveBeenCalledWith(
+      'workspace-1',
+      'stakeholder-2',
+      'security',
+      'workspace-1',
+      claims,
+    );
+  });
+
+  it('rejects revoke-discipline with an invalid discipline param before calling the service', async () => {
+    vi.mocked(sessionTokenService.verify).mockReturnValue(claims);
+
+    await expect(
+      controller.revokeDiscipline(
+        'workspace-1',
+        'stakeholder-2',
+        'finance',
+        'Bearer signed-token',
+        'workspace-1',
+      ),
+    ).rejects.toThrow(BadRequestException);
+    expect(service.revokeDiscipline).not.toHaveBeenCalled();
   });
 });

@@ -101,21 +101,21 @@ describe('BranchesController', () => {
     vi.mocked(sessionTokenService.verify).mockReturnValue(claims);
     vi.mocked(service.submit).mockResolvedValue(expected);
 
-    const result = await controller.submit('abc', 'Bearer signed-token', WORKSPACE_ID);
+    const result = await controller.submit('abc', { activeDiscipline: 'product' }, 'Bearer signed-token', WORKSPACE_ID);
 
     expect(result).toEqual(expected);
     expect(sessionTokenService.verify).toHaveBeenCalledWith('signed-token');
-    expect(service.submit).toHaveBeenCalledWith('abc', WORKSPACE_ID, claims);
+    expect(service.submit).toHaveBeenCalledWith('abc', WORKSPACE_ID, claims, 'product');
   });
 
   it('rejects a missing Authorization header', async () => {
-    await expect(controller.submit('abc', undefined, WORKSPACE_ID)).rejects.toThrow(UnauthorizedException);
+    await expect(controller.submit('abc', {}, undefined, WORKSPACE_ID)).rejects.toThrow(UnauthorizedException);
     expect(sessionTokenService.verify).not.toHaveBeenCalled();
     expect(service.submit).not.toHaveBeenCalled();
   });
 
   it('rejects a malformed Authorization header', async () => {
-    await expect(controller.submit('abc', 'Token signed-token', WORKSPACE_ID)).rejects.toThrow(
+    await expect(controller.submit('abc', {}, 'Token signed-token', WORKSPACE_ID)).rejects.toThrow(
       UnauthorizedException,
     );
     expect(sessionTokenService.verify).not.toHaveBeenCalled();

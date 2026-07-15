@@ -15,6 +15,7 @@ import { LOCAL_FILE_BLOB_STORE_CONFIG } from './local-file-blob-store-config.tok
 import { PairingCodeRepository } from './pairing-code.repository.js';
 import { PG_POOL } from './pg-pool.token.js';
 import { RefreshTokenRepository } from './refresh-token.repository.js';
+import { StakeholderDisciplineRepository } from './stakeholder-discipline.repository.js';
 import { StakeholderRepository } from './stakeholder.repository.js';
 import { SuggestionRepository } from './suggestion.repository.js';
 import { VerificationSignalRepository } from './verification-signal.repository.js';
@@ -65,6 +66,7 @@ class PgPoolProvider implements OnApplicationShutdown {
     DeliverySubscriptionRepository,
     RefreshTokenRepository,
     PairingCodeRepository,
+    StakeholderDisciplineRepository,
   ],
   exports: [
     PG_POOL,
@@ -83,6 +85,7 @@ class PgPoolProvider implements OnApplicationShutdown {
     DeliverySubscriptionRepository,
     RefreshTokenRepository,
     PairingCodeRepository,
+    StakeholderDisciplineRepository,
   ],
 })
 // eslint-disable-next-line @typescript-eslint/no-extraneous-class -- NestJS module classes are intentionally empty; behavior comes entirely from the @Module decorator.

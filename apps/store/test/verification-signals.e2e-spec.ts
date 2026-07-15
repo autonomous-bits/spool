@@ -38,6 +38,16 @@ describe('Verification Signals HTTP API (containerized Postgres)', () => {
       `INSERT INTO workspace_memberships (workspace_id, stakeholder_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
       [WORKSPACE_ID, engineeringStakeholderId],
     );
+    // G21 SG3: branch submit now checks the stakeholder_disciplines allow-list (sourced from the
+    // branch's own discipline) rather than a per-token discipline claim. Migration 0019's backfill
+    // only covers stakeholders that existed at migration time, so this test-created stakeholder
+    // needs its own allow-list row.
+    await database.pool.query(
+      `INSERT INTO stakeholder_disciplines (workspace_id, stakeholder_id, discipline)
+       VALUES ($1, $2, 'engineering')
+       ON CONFLICT DO NOTHING`,
+      [WORKSPACE_ID, engineeringStakeholderId],
+    );
 
     const moduleRef: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
@@ -53,10 +63,9 @@ describe('Verification Signals HTTP API (containerized Postgres)', () => {
     await database.close();
   });
 
-  function mintSessionToken(stakeholderId: string, discipline: string | null): string {
+  function mintSessionToken(stakeholderId: string): string {
     return sessionTokenService.sign({
       stakeholderId,
-      discipline,
       authTime: Math.floor(Date.now() / 1000),
       workspaceId: WORKSPACE_ID,
     });
@@ -69,7 +78,7 @@ describe('Verification Signals HTTP API (containerized Postgres)', () => {
   }
 
   async function createBranch(): Promise<string> {
-    const token = mintSessionToken(engineeringStakeholderId, 'engineering');
+    const token = mintSessionToken(engineeringStakeholderId);
     const createResponse = await request(app.getHttpServer())
       .post('/branches')
       .set('X-Workspace-Id', WORKSPACE_ID)
@@ -86,12 +95,13 @@ describe('Verification Signals HTTP API (containerized Postgres)', () => {
 
   async function createSubmittedBranch(): Promise<string> {
     const branchId = await createBranch();
-    const token = mintSessionToken(engineeringStakeholderId, 'engineering');
+    const token = mintSessionToken(engineeringStakeholderId);
 
     const submitResponse = await request(app.getHttpServer())
       .post(`/branches/${branchId}/submit`)
       .set('X-Workspace-Id', WORKSPACE_ID)
-      .set('Authorization', authHeader(token));
+      .set('Authorization', authHeader(token))
+      .send({ activeDiscipline: 'engineering' });
 
     expect(submitResponse.status).toBe(201);
     return branchId;
@@ -99,7 +109,7 @@ describe('Verification Signals HTTP API (containerized Postgres)', () => {
 
   async function createVerifiedBranch(): Promise<string> {
     const branchId = await createSubmittedBranch();
-    const token = mintSessionToken(engineeringStakeholderId, 'engineering');
+    const token = mintSessionToken(engineeringStakeholderId);
 
     const verifyResponse = await request(app.getHttpServer())
       .post(`/branches/${branchId}/verify`)
@@ -112,7 +122,7 @@ describe('Verification Signals HTTP API (containerized Postgres)', () => {
 
   it('POST /branches/:id/verification-signals persists one row for a submitted branch and does not change branch status', async () => {
     const branchId = await createSubmittedBranch();
-    const token = mintSessionToken(engineeringStakeholderId, 'engineering');
+    const token = mintSessionToken(engineeringStakeholderId);
 
     const response = await request(app.getHttpServer())
       .post(`/branches/${branchId}/verification-signals`)
@@ -151,7 +161,7 @@ describe('Verification Signals HTTP API (containerized Postgres)', () => {
 
   it('POST /branches/:id/verification-signals persists one row for a verified branch', async () => {
     const branchId = await createVerifiedBranch();
-    const token = mintSessionToken(engineeringStakeholderId, 'engineering');
+    const token = mintSessionToken(engineeringStakeholderId);
 
     const response = await request(app.getHttpServer())
       .post(`/branches/${branchId}/verification-signals`)
@@ -172,7 +182,7 @@ describe('Verification Signals HTTP API (containerized Postgres)', () => {
   });
 
   it('POST /branches/:id/verification-signals returns 404 for an unknown branchId, no row persisted', async () => {
-    const token = mintSessionToken(engineeringStakeholderId, 'engineering');
+    const token = mintSessionToken(engineeringStakeholderId);
     const response = await request(app.getHttpServer())
       .post('/branches/00000000-0000-0000-0000-00000000dead/verification-signals')
       .set('X-Workspace-Id', WORKSPACE_ID)
@@ -184,7 +194,7 @@ describe('Verification Signals HTTP API (containerized Postgres)', () => {
 
   it('POST /branches/:id/verification-signals returns 409 for a draft branch, no row persisted', async () => {
     const branchId = await createBranch();
-    const token = mintSessionToken(engineeringStakeholderId, 'engineering');
+    const token = mintSessionToken(engineeringStakeholderId);
 
     const response = await request(app.getHttpServer())
       .post(`/branches/${branchId}/verification-signals`)
@@ -203,7 +213,7 @@ describe('Verification Signals HTTP API (containerized Postgres)', () => {
 
   it('POST /branches/:id/verification-signals returns 409 for a merged branch, no row persisted', async () => {
     const branchId = await createVerifiedBranch();
-    const token = mintSessionToken(engineeringStakeholderId, 'engineering');
+    const token = mintSessionToken(engineeringStakeholderId);
     const mergeResponse = await request(app.getHttpServer())
       .post(`/branches/${branchId}/merge`)
       .set('X-Workspace-Id', WORKSPACE_ID)
@@ -227,7 +237,7 @@ describe('Verification Signals HTTP API (containerized Postgres)', () => {
 
   it('POST /branches/:id/verification-signals returns 400 for an invalid status', async () => {
     const branchId = await createSubmittedBranch();
-    const token = mintSessionToken(engineeringStakeholderId, 'engineering');
+    const token = mintSessionToken(engineeringStakeholderId);
 
     const response = await request(app.getHttpServer())
       .post(`/branches/${branchId}/verification-signals`)
@@ -240,7 +250,7 @@ describe('Verification Signals HTTP API (containerized Postgres)', () => {
 
   it('POST /branches/:id/verification-signals returns 400 for a blank verifierName', async () => {
     const branchId = await createSubmittedBranch();
-    const token = mintSessionToken(engineeringStakeholderId, 'engineering');
+    const token = mintSessionToken(engineeringStakeholderId);
 
     const response = await request(app.getHttpServer())
       .post(`/branches/${branchId}/verification-signals`)
@@ -253,7 +263,7 @@ describe('Verification Signals HTTP API (containerized Postgres)', () => {
 
   it('GET /branches/:id/verification-signals returns all signals oldest-first with a valid bearer token', async () => {
     const branchId = await createSubmittedBranch();
-    const token = mintSessionToken(engineeringStakeholderId, 'engineering');
+    const token = mintSessionToken(engineeringStakeholderId);
 
     await request(app.getHttpServer())
       .post(`/branches/${branchId}/verification-signals`)
@@ -303,7 +313,7 @@ describe('Verification Signals HTTP API (containerized Postgres)', () => {
 
   it('POST /branches/:id/verification-signals returns 403 when the X-Workspace-Id header is missing', async () => {
     const branchId = await createSubmittedBranch();
-    const token = mintSessionToken(engineeringStakeholderId, 'engineering');
+    const token = mintSessionToken(engineeringStakeholderId);
 
     const response = await request(app.getHttpServer())
       .post(`/branches/${branchId}/verification-signals`)
@@ -321,7 +331,7 @@ describe('Verification Signals HTTP API (containerized Postgres)', () => {
 
   it('POST /branches/:id/verification-signals returns 403 when X-Workspace-Id does not match the session scope', async () => {
     const branchId = await createSubmittedBranch();
-    const token = mintSessionToken(engineeringStakeholderId, 'engineering');
+    const token = mintSessionToken(engineeringStakeholderId);
 
     const response = await request(app.getHttpServer())
       .post(`/branches/${branchId}/verification-signals`)
@@ -340,7 +350,7 @@ describe('Verification Signals HTTP API (containerized Postgres)', () => {
 
   it('GET /branches/:id/verification-signals returns 403 when the X-Workspace-Id header is missing', async () => {
     const branchId = await createSubmittedBranch();
-    const token = mintSessionToken(engineeringStakeholderId, 'engineering');
+    const token = mintSessionToken(engineeringStakeholderId);
 
     const response = await request(app.getHttpServer())
       .get(`/branches/${branchId}/verification-signals`)
