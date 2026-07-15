@@ -2,7 +2,11 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Pool, PoolClient } from 'pg';
-import { BOOTSTRAP_STAKEHOLDER_ID } from './bootstrap-stakeholder.js';
+import {
+  BOOTSTRAP_STAKEHOLDER_ID,
+  DEFAULT_BOOTSTRAP_STAKEHOLDER_EMAIL,
+  DEFAULT_BOOTSTRAP_STAKEHOLDER_NAME,
+} from './bootstrap-stakeholder.js';
 import {
   OAUTH_E2E_FIXTURE_DISCIPLINE,
   OAUTH_E2E_FIXTURE_GITHUB_LOGIN,
@@ -25,12 +29,34 @@ function listMigrationFiles(): string[] {
     .sort();
 }
 
+/**
+ * Name/email for the bootstrap stakeholder (role='system'), sourced from
+ * `ADMIN_STAKEHOLDER_NAME`/`ADMIN_STAKEHOLDER_EMAIL` when set — see
+ * `tools/docker/seed-admin-env.sh`, which populates these from the host's `git config
+ * user.name`/`user.email` before `docker compose up`, so the bootstrap stakeholder seeded on
+ * first boot reflects a real, known identity instead of the generic placeholder. Falls back to
+ * the documented placeholder defaults otherwise (e.g. unit tests, CI). Only applied on the first
+ * insert — the `ON CONFLICT (id) DO NOTHING` below means an already-seeded bootstrap
+ * stakeholder's name/email is never overwritten by a later run.
+ */
+function resolveBootstrapStakeholderIdentity(env: NodeJS.ProcessEnv): {
+  name: string;
+  email: string;
+} {
+  const name = env.ADMIN_STAKEHOLDER_NAME?.trim() || DEFAULT_BOOTSTRAP_STAKEHOLDER_NAME;
+  const email = env.ADMIN_STAKEHOLDER_EMAIL?.trim() || DEFAULT_BOOTSTRAP_STAKEHOLDER_EMAIL;
+  return { name, email };
+}
+
 async function ensureBaselineSeedData(client: PoolClient): Promise<void> {
+  const { name: bootstrapStakeholderName, email: bootstrapStakeholderEmail } =
+    resolveBootstrapStakeholderIdentity(process.env);
+
   await client.query(
     `INSERT INTO stakeholders (id, name, email, role, discipline)
-     VALUES ($1, 'Bootstrap Stakeholder', 'bootstrap-stakeholder@spool.local', 'system', NULL)
+     VALUES ($1, $2, $3, 'system', NULL)
      ON CONFLICT (id) DO NOTHING`,
-    [BOOTSTRAP_STAKEHOLDER_ID],
+    [BOOTSTRAP_STAKEHOLDER_ID, bootstrapStakeholderName, bootstrapStakeholderEmail],
   );
 
   await client.query(
