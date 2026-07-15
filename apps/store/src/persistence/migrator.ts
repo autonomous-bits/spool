@@ -41,8 +41,10 @@ function resolveBootstrapStakeholderIdentity(env: NodeJS.ProcessEnv): {
   name: string;
   email: string;
 } {
-  const name = env.ADMIN_STAKEHOLDER_NAME?.trim() || DEFAULT_BOOTSTRAP_STAKEHOLDER_NAME;
-  const email = env.ADMIN_STAKEHOLDER_EMAIL?.trim() || DEFAULT_BOOTSTRAP_STAKEHOLDER_EMAIL;
+  const trimmedName = env.ADMIN_STAKEHOLDER_NAME?.trim();
+  const trimmedEmail = env.ADMIN_STAKEHOLDER_EMAIL?.trim();
+  const name = (trimmedName === '' ? undefined : trimmedName) ?? DEFAULT_BOOTSTRAP_STAKEHOLDER_NAME;
+  const email = (trimmedEmail === '' ? undefined : trimmedEmail) ?? DEFAULT_BOOTSTRAP_STAKEHOLDER_EMAIL;
   return { name, email };
 }
 
