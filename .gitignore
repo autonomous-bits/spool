@@ -10,3 +10,4 @@ coverage/
 docs/goals/
 .DS_Store
 .mcp.json
+.vscode/mcp.json
