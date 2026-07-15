@@ -27,6 +27,12 @@ services:
       # Without this override, the redirect_uri sent to GitHub (and echoed back in the token
       # exchange) points at the wrong port and login/token-exchange fails.
       GITHUB_OAUTH_REDIRECT_URI: http://localhost:3002/auth/github/callback
+      # Bootstrap stakeholder (role='system') identity, sourced from the host's git config by
+      # tools/docker/seed-admin-env.sh into repo-root .env before `docker compose up`. Falls
+      # back to migrator.ts's built-in placeholder defaults when unset. Seeded only once — an
+      # already-existing bootstrap stakeholder is never overwritten (see migrator.ts).
+      ADMIN_STAKEHOLDER_NAME: ${ADMIN_STAKEHOLDER_NAME:-}
+      ADMIN_STAKEHOLDER_EMAIL: ${ADMIN_STAKEHOLDER_EMAIL:-}
       # webhook-receiver-stub (and NODE_EXTRA_CA_CERTS to trust it) is not run by this compose
       # file; use compose.debug.yaml to exercise DeliveryWorkerService's outbound TLS handshake
       # against it.

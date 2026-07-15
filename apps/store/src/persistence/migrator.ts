@@ -2,7 +2,11 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Pool, PoolClient } from 'pg';
-import { BOOTSTRAP_STAKEHOLDER_ID } from './bootstrap-stakeholder.js';
+import {
+  BOOTSTRAP_STAKEHOLDER_ID,
+  DEFAULT_BOOTSTRAP_STAKEHOLDER_EMAIL,
+  DEFAULT_BOOTSTRAP_STAKEHOLDER_NAME,
+} from './bootstrap-stakeholder.js';
 import {
   OAUTH_E2E_FIXTURE_DISCIPLINE,
   OAUTH_E2E_FIXTURE_GITHUB_LOGIN,
@@ -25,13 +29,53 @@ function listMigrationFiles(): string[] {
     .sort();
 }
 
+/**
+ * Name/email for the bootstrap stakeholder (role='system'), sourced from
+ * `ADMIN_STAKEHOLDER_NAME`/`ADMIN_STAKEHOLDER_EMAIL` when set — see
+ * `tools/docker/seed-admin-env.sh`, which populates these from the host's `git config
+ * user.name`/`user.email` before `docker compose up`, so the bootstrap stakeholder seeded on
+ * first boot reflects a real, known identity instead of the generic placeholder. Falls back to
+ * the documented placeholder defaults otherwise (e.g. unit tests, CI).
+ */
+function resolveBootstrapStakeholderIdentity(env: NodeJS.ProcessEnv): {
+  name: string;
+  email: string;
+} {
+  const trimmedName = env.ADMIN_STAKEHOLDER_NAME?.trim();
+  const trimmedEmail = env.ADMIN_STAKEHOLDER_EMAIL?.trim();
+  const name = (trimmedName === '' ? undefined : trimmedName) ?? DEFAULT_BOOTSTRAP_STAKEHOLDER_NAME;
+  const email = (trimmedEmail === '' ? undefined : trimmedEmail) ?? DEFAULT_BOOTSTRAP_STAKEHOLDER_EMAIL;
+  return { name, email };
+}
+
 async function ensureBaselineSeedData(client: PoolClient): Promise<void> {
+  const { name: bootstrapStakeholderName, email: bootstrapStakeholderEmail } =
+    resolveBootstrapStakeholderIdentity(process.env);
+
   await client.query(
     `INSERT INTO stakeholders (id, name, email, role, discipline)
      VALUES ($1, 'Bootstrap Stakeholder', 'bootstrap-stakeholder@spool.local', 'system', NULL)
      ON CONFLICT (id) DO NOTHING`,
     [BOOTSTRAP_STAKEHOLDER_ID],
   );
+
+  // Migration 0002 always seeds the bootstrap stakeholder with the placeholder name/email (a
+  // later migration's FK needs the row to exist by then). If ADMIN_STAKEHOLDER_NAME/EMAIL are
+  // set, adopt them here by updating the row in place — but only while it still holds the
+  // untouched placeholder email, so a real admin identity set on first boot is never clobbered
+  // by this running again on every subsequent boot.
+  if (bootstrapStakeholderEmail !== DEFAULT_BOOTSTRAP_STAKEHOLDER_EMAIL) {
+    await client.query(
+      `UPDATE stakeholders SET name = $2, email = $3
+       WHERE id = $1 AND email = $4`,
+      [
+        BOOTSTRAP_STAKEHOLDER_ID,
+        bootstrapStakeholderName,
+        bootstrapStakeholderEmail,
+        DEFAULT_BOOTSTRAP_STAKEHOLDER_EMAIL,
+      ],
+    );
+  }
 
   await client.query(
     `INSERT INTO stakeholders (id, name, email, role, discipline, github_login)
