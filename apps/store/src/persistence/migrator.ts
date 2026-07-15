@@ -35,9 +35,7 @@ function listMigrationFiles(): string[] {
  * `tools/docker/seed-admin-env.sh`, which populates these from the host's `git config
  * user.name`/`user.email` before `docker compose up`, so the bootstrap stakeholder seeded on
  * first boot reflects a real, known identity instead of the generic placeholder. Falls back to
- * the documented placeholder defaults otherwise (e.g. unit tests, CI). Only applied on the first
- * insert — the `ON CONFLICT (id) DO NOTHING` below means an already-seeded bootstrap
- * stakeholder's name/email is never overwritten by a later run.
+ * the documented placeholder defaults otherwise (e.g. unit tests, CI).
  */
 function resolveBootstrapStakeholderIdentity(env: NodeJS.ProcessEnv): {
   name: string;
@@ -54,10 +52,28 @@ async function ensureBaselineSeedData(client: PoolClient): Promise<void> {
 
   await client.query(
     `INSERT INTO stakeholders (id, name, email, role, discipline)
-     VALUES ($1, $2, $3, 'system', NULL)
+     VALUES ($1, 'Bootstrap Stakeholder', 'bootstrap-stakeholder@spool.local', 'system', NULL)
      ON CONFLICT (id) DO NOTHING`,
-    [BOOTSTRAP_STAKEHOLDER_ID, bootstrapStakeholderName, bootstrapStakeholderEmail],
+    [BOOTSTRAP_STAKEHOLDER_ID],
   );
+
+  // Migration 0002 always seeds the bootstrap stakeholder with the placeholder name/email (a
+  // later migration's FK needs the row to exist by then). If ADMIN_STAKEHOLDER_NAME/EMAIL are
+  // set, adopt them here by updating the row in place — but only while it still holds the
+  // untouched placeholder email, so a real admin identity set on first boot is never clobbered
+  // by this running again on every subsequent boot.
+  if (bootstrapStakeholderEmail !== DEFAULT_BOOTSTRAP_STAKEHOLDER_EMAIL) {
+    await client.query(
+      `UPDATE stakeholders SET name = $2, email = $3
+       WHERE id = $1 AND email = $4`,
+      [
+        BOOTSTRAP_STAKEHOLDER_ID,
+        bootstrapStakeholderName,
+        bootstrapStakeholderEmail,
+        DEFAULT_BOOTSTRAP_STAKEHOLDER_EMAIL,
+      ],
+    );
+  }
 
   await client.query(
     `INSERT INTO stakeholders (id, name, email, role, discipline, github_login)
