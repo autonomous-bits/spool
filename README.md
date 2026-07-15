@@ -15,7 +15,7 @@ Spool is a TypeScript/NestJS monorepo managed with pnpm workspaces:
 | `apps/mcp`   | MCP (Model Context Protocol) server for agent-facing interactions — lets agents discover, manage, and approve chunks and relationships. |
 | `tools/`     | Shared scripts, codegen utilities, and CLI helpers. Not application code — do not import from here in `apps/`. |
 | `config/`    | Shared environment configuration templates consumed by apps and Docker Compose. Not for secrets — use local `.env` files. |
-| `docs/`      | Product roadmap, engineering constitution, and goal specifications.                              |
+| `docs/`      | Engineering constitution and architecture documents.                              |
 
 See `docs/constitution.md` for the engineering principles that govern changes to this repository.
 
@@ -80,7 +80,7 @@ detail on structure and testing conventions. Tests use **Vitest**, not Jest.
 ## Documentation
 
 - `docs/constitution.md` — engineering principles and quality gates
-- `docs/architecture.md` - architecture documents
+- `docs/architecture.md` — architecture documents
 
 ## License
 
