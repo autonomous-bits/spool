@@ -52,6 +52,17 @@ describe('Branches HTTP API (containerized Postgres)', () => {
       `INSERT INTO workspace_memberships (workspace_id, stakeholder_id) VALUES ($1, $2), ($1, $3), ($1, $4) ON CONFLICT DO NOTHING`,
       [WORKSPACE_ID, engineeringStakeholderId, productStakeholderId, nullDisciplineStakeholderId],
     );
+    // G21 SG3: submit/search discipline gating is now driven by the stakeholder_disciplines
+    // allow-list (not the legacy per-token discipline claim). Grant each stakeholder only the
+    // discipline their variable name implies; nullDisciplineStakeholderId intentionally gets no
+    // allow-list rows at all, so it can still exercise the "not allowed for any discipline" 403
+    // path formerly covered by a null-discipline-claim 400.
+    await database.pool.query(
+      `INSERT INTO stakeholder_disciplines (workspace_id, stakeholder_id, discipline)
+       VALUES ($1, $2, 'engineering'), ($1, $3, 'product')
+       ON CONFLICT DO NOTHING`,
+      [WORKSPACE_ID, engineeringStakeholderId, productStakeholderId],
+    );
 
     const moduleRef: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
@@ -67,17 +78,16 @@ describe('Branches HTTP API (containerized Postgres)', () => {
     await database.close();
   });
 
-  function mintSessionToken(stakeholderId: string, discipline: string | null): string {
+  function mintSessionToken(stakeholderId: string): string {
     return sessionTokenService.sign({
       stakeholderId,
-      discipline,
       authTime: Math.floor(Date.now() / 1000),
       workspaceId: WORKSPACE_ID,
     });
   }
 
   async function createBranch(discipline: 'engineering' | 'product', stakeholderId: string): Promise<string> {
-    const token = mintSessionToken(stakeholderId, discipline);
+    const token = mintSessionToken(stakeholderId);
     const createResponse = await request(app.getHttpServer())
       .post('/branches')
       .set('X-Workspace-Id', WORKSPACE_ID)
@@ -96,12 +106,13 @@ describe('Branches HTTP API (containerized Postgres)', () => {
     stakeholderId: string,
   ): Promise<string> {
     const branchId = await createBranch(discipline, stakeholderId);
-    const token = mintSessionToken(stakeholderId, discipline);
+    const token = mintSessionToken(stakeholderId);
 
     const submitResponse = await request(app.getHttpServer())
       .post(`/branches/${branchId}/submit`)
       .set('X-Workspace-Id', WORKSPACE_ID)
-      .set('Authorization', `Bearer ${token}`);
+      .set('Authorization', `Bearer ${token}`)
+      .send({ activeDiscipline: discipline });
 
     expect(submitResponse.status).toBe(201);
     return branchId;
@@ -112,7 +123,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
     stakeholderId: string,
   ): Promise<string> {
     const branchId = await createSubmittedBranch(discipline, stakeholderId);
-    const verifyToken = mintSessionToken(productStakeholderId, 'product');
+    const verifyToken = mintSessionToken(productStakeholderId);
 
     const verifyResponse = await request(app.getHttpServer())
       .post(`/branches/${branchId}/verify`)
@@ -124,7 +135,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
   }
 
   it('POST /branches creates a draft branch and GET /branches/:id retrieves it', async () => {
-    const bootstrapToken = mintSessionToken(BOOTSTRAP_STAKEHOLDER_ID, 'engineering');
+    const bootstrapToken = mintSessionToken(BOOTSTRAP_STAKEHOLDER_ID);
     const createResponse = await request(app.getHttpServer())
       .post('/branches')
       .set('X-Workspace-Id', WORKSPACE_ID)
@@ -157,13 +168,13 @@ describe('Branches HTTP API (containerized Postgres)', () => {
 
   it('POST /branches/:id/submit submits a draft branch using only the bearer token actor context and surfaces submittedAt on POST + GET', async () => {
     const branchId = await createBranch('engineering', engineeringStakeholderId);
-    const token = mintSessionToken(engineeringStakeholderId, 'engineering');
+    const token = mintSessionToken(engineeringStakeholderId);
 
     const submitResponse = await request(app.getHttpServer())
       .post(`/branches/${branchId}/submit`)
       .set('X-Workspace-Id', WORKSPACE_ID)
       .set('Authorization', `Bearer ${token}`)
-      .send({ actorKind: 'delegated', discipline: 'security' });
+      .send({ activeDiscipline: 'engineering' });
 
     expect(submitResponse.status).toBe(201);
     expect(submitResponse.body).toMatchObject({
@@ -215,31 +226,82 @@ describe('Branches HTTP API (containerized Postgres)', () => {
   });
 
   it('POST /branches/:id/submit returns 404 for an unknown branch id', async () => {
-    const token = mintSessionToken(engineeringStakeholderId, 'engineering');
+    const token = mintSessionToken(engineeringStakeholderId);
 
     const response = await request(app.getHttpServer())
       .post('/branches/00000000-0000-0000-0000-00000000dead/submit')
       .set('X-Workspace-Id', WORKSPACE_ID)
-      .set('Authorization', `Bearer ${token}`);
+      .set('Authorization', `Bearer ${token}`)
+      .send({ activeDiscipline: 'engineering' });
 
     expect(response.status).toBe(404);
   });
 
   it('POST /branches/:id/submit returns 403 when the token stakeholder is not a workspace member (does not resolve)', async () => {
     const branchId = await createBranch('engineering', engineeringStakeholderId);
-    const token = mintSessionToken('00000000-0000-0000-0000-00000000beef', 'engineering');
+    const token = mintSessionToken('00000000-0000-0000-0000-00000000beef');
 
     const response = await request(app.getHttpServer())
       .post(`/branches/${branchId}/submit`)
       .set('X-Workspace-Id', WORKSPACE_ID)
-      .set('Authorization', `Bearer ${token}`);
+      .set('Authorization', `Bearer ${token}`)
+      .send({ activeDiscipline: 'engineering' });
 
     expect(response.status).toBe(403);
   });
 
-  it('POST /branches/:id/submit returns 400 when the resolved stakeholder discipline is null', async () => {
+  it('POST /branches/:id/submit returns 403 when the stakeholder has no allow-list entry for any discipline (G21 SG3)', async () => {
+    // Replaces the old "resolved stakeholder discipline is null" 400: there is no more per-token
+    // discipline claim to be null. The equivalent gap is a stakeholder with zero
+    // stakeholder_disciplines rows in this workspace, who therefore can't be allowed to act as
+    // any discipline, including the branch's.
     const branchId = await createBranch('engineering', engineeringStakeholderId);
-    const token = mintSessionToken(nullDisciplineStakeholderId, null);
+    const token = mintSessionToken(nullDisciplineStakeholderId);
+
+    const response = await request(app.getHttpServer())
+      .post(`/branches/${branchId}/submit`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ activeDiscipline: 'engineering' });
+
+    expect(response.status).toBe(403);
+  });
+
+  it('POST /branches/:id/submit returns 403 when the stakeholder is not allowed to act as the branch discipline (G21 SG3 allow-list)', async () => {
+    const branchId = await createBranch('engineering', engineeringStakeholderId);
+    const token = mintSessionToken(productStakeholderId);
+
+    const response = await request(app.getHttpServer())
+      .post(`/branches/${branchId}/submit`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ activeDiscipline: 'engineering' });
+
+    expect(response.status).toBe(403);
+  });
+
+  it('POST /branches/:id/submit returns 409 when the branch is no longer in draft status', async () => {
+    const branchId = await createBranch('engineering', engineeringStakeholderId);
+    const token = mintSessionToken(engineeringStakeholderId);
+
+    const firstResponse = await request(app.getHttpServer())
+      .post(`/branches/${branchId}/submit`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ activeDiscipline: 'engineering' });
+    const repeatedResponse = await request(app.getHttpServer())
+      .post(`/branches/${branchId}/submit`)
+      .set('X-Workspace-Id', WORKSPACE_ID)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ activeDiscipline: 'engineering' });
+
+    expect(firstResponse.status).toBe(201);
+    expect(repeatedResponse.status).toBe(409);
+  });
+
+  it('POST /branches/:id/submit returns 400 when activeDiscipline is missing (G21 SG4)', async () => {
+    const branchId = await createBranch('engineering', engineeringStakeholderId);
+    const token = mintSessionToken(engineeringStakeholderId);
 
     const response = await request(app.getHttpServer())
       .post(`/branches/${branchId}/submit`)
@@ -249,38 +311,35 @@ describe('Branches HTTP API (containerized Postgres)', () => {
     expect(response.status).toBe(400);
   });
 
-  it('POST /branches/:id/submit returns 409 when the stakeholder discipline mismatches the branch discipline', async () => {
+  it('POST /branches/:id/submit returns 400 when activeDiscipline is blank (G21 SG4)', async () => {
     const branchId = await createBranch('engineering', engineeringStakeholderId);
-    const token = mintSessionToken(productStakeholderId, 'product');
+    const token = mintSessionToken(engineeringStakeholderId);
 
     const response = await request(app.getHttpServer())
       .post(`/branches/${branchId}/submit`)
       .set('X-Workspace-Id', WORKSPACE_ID)
-      .set('Authorization', `Bearer ${token}`);
+      .set('Authorization', `Bearer ${token}`)
+      .send({ activeDiscipline: '   ' });
 
-    expect(response.status).toBe(409);
+    expect(response.status).toBe(400);
   });
 
-  it('POST /branches/:id/submit returns 409 when the branch is no longer in draft status', async () => {
+  it('POST /branches/:id/submit returns 400 when activeDiscipline is not a valid vocabulary value (G21 SG4)', async () => {
     const branchId = await createBranch('engineering', engineeringStakeholderId);
-    const token = mintSessionToken(engineeringStakeholderId, 'engineering');
+    const token = mintSessionToken(engineeringStakeholderId);
 
-    const firstResponse = await request(app.getHttpServer())
+    const response = await request(app.getHttpServer())
       .post(`/branches/${branchId}/submit`)
       .set('X-Workspace-Id', WORKSPACE_ID)
-      .set('Authorization', `Bearer ${token}`);
-    const repeatedResponse = await request(app.getHttpServer())
-      .post(`/branches/${branchId}/submit`)
-      .set('X-Workspace-Id', WORKSPACE_ID)
-      .set('Authorization', `Bearer ${token}`);
+      .set('Authorization', `Bearer ${token}`)
+      .send({ activeDiscipline: 'bogus' });
 
-    expect(firstResponse.status).toBe(201);
-    expect(repeatedResponse.status).toBe(409);
+    expect(response.status).toBe(400);
   });
 
   it('POST /branches/:id/verify verifies a submitted branch with a cross-discipline stakeholder token and surfaces verifiedAt', async () => {
     const branchId = await createSubmittedBranch('engineering', engineeringStakeholderId);
-    const token = mintSessionToken(productStakeholderId, 'product');
+    const token = mintSessionToken(productStakeholderId);
 
     const verifyResponse = await request(app.getHttpServer())
       .post(`/branches/${branchId}/verify`)
@@ -302,7 +361,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
 
   it('POST /branches/:id/verify succeeds for a stakeholder with a null discipline', async () => {
     const branchId = await createSubmittedBranch('engineering', engineeringStakeholderId);
-    const token = mintSessionToken(nullDisciplineStakeholderId, null);
+    const token = mintSessionToken(nullDisciplineStakeholderId);
 
     const verifyResponse = await request(app.getHttpServer())
       .post(`/branches/${branchId}/verify`)
@@ -322,7 +381,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
   });
 
   it('POST /branches/:id/verify returns 404 for an unknown branch id', async () => {
-    const token = mintSessionToken(engineeringStakeholderId, 'engineering');
+    const token = mintSessionToken(engineeringStakeholderId);
 
     const response = await request(app.getHttpServer())
       .post('/branches/00000000-0000-0000-0000-00000000dead/verify')
@@ -334,7 +393,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
 
   it('POST /branches/:id/verify returns 403 when the token stakeholder is not a workspace member (does not resolve)', async () => {
     const branchId = await createSubmittedBranch('engineering', engineeringStakeholderId);
-    const token = mintSessionToken('00000000-0000-0000-0000-00000000beef', 'engineering');
+    const token = mintSessionToken('00000000-0000-0000-0000-00000000beef');
 
     const response = await request(app.getHttpServer())
       .post(`/branches/${branchId}/verify`)
@@ -346,7 +405,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
 
   it('POST /branches/:id/verify returns 409 when the branch is not submitted', async () => {
     const branchId = await createBranch('engineering', engineeringStakeholderId);
-    const token = mintSessionToken(productStakeholderId, 'product');
+    const token = mintSessionToken(productStakeholderId);
 
     const response = await request(app.getHttpServer())
       .post(`/branches/${branchId}/verify`)
@@ -358,7 +417,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
 
   it('POST /branches/:id/verify returns 409 when the branch was already verified', async () => {
     const branchId = await createSubmittedBranch('engineering', engineeringStakeholderId);
-    const token = mintSessionToken(productStakeholderId, 'product');
+    const token = mintSessionToken(productStakeholderId);
 
     const firstResponse = await request(app.getHttpServer())
       .post(`/branches/${branchId}/verify`)
@@ -375,7 +434,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
 
   it('POST /branches/:id/reject resets a submitted branch to draft, clearing verifiedAt and submittedAt', async () => {
     const branchId = await createSubmittedBranch('engineering', engineeringStakeholderId);
-    const token = mintSessionToken(productStakeholderId, 'product');
+    const token = mintSessionToken(productStakeholderId);
 
     const rejectResponse = await request(app.getHttpServer())
       .post(`/branches/${branchId}/reject`)
@@ -399,7 +458,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
 
   it('POST /branches/:id/reject resets a verified branch to draft', async () => {
     const branchId = await createSubmittedBranch('engineering', engineeringStakeholderId);
-    const verifyToken = mintSessionToken(productStakeholderId, 'product');
+    const verifyToken = mintSessionToken(productStakeholderId);
     await request(app.getHttpServer())
       .post(`/branches/${branchId}/verify`)
       .set('X-Workspace-Id', WORKSPACE_ID)
@@ -418,7 +477,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
 
   it('POST /branches/:id/reject returns 409 when the branch is a draft', async () => {
     const branchId = await createBranch('engineering', engineeringStakeholderId);
-    const token = mintSessionToken(productStakeholderId, 'product');
+    const token = mintSessionToken(productStakeholderId);
 
     const response = await request(app.getHttpServer())
       .post(`/branches/${branchId}/reject`)
@@ -437,7 +496,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
   });
 
   it('POST /branches/:id/reject returns 404 for an unknown branch id', async () => {
-    const token = mintSessionToken(engineeringStakeholderId, 'engineering');
+    const token = mintSessionToken(engineeringStakeholderId);
 
     const response = await request(app.getHttpServer())
       .post('/branches/00000000-0000-0000-0000-00000000dead/reject')
@@ -449,7 +508,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
 
   it('POST /branches/:id/merge merges a verified branch and returns mergedAt', async () => {
     const branchId = await createVerifiedBranch('engineering', engineeringStakeholderId);
-    const token = mintSessionToken(productStakeholderId, 'product');
+    const token = mintSessionToken(productStakeholderId);
 
     const mergeResponse = await request(app.getHttpServer())
       .post(`/branches/${branchId}/merge`)
@@ -471,7 +530,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
 
   it('POST /branches/:id/merge is discipline-agnostic (any human stakeholder can merge)', async () => {
     const branchId = await createVerifiedBranch('engineering', engineeringStakeholderId);
-    const token = mintSessionToken(nullDisciplineStakeholderId, null);
+    const token = mintSessionToken(nullDisciplineStakeholderId);
 
     const mergeResponse = await request(app.getHttpServer())
       .post(`/branches/${branchId}/merge`)
@@ -484,7 +543,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
 
   it('POST /branches/:id/merge returns 409 when the branch is not verified', async () => {
     const branchId = await createSubmittedBranch('engineering', engineeringStakeholderId);
-    const token = mintSessionToken(productStakeholderId, 'product');
+    const token = mintSessionToken(productStakeholderId);
 
     const response = await request(app.getHttpServer())
       .post(`/branches/${branchId}/merge`)
@@ -503,7 +562,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
   });
 
   it('POST /branches/:id/merge returns 404 for an unknown branch id', async () => {
-    const token = mintSessionToken(engineeringStakeholderId, 'engineering');
+    const token = mintSessionToken(engineeringStakeholderId);
 
     const response = await request(app.getHttpServer())
       .post('/branches/00000000-0000-0000-0000-00000000dead/merge')
@@ -514,7 +573,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
   });
 
   it('POST /branches returns 400 for an invalid discipline', async () => {
-    const token = mintSessionToken(BOOTSTRAP_STAKEHOLDER_ID, 'engineering');
+    const token = mintSessionToken(BOOTSTRAP_STAKEHOLDER_ID);
     const response = await request(app.getHttpServer())
       .post('/branches')
       .set('X-Workspace-Id', WORKSPACE_ID)
@@ -528,7 +587,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
   });
 
   it('POST /branches returns 400 for a missing required field', async () => {
-    const token = mintSessionToken(BOOTSTRAP_STAKEHOLDER_ID, 'engineering');
+    const token = mintSessionToken(BOOTSTRAP_STAKEHOLDER_ID);
     const response = await request(app.getHttpServer())
       .post('/branches')
       .set('X-Workspace-Id', WORKSPACE_ID)
@@ -541,7 +600,7 @@ describe('Branches HTTP API (containerized Postgres)', () => {
   });
 
   it('GET /branches/:id returns 404 for an unknown id', async () => {
-    const token = mintSessionToken(BOOTSTRAP_STAKEHOLDER_ID, 'engineering');
+    const token = mintSessionToken(BOOTSTRAP_STAKEHOLDER_ID);
     const response = await request(app.getHttpServer())
       .get('/branches/00000000-0000-0000-0000-00000000dead')
       .set('X-Workspace-Id', WORKSPACE_ID)

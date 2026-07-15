@@ -7,6 +7,7 @@ import {
 import { describe, expect, it, vi } from 'vitest';
 import { Branch } from '../domain/branch.js';
 import { Suggestion } from '../domain/suggestion.js';
+import type { StakeholderDisciplineRepository } from '../persistence/stakeholder-discipline.repository.js';
 import type { StakeholderRepository } from '../persistence/stakeholder.repository.js';
 import type { SuggestionRepository } from '../persistence/suggestion.repository.js';
 import type { WorkspaceRepository } from '../persistence/workspace.repository.js';
@@ -39,7 +40,6 @@ function edgeRequest(): CreateSuggestionRequest {
 
 const claims = {
   stakeholderId: STAKEHOLDER_ID,
-  discipline: 'product',
   authTime: 1_752_000_000,
   workspaceId: WORKSPACE_ID,
 };
@@ -65,10 +65,14 @@ function setUp() {
   const workspaceRepository: Pick<WorkspaceRepository, 'isMember'> = {
     isMember: vi.fn().mockResolvedValue(true),
   };
+  const stakeholderDisciplineRepository: Pick<StakeholderDisciplineRepository, 'isAllowed'> = {
+    isAllowed: vi.fn().mockResolvedValue(true),
+  };
   const service = new SuggestionsService(
     suggestionRepository as SuggestionRepository,
     stakeholderRepository as StakeholderRepository,
     workspaceRepository as WorkspaceRepository,
+    stakeholderDisciplineRepository as StakeholderDisciplineRepository,
   );
   return { suggestionRepository, stakeholderRepository, workspaceRepository, service };
 }

@@ -97,12 +97,14 @@ const searchChunksInputSchema = {
   q: z.string().min(1).optional(),
   limit: z.number().optional(),
   cursor: z.string().min(1).optional(),
+  activeDiscipline: z.string().min(1).optional(),
 } satisfies ZodRawShape;
 
 const getNeighbourhoodInputSchema = {
   id: z.string().min(1),
   depth: z.number().optional(),
   branchId: z.string().min(1).optional(),
+  activeDiscipline: z.string().min(1).optional(),
 } satisfies ZodRawShape;
 
 /**

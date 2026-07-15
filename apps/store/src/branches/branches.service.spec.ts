@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionTokenClaims } from '../auth/session-token.service.js';
 import { Branch } from '../domain/branch.js';
 import { BranchRepository } from '../persistence/branch.repository.js';
+import { StakeholderDisciplineRepository } from '../persistence/stakeholder-discipline.repository.js';
 import { StakeholderRepository } from '../persistence/stakeholder.repository.js';
 import { WorkspaceRepository } from '../persistence/workspace.repository.js';
 import { BranchesService } from './branches.service.js';
@@ -22,7 +23,6 @@ function validRequest(overrides: Partial<CreateBranchRequest> = {}): CreateBranc
 function validClaims(overrides: Partial<SessionTokenClaims> = {}): SessionTokenClaims {
   return {
     stakeholderId: '00000000-0000-0000-0000-000000000001',
-    discipline: 'product',
     authTime: 1_752_000_000,
     workspaceId: WORKSPACE_ID,
     ...overrides,
@@ -36,6 +36,7 @@ describe('BranchesService', () => {
   >;
   let stakeholderRepository: Pick<StakeholderRepository, 'findById'>;
   let workspaceRepository: Pick<WorkspaceRepository, 'isMember'>;
+  let stakeholderDisciplineRepository: Pick<StakeholderDisciplineRepository, 'isAllowed'>;
   let service: BranchesService;
 
   beforeEach(async () => {
@@ -68,6 +69,12 @@ describe('BranchesService', () => {
             isMember: vi.fn().mockResolvedValue(true),
           } satisfies Pick<WorkspaceRepository, 'isMember'>,
         },
+        {
+          provide: StakeholderDisciplineRepository,
+          useValue: {
+            isAllowed: vi.fn().mockResolvedValue(true),
+          } satisfies Pick<StakeholderDisciplineRepository, 'isAllowed'>,
+        },
       ],
     }).compile();
 
@@ -75,6 +82,7 @@ describe('BranchesService', () => {
     branchRepository = module.get(BranchRepository);
     stakeholderRepository = module.get(StakeholderRepository);
     workspaceRepository = module.get(WorkspaceRepository);
+    stakeholderDisciplineRepository = module.get(StakeholderDisciplineRepository);
   });
 
   it('creates and returns the persisted branch with claims-derived authorship', async () => {
@@ -147,18 +155,18 @@ describe('BranchesService', () => {
   });
 
   it('throws ForbiddenException from submit when the X-Workspace-Id header is missing', async () => {
-    await expect(service.submit('branch-1', undefined, validClaims())).rejects.toThrow(ForbiddenException);
+    await expect(service.submit('branch-1', undefined, validClaims(), undefined)).rejects.toThrow(ForbiddenException);
     expect(branchRepository.findById).not.toHaveBeenCalled();
   });
 
   it('throws ForbiddenException from submit when the token workspace claim does not match the header', async () => {
     await expect(
-      service.submit('branch-1', WORKSPACE_ID, validClaims({ workspaceId: '00000000-0000-0000-0000-00000000beef' })),
+      service.submit('branch-1', WORKSPACE_ID, validClaims({ workspaceId: '00000000-0000-0000-0000-00000000beef' }), undefined),
     ).rejects.toThrow(ForbiddenException);
     expect(branchRepository.findById).not.toHaveBeenCalled();
   });
 
-  it('submits a matching draft branch for a stakeholder with a valid discipline', async () => {
+  it('submits a matching draft branch for a stakeholder allowed to act as the branch discipline', async () => {
     const branch = new Branch({
       workspaceId: WORKSPACE_ID,
       name: 'feature-branch',
@@ -179,49 +187,87 @@ describe('BranchesService', () => {
     });
     vi.mocked(stakeholderRepository.findById).mockResolvedValue({
       id: validClaims().stakeholderId,
-      discipline: 'product',
+      discipline: null,
     });
     vi.mocked(branchRepository.findById).mockResolvedValue(branch);
     vi.mocked(branchRepository.submit).mockResolvedValue(submitted);
+    vi.mocked(stakeholderDisciplineRepository.isAllowed).mockResolvedValue(true);
 
-    const result = await service.submit(branch.id, WORKSPACE_ID, validClaims());
+    const result = await service.submit(branch.id, WORKSPACE_ID, validClaims(), 'product');
 
     expect(result.status).toBe('submitted');
     expect(result.submittedAt).toBe('2026-07-05T12:34:56.000Z');
     expect(stakeholderRepository.findById).toHaveBeenCalledWith(validClaims().stakeholderId);
+    expect(stakeholderDisciplineRepository.isAllowed).toHaveBeenCalledWith(
+      WORKSPACE_ID,
+      validClaims().stakeholderId,
+      'product',
+    );
     expect(branchRepository.submit).toHaveBeenCalledWith(branch.id, WORKSPACE_ID);
   });
 
-  it('returns 400 when the token stakeholder does not resolve', async () => {
-    vi.mocked(stakeholderRepository.findById).mockResolvedValue(undefined);
+  it('returns 404 when the branch does not exist, before any stakeholder lookup', async () => {
+    vi.mocked(branchRepository.findById).mockResolvedValue(undefined);
 
-    await expect(service.submit('branch-1', WORKSPACE_ID, validClaims())).rejects.toThrow(BadRequestException);
-    expect(branchRepository.findById).not.toHaveBeenCalled();
+    await expect(service.submit('missing-branch', WORKSPACE_ID, validClaims(), 'product')).rejects.toThrow(
+      NotFoundException,
+    );
+    expect(stakeholderRepository.findById).not.toHaveBeenCalled();
   });
 
-  it('returns 400 when the resolved stakeholder discipline is null', async () => {
+  it('returns 400 when the token stakeholder does not resolve', async () => {
+    const branch = new Branch({
+      workspaceId: WORKSPACE_ID,
+      name: 'feature-branch',
+      discipline: 'product',
+      createdByStakeholderId: 'creator-1',
+    });
+    vi.mocked(branchRepository.findById).mockResolvedValue(branch);
+    vi.mocked(stakeholderRepository.findById).mockResolvedValue(undefined);
+
+    await expect(service.submit(branch.id, WORKSPACE_ID, validClaims(), 'product')).rejects.toThrow(BadRequestException);
+    expect(branchRepository.submit).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 when activeDiscipline is missing', async () => {
+    const branch = new Branch({
+      workspaceId: WORKSPACE_ID,
+      name: 'feature-branch',
+      discipline: 'product',
+      createdByStakeholderId: 'creator-1',
+    });
+    vi.mocked(branchRepository.findById).mockResolvedValue(branch);
     vi.mocked(stakeholderRepository.findById).mockResolvedValue({
       id: validClaims().stakeholderId,
       discipline: null,
     });
 
-    await expect(service.submit('branch-1', WORKSPACE_ID, validClaims())).rejects.toThrow(BadRequestException);
-    expect(branchRepository.findById).not.toHaveBeenCalled();
+    await expect(service.submit(branch.id, WORKSPACE_ID, validClaims(), undefined)).rejects.toThrow(
+      BadRequestException,
+    );
+    expect(branchRepository.submit).not.toHaveBeenCalled();
   });
 
-  it('returns 404 when the branch does not exist', async () => {
+  it('returns 400 when activeDiscipline is not a valid vocabulary value', async () => {
+    const branch = new Branch({
+      workspaceId: WORKSPACE_ID,
+      name: 'feature-branch',
+      discipline: 'product',
+      createdByStakeholderId: 'creator-1',
+    });
+    vi.mocked(branchRepository.findById).mockResolvedValue(branch);
     vi.mocked(stakeholderRepository.findById).mockResolvedValue({
       id: validClaims().stakeholderId,
-      discipline: 'product',
+      discipline: null,
     });
-    vi.mocked(branchRepository.findById).mockResolvedValue(undefined);
 
-    await expect(service.submit('missing-branch', WORKSPACE_ID, validClaims())).rejects.toThrow(
-      NotFoundException,
+    await expect(service.submit(branch.id, WORKSPACE_ID, validClaims(), 'bogus')).rejects.toThrow(
+      BadRequestException,
     );
+    expect(branchRepository.submit).not.toHaveBeenCalled();
   });
 
-  it('returns 409 when the stakeholder discipline does not match the branch discipline', async () => {
+  it('returns 403 when activeDiscipline is a valid vocabulary value but not in the allow-list', async () => {
     const branch = new Branch({
       workspaceId: WORKSPACE_ID,
       name: 'feature-branch',
@@ -230,11 +276,32 @@ describe('BranchesService', () => {
     });
     vi.mocked(stakeholderRepository.findById).mockResolvedValue({
       id: validClaims().stakeholderId,
-      discipline: 'product',
+      discipline: null,
     });
     vi.mocked(branchRepository.findById).mockResolvedValue(branch);
+    vi.mocked(stakeholderDisciplineRepository.isAllowed).mockResolvedValue(false);
 
-    await expect(service.submit(branch.id, WORKSPACE_ID, validClaims())).rejects.toThrow(ConflictException);
+    await expect(service.submit(branch.id, WORKSPACE_ID, validClaims(), 'engineering')).rejects.toThrow(
+      ForbiddenException,
+    );
+    expect(branchRepository.submit).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 when the stakeholder is not allowed to act as the branch discipline (G21 SG1 allow-list)', async () => {
+    const branch = new Branch({
+      workspaceId: WORKSPACE_ID,
+      name: 'feature-branch',
+      discipline: 'engineering',
+      createdByStakeholderId: 'creator-1',
+    });
+    vi.mocked(stakeholderRepository.findById).mockResolvedValue({
+      id: validClaims().stakeholderId,
+      discipline: null,
+    });
+    vi.mocked(branchRepository.findById).mockResolvedValue(branch);
+    vi.mocked(stakeholderDisciplineRepository.isAllowed).mockResolvedValue(false);
+
+    await expect(service.submit(branch.id, WORKSPACE_ID, validClaims(), 'engineering')).rejects.toThrow(ForbiddenException);
     expect(branchRepository.submit).not.toHaveBeenCalled();
   });
 
@@ -249,11 +316,11 @@ describe('BranchesService', () => {
     });
     vi.mocked(stakeholderRepository.findById).mockResolvedValue({
       id: validClaims().stakeholderId,
-      discipline: 'product',
+      discipline: null,
     });
     vi.mocked(branchRepository.findById).mockResolvedValue(branch);
 
-    await expect(service.submit(branch.id, WORKSPACE_ID, validClaims())).rejects.toThrow(ConflictException);
+    await expect(service.submit(branch.id, WORKSPACE_ID, validClaims(), 'product')).rejects.toThrow(ConflictException);
     expect(branchRepository.submit).not.toHaveBeenCalled();
   });
 
@@ -266,12 +333,12 @@ describe('BranchesService', () => {
     });
     vi.mocked(stakeholderRepository.findById).mockResolvedValue({
       id: validClaims().stakeholderId,
-      discipline: 'product',
+      discipline: null,
     });
     vi.mocked(branchRepository.findById).mockResolvedValue(branch);
     vi.mocked(branchRepository.submit).mockResolvedValue(undefined);
 
-    await expect(service.submit(branch.id, WORKSPACE_ID, validClaims())).rejects.toThrow(ConflictException);
+    await expect(service.submit(branch.id, WORKSPACE_ID, validClaims(), 'product')).rejects.toThrow(ConflictException);
   });
 
   it('throws ForbiddenException from verify when the X-Workspace-Id header is missing', async () => {

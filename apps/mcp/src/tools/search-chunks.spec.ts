@@ -18,6 +18,7 @@ describe('search-chunks tool', () => {
         q: 'search query',
         limit: 10,
         cursor: 'cursor-string',
+        activeDiscipline: 'product',
       });
       expect(result).toEqual({
         discipline: 'product',
@@ -28,6 +29,7 @@ describe('search-chunks tool', () => {
         q: 'search query',
         limit: 10,
         cursor: 'cursor-string',
+        activeDiscipline: 'product',
       });
     });
 
@@ -91,6 +93,21 @@ describe('search-chunks tool', () => {
 
       expect(global.fetch).toHaveBeenCalledWith(
         'http://localhost:3000/chunks?type=feature',
+        expect.anything(),
+      );
+    });
+
+    it('forwards activeDiscipline as a query parameter for branch-scoped searches', async () => {
+      const mockResult = { chunks: [], nextCursor: null };
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue(mockResult),
+      });
+
+      await searchChunks({ branchId: 'branch-123', activeDiscipline: 'design' }, 'http://localhost:3000');
+
+      expect(global.fetch).toHaveBeenCalledWith(
+        'http://localhost:3000/chunks?branchId=branch-123&activeDiscipline=design',
         expect.anything(),
       );
     });

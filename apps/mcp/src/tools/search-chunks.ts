@@ -18,6 +18,7 @@ export interface SearchChunksInput {
   q?: string;
   limit?: number;
   cursor?: string;
+  activeDiscipline?: string;
 }
 
 export interface ChunkResponse {
@@ -108,6 +109,9 @@ export function parseSearchChunksInput(body: unknown): SearchChunksInput {
 
   const cursor = optionalStringField(record, 'cursor');
   if (cursor !== undefined) result.cursor = cursor;
+
+  const activeDiscipline = optionalStringField(record, 'activeDiscipline');
+  if (activeDiscipline !== undefined) result.activeDiscipline = activeDiscipline;
 
   return result;
 }

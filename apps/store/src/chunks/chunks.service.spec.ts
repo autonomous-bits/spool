@@ -4,6 +4,8 @@ import { Branch } from '../domain/branch.js';
 import { Chunk } from '../domain/chunk.js';
 import type { BranchRepository } from '../persistence/branch.repository.js';
 import type { ChunkRepository } from '../persistence/chunk.repository.js';
+import type { StakeholderDisciplineRepository } from '../persistence/stakeholder-discipline.repository.js';
+import type { StakeholderRepository } from '../persistence/stakeholder.repository.js';
 import type { WorkspaceRepository } from '../persistence/workspace.repository.js';
 import type { SessionTokenClaims } from '../auth/session-token.service.js';
 import { ChunksService } from './chunks.service.js';
@@ -27,7 +29,6 @@ function validClaims(overrides: Partial<SessionTokenClaims> = {}): SessionTokenC
   return {
     stakeholderId: STAKEHOLDER_ID,
     workspaceId: WORKSPACE_ID,
-    discipline: 'product',
     authTime: 1_752_000_000,
     ...overrides,
   };
@@ -37,6 +38,8 @@ describe('ChunksService', () => {
   let chunkRepository: Pick<ChunkRepository, 'create' | 'findById' | 'search'>;
   let branchRepository: Pick<BranchRepository, 'findById'>;
   let workspaceRepository: Pick<WorkspaceRepository, 'isMember'>;
+  let stakeholderDisciplineRepository: Pick<StakeholderDisciplineRepository, 'isAllowed'>;
+  let stakeholderRepository: Pick<StakeholderRepository, 'findById'>;
   let service: ChunksService;
 
   beforeEach(() => {
@@ -51,10 +54,18 @@ describe('ChunksService', () => {
     workspaceRepository = {
       isMember: vi.fn().mockResolvedValue(true),
     };
+    stakeholderDisciplineRepository = {
+      isAllowed: vi.fn().mockResolvedValue(true),
+    };
+    stakeholderRepository = {
+      findById: vi.fn().mockResolvedValue({ id: STAKEHOLDER_ID, discipline: null }),
+    };
     service = new ChunksService(
       chunkRepository as ChunkRepository,
       branchRepository as BranchRepository,
       workspaceRepository as WorkspaceRepository,
+      stakeholderDisciplineRepository as StakeholderDisciplineRepository,
+      stakeholderRepository as StakeholderRepository,
     );
   });
 
@@ -197,5 +208,93 @@ describe('ChunksService', () => {
     const createdArg = vi.mocked(chunkRepository.create).mock.calls[0]?.[0];
     expect(createdArg?.branchId).toBe(branch.id);
     expect(createdArg?.originBranchId).toBe(branch.id);
+  });
+
+  describe('branch-scoped search/getNeighbourhood (G21 SG4 activeDiscipline gate)', () => {
+    function branchScopedRequestFilters(branchId: string) {
+      return { workspaceId: WORKSPACE_ID, branchId } as const;
+    }
+
+    it('search() succeeds when activeDiscipline is allowed for the stakeholder', async () => {
+      const branch = new Branch({
+        workspaceId: WORKSPACE_ID,
+        name: 'design-work',
+        discipline: 'design',
+        createdByStakeholderId: '00000000-0000-0000-0000-000000000001',
+      });
+      vi.mocked(branchRepository.findById).mockResolvedValue(branch);
+      vi.mocked(stakeholderDisciplineRepository.isAllowed).mockResolvedValue(true);
+      vi.mocked(chunkRepository.search).mockResolvedValue({ chunks: [], nextCursor: null });
+
+      await service.search(branchScopedRequestFilters(branch.id), 10, validClaims(), undefined, 'design');
+
+      expect(stakeholderDisciplineRepository.isAllowed).toHaveBeenCalledWith(
+        WORKSPACE_ID,
+        STAKEHOLDER_ID,
+        'design',
+      );
+    });
+
+    it('search() throws BadRequestException when activeDiscipline is missing and branchId is present', async () => {
+      const branch = new Branch({
+        workspaceId: WORKSPACE_ID,
+        name: 'design-work',
+        discipline: 'design',
+        createdByStakeholderId: '00000000-0000-0000-0000-000000000001',
+      });
+      vi.mocked(branchRepository.findById).mockResolvedValue(branch);
+
+      await expect(
+        service.search(branchScopedRequestFilters(branch.id), 10, validClaims(), undefined, undefined),
+      ).rejects.toThrow(BadRequestException);
+      expect(chunkRepository.search).not.toHaveBeenCalled();
+    });
+
+    it('search() throws ForbiddenException when activeDiscipline is a valid vocabulary value but disallowed', async () => {
+      const branch = new Branch({
+        workspaceId: WORKSPACE_ID,
+        name: 'design-work',
+        discipline: 'design',
+        createdByStakeholderId: '00000000-0000-0000-0000-000000000001',
+      });
+      vi.mocked(branchRepository.findById).mockResolvedValue(branch);
+      vi.mocked(stakeholderDisciplineRepository.isAllowed).mockResolvedValue(false);
+
+      await expect(
+        service.search(branchScopedRequestFilters(branch.id), 10, validClaims(), undefined, 'design'),
+      ).rejects.toThrow(ForbiddenException);
+      expect(chunkRepository.search).not.toHaveBeenCalled();
+    });
+
+    it('getNeighbourhood() throws BadRequestException when activeDiscipline is missing and branchId is present', async () => {
+      const branch = new Branch({
+        workspaceId: WORKSPACE_ID,
+        name: 'design-work',
+        discipline: 'design',
+        createdByStakeholderId: '00000000-0000-0000-0000-000000000001',
+      });
+      vi.mocked(branchRepository.findById).mockResolvedValue(branch);
+
+      await expect(
+        service.getNeighbourhood('chunk-1', WORKSPACE_ID, validClaims(), 1, branch.id, undefined),
+      ).rejects.toThrow(BadRequestException);
+      expect(chunkRepository.findById).not.toHaveBeenCalled();
+    });
+
+    it('getNeighbourhood() throws ForbiddenException when activeDiscipline is a valid vocabulary value but disallowed', async () => {
+      const branch = new Branch({
+        workspaceId: WORKSPACE_ID,
+        name: 'design-work',
+        discipline: 'design',
+        createdByStakeholderId: '00000000-0000-0000-0000-000000000001',
+      });
+      vi.mocked(branchRepository.findById).mockResolvedValue(branch);
+      vi.mocked(stakeholderDisciplineRepository.isAllowed).mockResolvedValue(false);
+
+      await expect(
+        service.getNeighbourhood('chunk-1', WORKSPACE_ID, validClaims(), 1, branch.id, 'design'),
+      ).rejects.toThrow(ForbiddenException);
+      expect(chunkRepository.findById).not.toHaveBeenCalled();
+    });
   });
 });

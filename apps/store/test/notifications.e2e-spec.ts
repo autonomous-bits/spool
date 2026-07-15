@@ -38,6 +38,16 @@ describe('Notifications HTTP API (containerized Postgres)', () => {
       `INSERT INTO workspace_memberships (workspace_id, stakeholder_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
       [WORKSPACE_ID, engineeringStakeholderId],
     );
+    // G21 SG3: branch submit now checks the stakeholder_disciplines allow-list (sourced from the
+    // branch's own discipline) rather than a per-token discipline claim. Migration 0019's backfill
+    // only covers stakeholders that existed at migration time, so this test-created stakeholder
+    // needs its own allow-list row.
+    await database.pool.query(
+      `INSERT INTO stakeholder_disciplines (workspace_id, stakeholder_id, discipline)
+       VALUES ($1, $2, 'engineering')
+       ON CONFLICT DO NOTHING`,
+      [WORKSPACE_ID, engineeringStakeholderId],
+    );
 
     const moduleRef: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
@@ -59,10 +69,9 @@ describe('Notifications HTTP API (containerized Postgres)', () => {
     return BEARER_PREFIX.concat(token);
   }
 
-  function mintSessionToken(stakeholderId: string, discipline: string | null): string {
+  function mintSessionToken(stakeholderId: string): string {
     return sessionTokenService.sign({
       stakeholderId,
-      discipline,
       authTime: Math.floor(Date.now() / 1000),
       workspaceId: WORKSPACE_ID,
     });
@@ -89,7 +98,7 @@ describe('Notifications HTTP API (containerized Postgres)', () => {
    * that is a member of `WORKSPACE_ID`.
    */
   async function createSignal(): Promise<void> {
-    const token = mintSessionToken(engineeringStakeholderId, 'engineering');
+    const token = mintSessionToken(engineeringStakeholderId);
     const createResponse = await request(app.getHttpServer())
       .post('/branches')
       .set('X-Workspace-Id', WORKSPACE_ID)
@@ -105,7 +114,8 @@ describe('Notifications HTTP API (containerized Postgres)', () => {
     const submitResponse = await request(app.getHttpServer())
       .post(`/branches/${branchId}/submit`)
       .set('X-Workspace-Id', WORKSPACE_ID)
-      .set('Authorization', authHeader(token));
+      .set('Authorization', authHeader(token))
+      .send({ activeDiscipline: 'engineering' });
     expect(submitResponse.status).toBe(201);
 
     const signalResponse = await request(app.getHttpServer())
@@ -122,7 +132,7 @@ describe('Notifications HTTP API (containerized Postgres)', () => {
     await createSignal();
     await createSignal();
 
-    const token = mintSessionToken(stakeholderId, 'engineering');
+    const token = mintSessionToken(stakeholderId);
     const response = await request(app.getHttpServer())
       .get('/notifications')
       .set('X-Workspace-Id', WORKSPACE_ID)
@@ -142,7 +152,7 @@ describe('Notifications HTTP API (containerized Postgres)', () => {
     await createSignal();
     await createSignal();
 
-    const token = mintSessionToken(stakeholderId, 'engineering');
+    const token = mintSessionToken(stakeholderId);
     const listResponse = await request(app.getHttpServer())
       .get('/notifications')
       .set('X-Workspace-Id', WORKSPACE_ID)
@@ -172,7 +182,7 @@ describe('Notifications HTTP API (containerized Postgres)', () => {
     const stakeholderId = await seedStakeholder();
     await createSignal();
 
-    const token = mintSessionToken(stakeholderId, 'engineering');
+    const token = mintSessionToken(stakeholderId);
     const listResponse = await request(app.getHttpServer())
       .get('/notifications')
       .set('X-Workspace-Id', WORKSPACE_ID)
@@ -196,7 +206,7 @@ describe('Notifications HTTP API (containerized Postgres)', () => {
     const otherStakeholderId = await seedStakeholder();
     await createSignal();
 
-    const token = mintSessionToken(stakeholderId, 'engineering');
+    const token = mintSessionToken(stakeholderId);
     const listResponse = await request(app.getHttpServer())
       .get('/notifications')
       .set('X-Workspace-Id', WORKSPACE_ID)
@@ -206,7 +216,7 @@ describe('Notifications HTTP API (containerized Postgres)', () => {
       throw new Error('expected at least one notification');
     }
 
-    const otherToken = mintSessionToken(otherStakeholderId, 'engineering');
+    const otherToken = mintSessionToken(otherStakeholderId);
     const response = await request(app.getHttpServer())
       .post(`/notifications/${notificationId}/read`)
       .set('X-Workspace-Id', WORKSPACE_ID)
@@ -224,7 +234,7 @@ describe('Notifications HTTP API (containerized Postgres)', () => {
 
   it('GET /notifications with a valid session token but missing X-Workspace-Id header returns 403', async () => {
     const stakeholderId = await seedStakeholder();
-    const token = mintSessionToken(stakeholderId, 'engineering');
+    const token = mintSessionToken(stakeholderId);
 
     const response = await request(app.getHttpServer())
       .get('/notifications')
@@ -235,7 +245,7 @@ describe('Notifications HTTP API (containerized Postgres)', () => {
 
   it('GET /notifications with a valid session token but mismatched X-Workspace-Id header returns 403', async () => {
     const stakeholderId = await seedStakeholder();
-    const token = mintSessionToken(stakeholderId, 'engineering');
+    const token = mintSessionToken(stakeholderId);
 
     const response = await request(app.getHttpServer())
       .get('/notifications')
@@ -254,7 +264,7 @@ describe('Notifications HTTP API (containerized Postgres)', () => {
 
   it('POST /notifications/:id/read with a valid session token but missing X-Workspace-Id header returns 403', async () => {
     const stakeholderId = await seedStakeholder();
-    const token = mintSessionToken(stakeholderId, 'engineering');
+    const token = mintSessionToken(stakeholderId);
 
     const response = await request(app.getHttpServer())
       .post(`/notifications/${randomUUID()}/read`)

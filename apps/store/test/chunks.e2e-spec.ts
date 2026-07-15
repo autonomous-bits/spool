@@ -29,16 +29,24 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
     sessionTokenService = moduleRef.get(SessionTokenService);
     defaultToken = sessionTokenService.sign({
       stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
-      discipline: 'engineering',
       authTime: Math.floor(Date.now() / 1000),
       workspaceId: WORKSPACE_ID,
     });
+    // G21 SG3: branch-scoped search/getNeighbourhood gating now checks the stakeholder_disciplines
+    // allow-list (sourced from the branch's own discipline) instead of a per-token discipline
+    // claim. Grant the bootstrap stakeholder 'engineering' so existing branch-scoped fixtures
+    // (which create 'engineering' branches) keep working.
+    await database.pool.query(
+      `INSERT INTO stakeholder_disciplines (workspace_id, stakeholder_id, discipline)
+       VALUES ($1, $2, 'engineering')
+       ON CONFLICT DO NOTHING`,
+      [WORKSPACE_ID, BOOTSTRAP_STAKEHOLDER_ID],
+    );
   });
 
   function tokenFor(workspaceId: string): string {
     return sessionTokenService.sign({
       stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
-      discipline: 'engineering',
       authTime: Math.floor(Date.now() / 1000),
       workspaceId,
     });
@@ -52,7 +60,6 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
   async function createWorkspaceFor(stakeholderId: string): Promise<string> {
     const token = sessionTokenService.sign({
       stakeholderId,
-      discipline: 'engineering',
       authTime: Math.floor(Date.now() / 1000),
       workspaceId: null,
     });
@@ -130,7 +137,6 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
   it('POST /chunks returns 403 when the stakeholder is not a current member of the workspace (authorship is claim-derived, not client-supplied)', async () => {
     const nonMemberToken = sessionTokenService.sign({
       stakeholderId: randomUUID(),
-      discipline: 'engineering',
       authTime: Math.floor(Date.now() / 1000),
       workspaceId: WORKSPACE_ID,
     });
@@ -175,7 +181,6 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
 
     const nonMemberToken = sessionTokenService.sign({
       stakeholderId: randomUUID(),
-      discipline: 'engineering',
       authTime: Math.floor(Date.now() / 1000),
       workspaceId: WORKSPACE_ID,
     });
@@ -337,7 +342,6 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
     beforeAll(() => {
       validToken = sessionTokenService.sign({
         stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
-        discipline: 'engineering',
         authTime: Math.floor(Date.now() / 1000),
         workspaceId: WORKSPACE_ID,
       });
@@ -362,7 +366,6 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
     it('returns 403 when token workspaceId does not match X-Workspace-Id', async () => {
       const mismatchedToken = sessionTokenService.sign({
         stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
-        discipline: 'engineering',
         authTime: Math.floor(Date.now() / 1000),
         workspaceId: '00000000-0000-0000-0000-0000000000ff',
       });
@@ -374,7 +377,7 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
       expect(response.status).toBe(403);
     });
 
-    it('returns 400 when filtering by branchId but token has no discipline claim', async () => {
+    it('returns 400 when filtering by branchId and activeDiscipline is missing (G21 SG4)', async () => {
       const branchResponse = await request(app.getHttpServer())
         .post('/branches')
         .set('Authorization', `Bearer ${validToken}`)
@@ -386,23 +389,16 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
         });
       const branchId = branchResponse.body.id as string;
 
-      const noDisciplineToken = sessionTokenService.sign({
-        stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
-        discipline: null,
-        authTime: Math.floor(Date.now() / 1000),
-        workspaceId: WORKSPACE_ID,
-      });
-
       const response = await request(app.getHttpServer())
         .get('/chunks')
-        .set('Authorization', `Bearer ${noDisciplineToken}`)
+        .set('Authorization', `Bearer ${validToken}`)
         .set('X-Workspace-Id', WORKSPACE_ID)
         .query({ branchId });
 
       expect(response.status).toBe(400);
     });
 
-    it('returns 403 when filtering by branchId and token discipline does not match branch discipline', async () => {
+    it('returns 403 when filtering by branchId and activeDiscipline is a valid vocabulary value but disallowed (G21 SG4)', async () => {
       const branchResponse = await request(app.getHttpServer())
         .post('/branches')
         .set('Authorization', `Bearer ${validToken}`)
@@ -414,13 +410,36 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
         });
       const branchId = branchResponse.body.id as string;
 
+      // validToken's stakeholder is only allowed 'engineering' in this workspace (seeded in the
+      // outer beforeAll), not 'design'.
       const response = await request(app.getHttpServer())
         .get('/chunks')
-        .set('Authorization', `Bearer ${validToken}`) // discipline is 'engineering'
+        .set('Authorization', `Bearer ${validToken}`)
         .set('X-Workspace-Id', WORKSPACE_ID)
-        .query({ branchId });
+        .query({ branchId, activeDiscipline: 'design' });
 
       expect(response.status).toBe(403);
+    });
+
+    it('returns 200 when filtering by branchId and activeDiscipline is allowed (G21 SG4)', async () => {
+      const branchResponse = await request(app.getHttpServer())
+        .post('/branches')
+        .set('Authorization', `Bearer ${validToken}`)
+        .set('X-Workspace-Id', WORKSPACE_ID)
+        .send({
+          name: `e2e-branch-${Math.random().toString(36).slice(2, 10)}`,
+          discipline: 'engineering',
+          stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
+        });
+      const branchId = branchResponse.body.id as string;
+
+      const response = await request(app.getHttpServer())
+        .get('/chunks')
+        .set('Authorization', `Bearer ${validToken}`)
+        .set('X-Workspace-Id', WORKSPACE_ID)
+        .query({ branchId, activeDiscipline: 'engineering' });
+
+      expect(response.status).toBe(200);
     });
 
     it('successfully searches and paginates chunks', async () => {
@@ -468,7 +487,6 @@ describe('Chunks HTTP API (containerized Postgres)', () => {
     beforeAll(() => {
       validToken = sessionTokenService.sign({
         stakeholderId: BOOTSTRAP_STAKEHOLDER_ID,
-        discipline: 'engineering',
         authTime: Math.floor(Date.now() / 1000),
         workspaceId: WORKSPACE_ID,
       });

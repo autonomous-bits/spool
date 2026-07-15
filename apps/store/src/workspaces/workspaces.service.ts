@@ -6,15 +6,21 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { SessionTokenClaims } from '../auth/session-token.service.js';
+import type { Discipline } from '../domain/types/vocabulary/discipline.js';
 import { Workspace } from '../domain/workspace.js';
 import { WorkspaceMembershipAlreadyExistsError } from '../domain/workspace-membership.js';
 import { assertWorkspaceScope, WorkspaceScopeViolationError } from '../domain/workspace-scope.js';
+import { StakeholderDisciplineRepository } from '../persistence/stakeholder-discipline.repository.js';
 import { StakeholderRepository } from '../persistence/stakeholder.repository.js';
 import {
   WorkspaceRepository,
   type WorkspaceAddMemberResult,
 } from '../persistence/workspace.repository.js';
 import type { CreateWorkspaceRequest } from './create-workspace-request.dto.js';
+import {
+  toStakeholderDisciplineResponse,
+  type StakeholderDisciplineResponse,
+} from './stakeholder-discipline-response.dto.js';
 import { toWorkspaceResponse, type WorkspaceResponse } from './workspace-response.dto.js';
 import {
   toWorkspaceMembershipResponse,
@@ -24,12 +30,7 @@ import {
 const FOREIGN_KEY_VIOLATION = '23503';
 
 function isPgErrorWithCode(error: unknown, code: string): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    (error).code === code
-  );
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === code;
 }
 
 /**
@@ -43,6 +44,7 @@ export class WorkspacesService {
   constructor(
     private readonly workspaceRepository: WorkspaceRepository,
     private readonly stakeholderRepository: StakeholderRepository,
+    private readonly stakeholderDisciplineRepository: StakeholderDisciplineRepository,
   ) {}
 
   async create(
@@ -56,7 +58,6 @@ export class WorkspacesService {
         createdByStakeholderId: claims.stakeholderId,
       });
     } catch (error) {
-      // Domain invariants (blank name/createdByStakeholderId) surfaced as 400s, not 500s.
       const message = error instanceof Error ? error.message : 'Invalid workspace';
       throw new BadRequestException(message);
     }
@@ -78,11 +79,6 @@ export class WorkspacesService {
     headerWorkspaceId: string | null | undefined,
     claims: SessionTokenClaims,
   ): Promise<WorkspaceMembershipResponse> {
-    // G16 SG2 (Meridian IDEA-139, single-tier auth): this route is already token-gated, so
-    // X-Workspace-Id must both match the token's workspaceId claim AND name the same workspace
-    // as the :id route param — otherwise a caller with a token bound to workspace A could target
-    // /workspaces/B/members while merely asserting X-Workspace-Id: A. The token's stakeholder
-    // must also currently be a live member of that workspace.
     const isMember =
       headerWorkspaceId === null || headerWorkspaceId === undefined || headerWorkspaceId.trim().length === 0
         ? false
@@ -129,6 +125,92 @@ export class WorkspacesService {
         );
       case 'added':
         return toWorkspaceMembershipResponse(result.membership);
+    }
+  }
+
+  async assignDiscipline(
+    workspaceId: string,
+    targetStakeholderId: string,
+    discipline: Discipline,
+    headerWorkspaceId: string | null | undefined,
+    claims: SessionTokenClaims,
+  ): Promise<StakeholderDisciplineResponse> {
+    const isMember =
+      headerWorkspaceId === null || headerWorkspaceId === undefined || headerWorkspaceId.trim().length === 0
+        ? false
+        : await this.workspaceRepository.isMember(headerWorkspaceId, claims.stakeholderId);
+    try {
+      assertWorkspaceScope(headerWorkspaceId, { workspaceIdClaim: claims.workspaceId, isMember });
+    } catch (error) {
+      if (error instanceof WorkspaceScopeViolationError) {
+        throw new ForbiddenException(error.message);
+      }
+      throw error;
+    }
+    if (headerWorkspaceId !== workspaceId) {
+      throw new ForbiddenException(
+        `X-Workspace-Id ${headerWorkspaceId} does not match the target workspace ${workspaceId}`,
+      );
+    }
+
+    const targetIsMember = await this.workspaceRepository.isMember(workspaceId, targetStakeholderId);
+    if (!targetIsMember) {
+      throw new NotFoundException(
+        `Stakeholder ${targetStakeholderId} is not a member of workspace ${workspaceId}`,
+      );
+    }
+
+    try {
+      const assigned = await this.stakeholderDisciplineRepository.assign(
+        workspaceId,
+        targetStakeholderId,
+        discipline,
+      );
+      return toStakeholderDisciplineResponse(assigned);
+    } catch (error) {
+      if (isPgErrorWithCode(error, FOREIGN_KEY_VIOLATION)) {
+        throw new NotFoundException(
+          `Stakeholder ${targetStakeholderId} is not a member of workspace ${workspaceId}`,
+        );
+      }
+      throw error;
+    }
+  }
+
+  async revokeDiscipline(
+    workspaceId: string,
+    targetStakeholderId: string,
+    discipline: Discipline,
+    headerWorkspaceId: string | null | undefined,
+    claims: SessionTokenClaims,
+  ): Promise<void> {
+    const isMember =
+      headerWorkspaceId === null || headerWorkspaceId === undefined || headerWorkspaceId.trim().length === 0
+        ? false
+        : await this.workspaceRepository.isMember(headerWorkspaceId, claims.stakeholderId);
+    try {
+      assertWorkspaceScope(headerWorkspaceId, { workspaceIdClaim: claims.workspaceId, isMember });
+    } catch (error) {
+      if (error instanceof WorkspaceScopeViolationError) {
+        throw new ForbiddenException(error.message);
+      }
+      throw error;
+    }
+    if (headerWorkspaceId !== workspaceId) {
+      throw new ForbiddenException(
+        `X-Workspace-Id ${headerWorkspaceId} does not match the target workspace ${workspaceId}`,
+      );
+    }
+
+    const revoked = await this.stakeholderDisciplineRepository.revoke(
+      workspaceId,
+      targetStakeholderId,
+      discipline,
+    );
+    if (!revoked) {
+      throw new NotFoundException(
+        `Discipline ${discipline} is not assigned to stakeholder ${targetStakeholderId} in workspace ${workspaceId}`,
+      );
     }
   }
 }

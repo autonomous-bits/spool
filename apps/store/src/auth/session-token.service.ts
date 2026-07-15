@@ -11,13 +11,20 @@ export class InvalidSessionTokenError extends Error {
 }
 
 /**
- * Claims carried by a store-issued session token, per Meridian IDEA-81. `discipline` is
- * nullable because not every stakeholder has one assigned. `authTime` (epoch seconds) records
- * when the interactive GitHub OAuth login completed, per IDEA-81's auth_time-equivalent claim.
+ * Claims carried by a store-issued session token, per Meridian IDEA-81. `authTime` (epoch
+ * seconds) records when the interactive GitHub OAuth login completed, per IDEA-81's
+ * auth_time-equivalent claim.
+ *
+ * G21 SG3 (Meridian IDEA-142/IDEA-143): the token no longer carries a `discipline` claim. A
+ * stakeholder's discipline is no longer a single token-baked value — it's now a per-workspace
+ * allow-list (`stakeholder_disciplines`) plus a per-request `activeDiscipline`, both resolved and
+ * validated server-side by `resolveHumanActorContext`, never read off the token. Pre-rewrite
+ * tokens may still carry a raw `discipline` field in their signed payload; `isValidClaims`
+ * ignores it (extra key), so those tokens still verify, they just no longer surface a
+ * `discipline` value.
  */
 export interface SessionTokenClaims {
   stakeholderId: string;
-  discipline: string | null;
   authTime: number;
   /**
    * The workspace this token is bound to, per Meridian IDEA-92/IDEA-100. `null` marks a
@@ -29,13 +36,11 @@ export interface SessionTokenClaims {
 
 function isValidClaims(claims: Record<string, unknown>): claims is SessionTokenClaims & Record<string, unknown> {
   const stakeholderId = claims.stakeholderId;
-  const discipline = claims.discipline;
   const authTime = claims.authTime;
   const workspaceId = claims.workspaceId;
 
   return (
     typeof stakeholderId === 'string' &&
-    (discipline === null || typeof discipline === 'string') &&
     typeof authTime === 'number' &&
     (workspaceId === null || typeof workspaceId === 'string')
   );
@@ -54,7 +59,6 @@ export class SessionTokenService {
     return signHmacToken(
       {
         stakeholderId: claims.stakeholderId,
-        discipline: claims.discipline,
         authTime: claims.authTime,
         workspaceId: claims.workspaceId,
       },
@@ -84,7 +88,6 @@ export class SessionTokenService {
 
     return {
       stakeholderId: claims.stakeholderId,
-      discipline: claims.discipline,
       authTime: claims.authTime,
       workspaceId: claims.workspaceId,
     };

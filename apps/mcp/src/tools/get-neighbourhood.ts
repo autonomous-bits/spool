@@ -13,6 +13,7 @@ export interface GetNeighbourhoodInput {
   id: string;
   depth?: number;
   branchId?: string;
+  activeDiscipline?: string;
 }
 
 export interface NeighbourResponse {
@@ -100,6 +101,9 @@ export function parseGetNeighbourhoodInput(body: unknown): GetNeighbourhoodInput
 
   const branchId = optionalStringField(record, 'branchId');
   if (branchId !== undefined) result.branchId = branchId;
+
+  const activeDiscipline = optionalStringField(record, 'activeDiscipline');
+  if (activeDiscipline !== undefined) result.activeDiscipline = activeDiscipline;
 
   return result;
 }

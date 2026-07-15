@@ -20,6 +20,7 @@ import { Branch } from '../domain/branch.js';
 import type { HumanActorContext } from '../domain/types/actor/actor-context.js';
 import { assertWorkspaceScope, WorkspaceScopeViolationError } from '../domain/workspace-scope.js';
 import { BranchRepository } from '../persistence/branch.repository.js';
+import { StakeholderDisciplineRepository } from '../persistence/stakeholder-discipline.repository.js';
 import { StakeholderRepository } from '../persistence/stakeholder.repository.js';
 import { WorkspaceRepository } from '../persistence/workspace.repository.js';
 import { toBranchResponse, type BranchResponse } from './branch-response.dto.js';
@@ -59,6 +60,7 @@ export class BranchesService {
     private readonly branchRepository: BranchRepository,
     private readonly stakeholderRepository: StakeholderRepository,
     private readonly workspaceRepository: WorkspaceRepository,
+    private readonly stakeholderDisciplineRepository: StakeholderDisciplineRepository,
   ) {}
 
   private async assertScope(
@@ -121,18 +123,29 @@ export class BranchesService {
     branchId: string,
     headerWorkspaceId: string | null | undefined,
     claims: SessionTokenClaims,
+    activeDiscipline: string | null | undefined,
   ): Promise<BranchResponse> {
     const workspaceId = await this.assertScope(headerWorkspaceId, claims);
 
-    const actor = await resolveHumanActorContext(this.stakeholderRepository, claims, {
-      requireDiscipline: true,
-      actionDescription: 'submit a branch',
-    });
-
+    // G21 SG4: the branch is looked up first (404 before any actor/discipline check), then the
+    // client-supplied `activeDiscipline` (Meridian IDEA-142/IDEA-143) is validated and checked
+    // against the caller's per-workspace allow-list via `resolveHumanActorContext`; a mismatch
+    // against this branch's own discipline is still caught below by `assertSubmitDiscipline`.
     const branch = await this.branchRepository.findById(branchId, workspaceId);
     if (branch === undefined) {
       throw new NotFoundException(`Branch ${branchId} not found`);
     }
+
+    const actor = await resolveHumanActorContext(
+      this.stakeholderRepository,
+      this.stakeholderDisciplineRepository,
+      claims,
+      {
+        requireDiscipline: true,
+        actionDescription: 'submit a branch',
+        activeDiscipline,
+      },
+    );
 
     try {
       assertIsHumanActor(actor);
@@ -263,10 +276,12 @@ export class BranchesService {
       throw new NotFoundException(`Branch ${branchId} not found`);
     }
 
-    const actor = await resolveHumanActorContext(this.stakeholderRepository, claims, {
-      requireDiscipline: false,
-      actionDescription: 'verify, reject, or merge a branch',
-    });
+    const actor = await resolveHumanActorContext(
+      this.stakeholderRepository,
+      this.stakeholderDisciplineRepository,
+      claims,
+      { requireDiscipline: false, actionDescription: 'verify, reject, or merge a branch' },
+    );
 
     return { ...actor, branch };
   }

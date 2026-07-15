@@ -8,6 +8,7 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionTokenClaims } from '../auth/session-token.service.js';
 import { WorkspaceMembershipAlreadyExistsError } from '../domain/workspace-membership.js';
+import { StakeholderDisciplineRepository } from '../persistence/stakeholder-discipline.repository.js';
 import { StakeholderRepository, type StakeholderRecord } from '../persistence/stakeholder.repository.js';
 import { WorkspaceRepository } from '../persistence/workspace.repository.js';
 import { WorkspacesService } from './workspaces.service.js';
@@ -33,6 +34,7 @@ describe('WorkspacesService', () => {
     'createWithFirstMember' | 'addMember' | 'findById' | 'isMember'
   >;
   let stakeholderRepository: Pick<StakeholderRepository, 'findById'>;
+  let stakeholderDisciplineRepository: Pick<StakeholderDisciplineRepository, 'assign' | 'revoke'>;
   let service: WorkspacesService;
 
   beforeEach(async () => {
@@ -57,11 +59,19 @@ describe('WorkspacesService', () => {
             findById: vi.fn(),
           } satisfies Pick<StakeholderRepository, 'findById'>,
         },
+        {
+          provide: StakeholderDisciplineRepository,
+          useValue: {
+            assign: vi.fn(),
+            revoke: vi.fn(),
+          } satisfies Pick<StakeholderDisciplineRepository, 'assign' | 'revoke'>,
+        },
       ],
     }).compile();
 
     workspaceRepository = module.get(WorkspaceRepository);
     stakeholderRepository = module.get(StakeholderRepository);
+    stakeholderDisciplineRepository = module.get(StakeholderDisciplineRepository);
     service = module.get(WorkspacesService);
   });
 
@@ -206,6 +216,87 @@ describe('WorkspacesService', () => {
         CALLER_ID,
         TARGET_ID,
       );
+    });
+  });
+
+  describe('assignDiscipline', () => {
+    it('assigns a discipline for another existing member and it is visible via isAllowed repository semantics', async () => {
+      vi.mocked(workspaceRepository.isMember)
+        .mockResolvedValueOnce(true)
+        .mockResolvedValueOnce(true);
+      vi.mocked(stakeholderDisciplineRepository.assign).mockResolvedValue({
+        workspaceId: WORKSPACE_ID,
+        stakeholderId: TARGET_ID,
+        discipline: 'security',
+        createdAt: new Date('2026-07-15T07:00:00.000Z'),
+      });
+
+      const result = await service.assignDiscipline(
+        WORKSPACE_ID,
+        TARGET_ID,
+        'security',
+        WORKSPACE_ID,
+        validClaims(),
+      );
+
+      expect(result).toEqual({
+        workspaceId: WORKSPACE_ID,
+        stakeholderId: TARGET_ID,
+        discipline: 'security',
+        createdAt: '2026-07-15T07:00:00.000Z',
+      });
+      expect(stakeholderDisciplineRepository.assign).toHaveBeenCalledWith(
+        WORKSPACE_ID,
+        TARGET_ID,
+        'security',
+      );
+    });
+
+    it('returns 403 when a non-member caller attempts to assign a discipline', async () => {
+      vi.mocked(workspaceRepository.isMember).mockResolvedValueOnce(false);
+
+      await expect(
+        service.assignDiscipline(WORKSPACE_ID, TARGET_ID, 'security', WORKSPACE_ID, validClaims()),
+      ).rejects.toThrow(ForbiddenException);
+      expect(stakeholderDisciplineRepository.assign).not.toHaveBeenCalled();
+    });
+
+    it('returns 404 when the target stakeholder is not a member of the workspace', async () => {
+      vi.mocked(workspaceRepository.isMember)
+        .mockResolvedValueOnce(true)
+        .mockResolvedValueOnce(false);
+
+      await expect(
+        service.assignDiscipline(WORKSPACE_ID, TARGET_ID, 'security', WORKSPACE_ID, validClaims()),
+      ).rejects.toThrow(NotFoundException);
+      expect(stakeholderDisciplineRepository.assign).not.toHaveBeenCalled();
+    });
+
+    it('maps a late foreign-key violation to 404 when the target membership disappears after pre-check', async () => {
+      vi.mocked(workspaceRepository.isMember)
+        .mockResolvedValueOnce(true)
+        .mockResolvedValueOnce(true);
+      vi.mocked(stakeholderDisciplineRepository.assign).mockRejectedValue({ code: '23503' });
+
+      await expect(
+        service.assignDiscipline(WORKSPACE_ID, TARGET_ID, 'security', WORKSPACE_ID, validClaims()),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('revokeDiscipline', () => {
+    it('removes the row and returns 404 on repeat delete', async () => {
+      vi.mocked(workspaceRepository.isMember).mockResolvedValue(true);
+      vi.mocked(stakeholderDisciplineRepository.revoke)
+        .mockResolvedValueOnce(true)
+        .mockResolvedValueOnce(false);
+
+      await expect(
+        service.revokeDiscipline(WORKSPACE_ID, TARGET_ID, 'security', WORKSPACE_ID, validClaims()),
+      ).resolves.toBeUndefined();
+      await expect(
+        service.revokeDiscipline(WORKSPACE_ID, TARGET_ID, 'security', WORKSPACE_ID, validClaims()),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 });
