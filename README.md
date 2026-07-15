@@ -80,7 +80,7 @@ detail on structure and testing conventions. Tests use **Vitest**, not Jest.
 ## Documentation
 
 - `docs/constitution.md` — engineering principles and quality gates
-- `docs/goals/` — per-goal product and architecture specifications
+- `docs/architecture.md` - architecture documents
 
 ## License
 
