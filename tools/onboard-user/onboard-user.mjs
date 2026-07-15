@@ -1,16 +1,19 @@
 #!/usr/bin/env node
 /**
  * Interactive dev/ops helper to onboard a new user into Spool by driving the store's human-only
- * workspace endpoints (Meridian IDEA-94/IDEA-88/IDEA-95): `POST /workspaces` and
- * `POST /workspaces/:id/members`. Deliberately a plain script, not an MCP tool — those two
- * endpoints are intentionally human-only and have no MCP equivalent (see
- * apps/store/src/workspaces/workspaces.controller.ts).
+ * workspace endpoints (Meridian IDEA-94/IDEA-88/IDEA-95/IDEA-142/IDEA-143): `POST /workspaces`,
+ * `POST /workspaces/:id/members`, and `POST`/`DELETE /workspaces/:id/stakeholders/:stakeholderId/disciplines`.
+ * Deliberately a plain script, not an MCP tool — these endpoints are intentionally human-only and
+ * have no MCP equivalent (see apps/store/src/workspaces/workspaces.controller.ts).
  *
- * Guides the caller through one of two flows:
+ * Guides the caller through one of four flows:
  *   1. Create a brand-new workspace (the caller becomes its first member).
  *   2. Add an existing stakeholder as a member of an existing workspace.
+ *   3. Assign a discipline to a workspace member (a stakeholder may hold multiple disciplines
+ *      per workspace — this is a per-workspace allow-list, not a fixed value on the token).
+ *   4. Revoke a discipline from a workspace member.
  *
- * Both flows require a valid session token for the *acting* stakeholder. There is no headless
+ * All flows require a valid session token for the *acting* stakeholder. There is no headless
  * way to mint one against the real GitHub OAuth App wired in `compose.yaml` — a store-issued
  * session token only exists after a real browser GitHub login (see
  * apps/store/src/auth/auth.controller.ts). If `SESSION_TOKEN` isn't set, this script prints the
@@ -28,6 +31,10 @@
  * Usage (non-interactive, scriptable):
  *   node tools/onboard-user/onboard-user.mjs --create-workspace --name "My Workspace"
  *   node tools/onboard-user/onboard-user.mjs --add-member --workspace-id <id> --stakeholder-id <id>
+ *   node tools/onboard-user/onboard-user.mjs --assign-discipline --workspace-id <id> \
+ *     --stakeholder-id <id> --discipline <discipline>
+ *   node tools/onboard-user/onboard-user.mjs --revoke-discipline --workspace-id <id> \
+ *     --stakeholder-id <id> --discipline <discipline>
  *
  * Env vars:
  *   STORE_URL       base URL of the running store (default http://localhost:3000; use
@@ -40,6 +47,24 @@ import { createInterface } from 'node:readline/promises';
 import { parseArgs } from 'node:util';
 
 const STORE_URL = process.env.STORE_URL ?? 'http://localhost:3000';
+
+/**
+ * Closed discipline vocabulary, mirrored from
+ * `apps/store/src/domain/types/vocabulary/discipline.ts` (Meridian IDEA-142/IDEA-143). Mirrored
+ * rather than imported: `tools/` is shared scripts and must not import from `apps/`, per
+ * docs/constitution.md.
+ *
+ * @type {readonly string[]}
+ */
+const DISCIPLINES = ['product', 'architecture', 'design', 'engineering', 'security', 'governance'];
+
+/**
+ * @param {string} value
+ * @returns {boolean}
+ */
+function isDiscipline(value) {
+  return DISCIPLINES.includes(value);
+}
 
 /**
  * Reads one line of answer for `message`, via a shared async-iterator over the readline
@@ -160,8 +185,84 @@ async function addMember(workspaceId, stakeholderId, sessionToken) {
 }
 
 /**
+ * Assigns `discipline` to `stakeholderId` in `workspaceId` (Meridian IDEA-142/IDEA-143). Idempotent
+ * on the store side (`ON CONFLICT DO NOTHING`) — reassigning an already-held discipline still
+ * succeeds. The target stakeholder must already be a member of the workspace, or the store 404s.
+ *
+ * @param {string} workspaceId
+ * @param {string} stakeholderId
+ * @param {string} discipline
+ * @param {string} sessionToken
+ * @returns {Promise<unknown>}
+ */
+async function assignDiscipline(workspaceId, stakeholderId, discipline, sessionToken) {
+  const response = await fetch(
+    `${STORE_URL}/workspaces/${encodeURIComponent(workspaceId)}/stakeholders/${encodeURIComponent(stakeholderId)}/disciplines`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Workspace-Id': workspaceId,
+        ...authHeaders(sessionToken),
+      },
+      body: JSON.stringify({ discipline }),
+    },
+  );
+  const body = /** @type {unknown} */ (await response.json());
+  if (!response.ok) {
+    throw new Error(
+      `POST /workspaces/${workspaceId}/stakeholders/${stakeholderId}/disciplines failed with ` +
+        `${String(response.status)}: ${JSON.stringify(body)}`,
+    );
+  }
+  return body;
+}
+
+/**
+ * Revokes `discipline` from `stakeholderId` in `workspaceId` (Meridian IDEA-142/IDEA-143). Not
+ * idempotent — revoking a discipline that isn't currently assigned is a 404, not a no-op success.
+ *
+ * @param {string} workspaceId
+ * @param {string} stakeholderId
+ * @param {string} discipline
+ * @param {string} sessionToken
+ * @returns {Promise<void>}
+ */
+async function revokeDiscipline(workspaceId, stakeholderId, discipline, sessionToken) {
+  const response = await fetch(
+    `${STORE_URL}/workspaces/${encodeURIComponent(workspaceId)}/stakeholders/${encodeURIComponent(stakeholderId)}/disciplines/${encodeURIComponent(discipline)}`,
+    {
+      method: 'DELETE',
+      headers: {
+        'X-Workspace-Id': workspaceId,
+        ...authHeaders(sessionToken),
+      },
+    },
+  );
+  if (!response.ok) {
+    const body = /** @type {unknown} */ (await response.json().catch(() => undefined));
+    throw new Error(
+      `DELETE /workspaces/${workspaceId}/stakeholders/${stakeholderId}/disciplines/${discipline} failed ` +
+        `with ${String(response.status)}: ${JSON.stringify(body)}`,
+    );
+  }
+}
+
+/**
  * @param {AsyncIterator<string>} lines
- * @returns {Promise<'create-workspace' | 'add-member'>}
+ * @returns {Promise<string>}
+ */
+async function promptForDiscipline(lines) {
+  const discipline = await prompt(lines, `Discipline (${DISCIPLINES.join(', ')}): `);
+  if (!isDiscipline(discipline)) {
+    throw new Error(`discipline must be one of: ${DISCIPLINES.join(', ')}`);
+  }
+  return discipline;
+}
+
+/**
+ * @param {AsyncIterator<string>} lines
+ * @returns {Promise<'create-workspace' | 'add-member' | 'assign-discipline' | 'revoke-discipline'>}
  */
 async function promptForFlow(lines) {
   const answer = await prompt(
@@ -169,13 +270,21 @@ async function promptForFlow(lines) {
     '\nWhat would you like to do?\n' +
       '  [1] Create a new workspace\n' +
       '  [2] Add a user to an existing workspace\n' +
-      'Enter 1 or 2: ',
+      '  [3] Assign a discipline to a workspace member\n' +
+      '  [4] Revoke a discipline from a workspace member\n' +
+      'Enter 1, 2, 3, or 4: ',
   );
   if (answer === '1') {
     return 'create-workspace';
   }
   if (answer === '2') {
     return 'add-member';
+  }
+  if (answer === '3') {
+    return 'assign-discipline';
+  }
+  if (answer === '4') {
+    return 'revoke-discipline';
   }
   throw new Error(`Unrecognized choice: ${answer}`);
 }
@@ -198,12 +307,29 @@ async function runInteractive(lines) {
   }
 
   const workspaceId = await prompt(lines, 'Workspace id: ');
-  // Adding a member requires a token scoped to that workspace (X-Workspace-Id must match the
-  // token's workspaceId claim), so the login URL below is minted with this workspaceId.
+  // All remaining flows are workspace-scoped: the token must carry a matching workspaceId claim
+  // (X-Workspace-Id must equal both the route param and the token's claim), so the login URL
+  // below is minted with this workspaceId.
   const sessionToken = envToken ?? (await promptForSessionTokenViaLogin(lines, workspaceId));
-  const stakeholderId = await prompt(lines, 'Stakeholder id to add: ');
-  const membership = await addMember(workspaceId, stakeholderId, sessionToken);
-  console.log(`\nAdded member:\n${JSON.stringify(membership, null, 2)}`);
+
+  if (flow === 'add-member') {
+    const stakeholderId = await prompt(lines, 'Stakeholder id to add: ');
+    const membership = await addMember(workspaceId, stakeholderId, sessionToken);
+    console.log(`\nAdded member:\n${JSON.stringify(membership, null, 2)}`);
+    return;
+  }
+
+  const stakeholderId = await prompt(lines, 'Stakeholder id: ');
+  const discipline = await promptForDiscipline(lines);
+
+  if (flow === 'assign-discipline') {
+    const assigned = await assignDiscipline(workspaceId, stakeholderId, discipline, sessionToken);
+    console.log(`\nAssigned discipline:\n${JSON.stringify(assigned, null, 2)}`);
+    return;
+  }
+
+  await revokeDiscipline(workspaceId, stakeholderId, discipline, sessionToken);
+  console.log(`\nRevoked discipline "${discipline}" from stakeholder ${stakeholderId} in workspace ${workspaceId}.`);
 }
 
 async function main() {
@@ -211,9 +337,12 @@ async function main() {
     options: {
       'create-workspace': { type: 'boolean', default: false },
       'add-member': { type: 'boolean', default: false },
+      'assign-discipline': { type: 'boolean', default: false },
+      'revoke-discipline': { type: 'boolean', default: false },
       name: { type: 'string' },
       'workspace-id': { type: 'string' },
       'stakeholder-id': { type: 'string' },
+      discipline: { type: 'string' },
     },
   });
 
@@ -240,6 +369,41 @@ async function main() {
         envToken ?? (await promptForSessionTokenViaLogin(lines, values['workspace-id']));
       const membership = await addMember(values['workspace-id'], values['stakeholder-id'], sessionToken);
       console.log(JSON.stringify(membership, null, 2));
+      return;
+    }
+
+    if (values['assign-discipline'] || values['revoke-discipline']) {
+      if (
+        values['workspace-id'] === undefined ||
+        values['stakeholder-id'] === undefined ||
+        values.discipline === undefined
+      ) {
+        const flagName = values['assign-discipline'] ? '--assign-discipline' : '--revoke-discipline';
+        throw new Error(
+          `${flagName} requires --workspace-id <id>, --stakeholder-id <id>, and --discipline <discipline>`,
+        );
+      }
+      if (!isDiscipline(values.discipline)) {
+        throw new Error(`discipline must be one of: ${DISCIPLINES.join(', ')}`);
+      }
+      const sessionToken =
+        envToken ?? (await promptForSessionTokenViaLogin(lines, values['workspace-id']));
+
+      if (values['assign-discipline']) {
+        const assigned = await assignDiscipline(
+          values['workspace-id'],
+          values['stakeholder-id'],
+          values.discipline,
+          sessionToken,
+        );
+        console.log(JSON.stringify(assigned, null, 2));
+        return;
+      }
+
+      await revokeDiscipline(values['workspace-id'], values['stakeholder-id'], values.discipline, sessionToken);
+      console.log(
+        `Revoked discipline "${values.discipline}" from stakeholder ${values['stakeholder-id']} in workspace ${values['workspace-id']}.`,
+      );
       return;
     }
 
