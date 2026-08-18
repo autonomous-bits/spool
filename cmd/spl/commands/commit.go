@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/spf13/cobra"
 	"github.com/autonomous-bits/spool/internal/repository"
 	"github.com/autonomous-bits/spool/internal/resolve"
+	"github.com/spf13/cobra"
 )
 
 // NewCommitCommand creates the command for committing a branch's current staged mutation set.

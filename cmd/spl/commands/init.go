@@ -3,8 +3,8 @@ package commands
 import (
 	"encoding/json"
 
-	"github.com/spf13/cobra"
 	"github.com/autonomous-bits/spool/internal/repository"
+	"github.com/spf13/cobra"
 )
 
 // NewInitCommand creates the repository initialization command.

@@ -3,9 +3,9 @@ package commands
 import (
 	"encoding/json"
 
-	"github.com/spf13/cobra"
 	"github.com/autonomous-bits/spool/internal/repository"
 	"github.com/autonomous-bits/spool/internal/resolve"
+	"github.com/spf13/cobra"
 )
 
 // NewHistoryCommand creates the command for retrieving an entity's commit history.

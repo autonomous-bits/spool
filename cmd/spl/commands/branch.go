@@ -3,9 +3,9 @@ package commands
 import (
 	"encoding/json"
 
-	"github.com/spf13/cobra"
 	"github.com/autonomous-bits/spool/internal/repository/branch"
 	"github.com/autonomous-bits/spool/internal/resolve"
+	"github.com/spf13/cobra"
 )
 
 // NewBranchCommand creates the branch command and its lifecycle subcommands.

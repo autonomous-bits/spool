@@ -3,10 +3,10 @@ package main
 import (
 	"io"
 
-	"github.com/spf13/cobra"
 	"github.com/autonomous-bits/spool/cmd/spl/commands"
 	"github.com/autonomous-bits/spool/internal/repository"
 	"github.com/autonomous-bits/spool/internal/resolve"
+	"github.com/spf13/cobra"
 )
 
 func newRootCommand(stdout io.Writer, tool *resolve.ResolveTool) *cobra.Command {

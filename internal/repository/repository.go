@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/autonomous-bits/spool/internal/repository/branch"
 	"github.com/fxamacker/cbor/v2"
 	"github.com/gofrs/flock"
-	"github.com/autonomous-bits/spool/internal/repository/branch"
 	"lukechampine.com/blake3"
 )
 
