@@ -1,0 +1,3 @@
+Contact: https://github.com/autonomous-bits/spool/security/advisories/new
+Expires: 2027-08-18T00:00:00Z
+Preferred-Languages: en

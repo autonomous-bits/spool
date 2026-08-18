@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.1"
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            cmd/spl/go.sum
+      - name: Build and test root module
+        run: |
+          go build ./...
+          go test ./...
+      - name: Build and test CLI module
+        working-directory: cmd/spl
+        run: |
+          go build ./...
+          go test ./...

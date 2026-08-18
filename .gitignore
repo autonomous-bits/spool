@@ -1,0 +1,19 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+
+# Build output
+/dist/
+
+# Test coverage
+*.out
+
+# macOS
+.DS_Store
+
+# Documentation
+/docs/goals/
