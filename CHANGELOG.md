@@ -8,7 +8,8 @@ generated from commits since the preceding `v*` tag. Commits prefixed with `docs
 
 ## [Unreleased]
 
+## [0.0.1] - 2026-08-18
+
 ### Added
 
 - GoReleaser-based release automation for the `spl` CLI.
-
