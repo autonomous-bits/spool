@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/spf13/cobra"
 	"github.com/autonomous-bits/spool/internal/repository"
 	"github.com/autonomous-bits/spool/internal/resolve"
+	"github.com/spf13/cobra"
 )
 
 // NewAddCommand creates the command for validating and staging a graph-mutation batch.

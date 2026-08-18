@@ -8,9 +8,9 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/spf13/cobra"
 	"github.com/autonomous-bits/spool/internal/repository"
 	"github.com/autonomous-bits/spool/internal/resolve"
+	"github.com/spf13/cobra"
 )
 
 func TestStatusCLIAndMCPReportEquivalentSharedStagingDelta(t *testing.T) {

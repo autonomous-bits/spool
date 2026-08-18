@@ -6,10 +6,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/spf13/cobra"
 	"github.com/autonomous-bits/spool/internal/repository"
 	"github.com/autonomous-bits/spool/internal/repository/initialization"
 	"github.com/autonomous-bits/spool/internal/resolve"
+	"github.com/spf13/cobra"
 )
 
 func bootstrapRootCommand(stdout io.Writer, stateDir string) (*cobra.Command, func() error) {

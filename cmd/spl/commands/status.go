@@ -3,8 +3,8 @@ package commands
 import (
 	"encoding/json"
 
-	"github.com/spf13/cobra"
 	"github.com/autonomous-bits/spool/internal/resolve"
+	"github.com/spf13/cobra"
 )
 
 // NewStatusCommand creates the command for reporting a branch's staged delta.
