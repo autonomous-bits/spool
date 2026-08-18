@@ -38,6 +38,30 @@ go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
 
 GitHub Actions runs `make check` and the bounded fuzz target for every push and pull request.
 
+## Releases
+
+`main` is protected, so prepare each release in a pull request:
+
+1. Create a branch from `main`, move user-facing entries from [`CHANGELOG.md`](CHANGELOG.md)'s
+   `Unreleased` section into a versioned section, and open a pull request.
+2. Have the pull request approved and merged into `main`.
+3. Create and push an annotated semantic-version tag for the resulting `main` commit:
+
+   ```sh
+   git fetch origin main
+   git tag -a v0.1.0 origin/main -m "Release v0.1.0"
+   git push origin v0.1.0
+   ```
+
+Pushing a `v*` tag runs the release workflow. GoReleaser cross-compiles `spl`, uploads archives
+and `checksums.txt` to GitHub Releases, and generates release notes from eligible commits. It does
+not modify `main` or `CHANGELOG.md`.
+
+The workflow uses GitHub's automatic `GITHUB_TOKEN`; no repository secret is needed. In GitHub
+repository settings, allow workflows **Read and write permissions**. The user or automation that
+pushes the release tag must have Contents write permission and must be allowed by any `v*` tag
+protection ruleset.
+
 ## Code conventions
 
 - Define CLI subcommands in [`cmd/spl/commands`](cmd/spl/commands), wire them in

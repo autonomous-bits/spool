@@ -21,6 +21,10 @@ To build the checked-out workspace instead:
 go build -o dist/spl ./cmd/spl
 ```
 
+Prebuilt archives for released versions are available from the
+[GitHub Releases](https://github.com/autonomous-bits/spool/releases) page. Verify a download with
+the accompanying `checksums.txt` file.
+
 ## Quick start
 
 Initialize a graph repository in your workspace:
@@ -64,3 +68,4 @@ Run `spl <command> --help` for all commands, flags, response-budget controls, an
 
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) explains how to build, test, and contribute to Spool.
 - [`docs/architecture.md`](docs/architecture.md) describes the high-level system architecture.
+- [`CHANGELOG.md`](CHANGELOG.md) explains how release notes are generated.
