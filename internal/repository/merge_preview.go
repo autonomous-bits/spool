@@ -312,8 +312,30 @@ func sortMergeConflicts(conflicts []MergeConflict) {
 		if conflicts[i].ID != conflicts[j].ID {
 			return conflicts[i].ID < conflicts[j].ID
 		}
-		return conflicts[i].Field < conflicts[j].Field
+		if conflicts[i].Field != conflicts[j].Field {
+			return conflicts[i].Field < conflicts[j].Field
+		}
+		return compareMergeConflictPaths(conflicts[i].Paths, conflicts[j].Paths) < 0
 	})
+}
+
+func compareMergeConflictPaths(left, right []string) int {
+	for index := 0; index < len(left) && index < len(right); index++ {
+		if left[index] < right[index] {
+			return -1
+		}
+		if left[index] > right[index] {
+			return 1
+		}
+	}
+	switch {
+	case len(left) < len(right):
+		return -1
+	case len(left) > len(right):
+		return 1
+	default:
+		return 0
+	}
 }
 
 func mergeConflictID(conflict MergeConflict) string {

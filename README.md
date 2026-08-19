@@ -113,7 +113,8 @@ spl merge finalize --target main --transaction merge-42
 # or: spl merge abort --target main --transaction merge-42
 ```
 
-Each selection is `{"conflictId":"...","choice":"source"}` or `target`. Overrides use the same
+Each selection is `{"conflictId":"...","choice":"source"}` or
+`{"conflictId":"...","choice":"target"}`. Overrides use the same
 mutation-array format as `spl add` and can repair a schema-derived semantic conflict. Resolution
 and finalization reject stale previews, require transaction ownership, and keep the target lease
 until finalization or abort.

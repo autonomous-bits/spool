@@ -301,15 +301,23 @@ func (r *Repository) ResolveConflictedMerge(request ResolveConflictedMergeReques
 	snapshotID := r.store("graph-snapshot", snapshot)
 	r.snapshots[snapshotID], r.edgeProjections[snapshotID] = snapshot, candidate.edges
 	r.projections[snapshot.NodeRoot] = candidate.nodes
-	if err := r.persistRepositoryLocked(); err != nil && !durableWriteCommitted(err) {
+	repositoryErr := r.persistRepositoryLocked()
+	if repositoryErr != nil && !durableWriteCommitted(repositoryErr) {
 		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
-		return err
+		return repositoryErr
 	}
 	transaction.StagedSnapshot, transaction.Resolved, transaction.Restaged = snapshotID, true, true
-	if err := r.persistMergeTransactionLocked(request.TargetBranch, request.TransactionID, &transaction); err != nil && !durableWriteCommitted(err) {
-		return err
+	transactionErr := r.persistMergeTransactionLocked(request.TargetBranch, request.TransactionID, &transaction)
+	if transactionErr != nil && !durableWriteCommitted(transactionErr) {
+		return transactionErr
 	}
 	r.mergeTransactions[request.TargetBranch] = transaction
+	if transactionErr != nil {
+		return fmt.Errorf("merge resolution recorded but directory sync failed: %w", transactionErr)
+	}
+	if repositoryErr != nil {
+		return fmt.Errorf("resolved merge snapshot recorded but directory sync failed: %w", repositoryErr)
+	}
 	return nil
 }
 
