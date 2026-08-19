@@ -175,14 +175,12 @@ func (v *schemaValidator) validateNodeRules() {
 	for _, id := range sortedNodeIDs(v.nodesByID) {
 		node := v.nodesByID[id]
 		for _, label := range node.Labels {
-			if _, exists := v.nodeRules[label]; !exists {
+			rule, exists := v.nodeRules[label]
+			if !exists {
 				v.add(SchemaViolation{Code: SchemaViolationNodeLabel, Entity: "node", EntityID: id, Rule: label, Expected: "declared node label", Actual: label})
+				continue
 			}
-		}
-		for _, rule := range v.schema.NodeRules {
-			if hasLabel(node, rule.Label) {
-				v.validateProperties("node", id, rule.Label, node.Properties, rule.Properties)
-			}
+			v.validateProperties("node", id, rule.Label, node.Properties, rule.Properties)
 		}
 	}
 }

@@ -216,10 +216,6 @@ func (r *Repository) StageMutationBatch(request StageMutationRequest) (StageMuta
 	if err != nil {
 		return StageMutationResult{}, err
 	}
-	if err := r.validateMutationBatchLocked(head, operations); err != nil {
-		return StageMutationResult{}, err
-	}
-
 	staged := StagedMutationSet{
 		Branch:     request.Branch,
 		BaseCommit: head,
