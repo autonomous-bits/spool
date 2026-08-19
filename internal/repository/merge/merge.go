@@ -57,6 +57,10 @@ type Store interface {
 	ApplyCleanBoundMerge(string, string, string, repository.MergePreviewBinding) (repository.ObjectID, error)
 	// ApplyConflictedBoundMerge records a conflicted merge transaction.
 	ApplyConflictedBoundMerge(string, string, string, repository.MergePreviewBinding) error
+	// InspectMergeTransaction returns the persisted conflicted preview to its owner.
+	InspectMergeTransaction(string, string) (repository.MergeTransactionStatus, error)
+	// ResolveConflictedMerge records a complete, validated conflict resolution.
+	ResolveConflictedMerge(repository.ResolveConflictedMergeRequest) error
 	// ResolveMergeTransaction records an owning transaction's resolution snapshot.
 	ResolveMergeTransaction(string, string, repository.ObjectID) error
 	// RestageMergeTransaction records that an owning transaction was restaged.
@@ -91,6 +95,16 @@ func (s Service) ApplyClean(source, target, transactionID string, binding Previe
 // ApplyConflicted records a conflicted preview-bound merge transaction.
 func (s Service) ApplyConflicted(source, target, transactionID string, binding PreviewBinding) error {
 	return s.store.ApplyConflictedBoundMerge(source, target, transactionID, binding.record())
+}
+
+// Conflicts returns the persisted conflicted preview and current resolution state.
+func (s Service) Conflicts(target, transactionID string) (repository.MergeTransactionStatus, error) {
+	return s.store.InspectMergeTransaction(target, transactionID)
+}
+
+// ResolveConflicts records a complete, validated conflict resolution.
+func (s Service) ResolveConflicts(request repository.ResolveConflictedMergeRequest) error {
+	return s.store.ResolveConflictedMerge(request)
 }
 
 // Resolve records the snapshot produced by resolving a transaction.

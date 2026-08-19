@@ -42,7 +42,8 @@ func TestMergeNodeReportsOverlappingPropertyConflict(t *testing.T) {
 
 	var conflicts []MergeConflict
 	_, _ = mergeNode("node", base, source, target, true, true, true, &conflicts)
-	if len(conflicts) != 1 || conflicts[0] != (MergeConflict{Category: "structural", Entity: "node", ID: "node", Field: "properties.priority"}) {
+	if len(conflicts) != 1 || conflicts[0].Category != "structural" || conflicts[0].Entity != "node" ||
+		conflicts[0].ID != "node" || conflicts[0].Field != "properties.priority" {
 		t.Fatalf("conflicts = %#v", conflicts)
 	}
 }

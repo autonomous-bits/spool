@@ -54,6 +54,10 @@ var (
 	ErrMergeStagedSnapshotMissing = errors.New("merge staged snapshot was not found")
 	// ErrMergeTargetLeaseHeld reports an operation blocked by an active target merge transaction.
 	ErrMergeTargetLeaseHeld = errors.New("merge target branch has an active transaction")
+	// ErrMergeResolutionSelection reports malformed, incomplete, or unknown conflict choices.
+	ErrMergeResolutionSelection = errors.New("merge resolution selections are invalid")
+	// ErrMergeResolutionPreviewMismatch reports a resolution request for another preview.
+	ErrMergeResolutionPreviewMismatch = errors.New("merge resolution preview identifier does not match")
 	// ErrMergeRepositoryLocked reports repository state locked by another process.
 	ErrMergeRepositoryLocked = errors.New("merge repository is locked by another process")
 	// ErrMergeRepositoryClosed reports use after Close.

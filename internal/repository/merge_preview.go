@@ -15,7 +15,9 @@ var (
 
 // MergeConflict describes a deterministic three-way merge disagreement.
 type MergeConflict struct {
-	// Category is "structural" or "schema".
+	// ConflictID is the deterministic identifier used when selecting a resolution.
+	ConflictID string `json:"conflictId"`
+	// Category is "structural", "schema", or "semantic".
 	Category string `json:"category"`
 	// Entity is "node", "edge", or "schema".
 	Entity string `json:"entity"`
@@ -23,6 +25,8 @@ type MergeConflict struct {
 	ID string `json:"id,omitempty"`
 	// Field identifies the overlapping field or property key.
 	Field string `json:"field,omitempty"`
+	// Paths identifies the affected graph locations in deterministic order.
+	Paths []string `json:"paths"`
 }
 
 // MergeChange describes an entity changed from the target snapshot by a preview.
@@ -108,10 +112,21 @@ func (r *Repository) previewMergeLocked(sourceBranch, targetBranch string) (merg
 			} else {
 				return mergeCandidate{}, err
 			}
-			conflicts = append(conflicts, MergeConflict{Category: "schema", Entity: "schema", Field: "validation"})
+			for _, violation := range violations {
+				conflicts = append(conflicts, MergeConflict{
+					Category: "semantic", Entity: violation.Entity, ID: violation.EntityID,
+					Field: violation.Field, Paths: schemaViolationPaths(violation),
+				})
+			}
 		}
 	}
 	sortMergeConflicts(conflicts)
+	for index := range conflicts {
+		if conflicts[index].Paths == nil {
+			conflicts[index].Paths = mergeConflictPaths(conflicts[index])
+		}
+		conflicts[index].ConflictID = mergeConflictID(conflicts[index])
+	}
 	preview := MergePreview{
 		Binding:      MergePreviewBinding{MergeBase: base, SourceCommit: source, TargetCommit: target},
 		SourceBranch: sourceBranch, TargetBranch: targetBranch,
@@ -297,8 +312,62 @@ func sortMergeConflicts(conflicts []MergeConflict) {
 		if conflicts[i].ID != conflicts[j].ID {
 			return conflicts[i].ID < conflicts[j].ID
 		}
-		return conflicts[i].Field < conflicts[j].Field
+		if conflicts[i].Field != conflicts[j].Field {
+			return conflicts[i].Field < conflicts[j].Field
+		}
+		return compareMergeConflictPaths(conflicts[i].Paths, conflicts[j].Paths) < 0
 	})
+}
+
+func compareMergeConflictPaths(left, right []string) int {
+	for index := 0; index < len(left) && index < len(right); index++ {
+		if left[index] < right[index] {
+			return -1
+		}
+		if left[index] > right[index] {
+			return 1
+		}
+	}
+	switch {
+	case len(left) < len(right):
+		return -1
+	case len(left) > len(right):
+		return 1
+	default:
+		return 0
+	}
+}
+
+func mergeConflictID(conflict MergeConflict) string {
+	return string(persistedObjectID("merge-conflict", struct {
+		Category string
+		Entity   string
+		ID       string
+		Field    string
+		Paths    []string
+	}{conflict.Category, conflict.Entity, conflict.ID, conflict.Field, conflict.Paths}))
+}
+
+func mergeConflictPaths(conflict MergeConflict) []string {
+	if conflict.Entity == "schema" {
+		return []string{"schema/" + conflict.Field}
+	}
+	path := conflict.Entity + "/" + conflict.ID
+	if conflict.Field != "" {
+		path += "/" + conflict.Field
+	}
+	return []string{path}
+}
+
+func schemaViolationPaths(violation SchemaViolation) []string {
+	path := violation.Entity + "/" + violation.EntityID
+	if violation.Field != "" {
+		path += "/" + violation.Field
+	}
+	if violation.Rule != "" {
+		path += "/rule/" + violation.Rule
+	}
+	return []string{path}
 }
 
 func mergeChanges(targetNodes, nodes map[string]Node, targetEdges, edges map[string]Edge) []MergeChange {

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"errors"
+	"reflect"
 	"testing"
 )
 
@@ -421,7 +422,7 @@ func TestMergeTransactionOperationsRejectNonOwnerWithoutMutation(t *testing.T) {
 			if got := repo.mergeLeases["main"]; got != initialLease {
 				t.Fatalf("lease holder = %q, want %q", got, initialLease)
 			}
-			if got := repo.mergeTransactions["main"]; got != initialTransaction {
+			if got := repo.mergeTransactions["main"]; !reflect.DeepEqual(got, initialTransaction) {
 				t.Fatalf("transaction = %#v, want %#v", got, initialTransaction)
 			}
 		})
