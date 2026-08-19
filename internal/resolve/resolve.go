@@ -8,6 +8,7 @@ import (
 
 	"github.com/autonomous-bits/spool/internal/repository"
 	"github.com/autonomous-bits/spool/internal/repository/branch"
+	"github.com/autonomous-bits/spool/internal/repository/merge"
 )
 
 var (
@@ -234,10 +235,21 @@ type ImpactRequest struct {
 	Budget QueryBudgetRequest `json:"budget"`
 }
 
+// MergeApplyRequest identifies a reviewed clean preview and its merge commit metadata.
+type MergeApplyRequest struct {
+	SourceBranch  string              `json:"sourceBranch"`
+	TargetBranch  string              `json:"targetBranch"`
+	TransactionID string              `json:"transactionId"`
+	PreviewID     repository.ObjectID `json:"previewId"`
+	Author        string              `json:"author,omitempty"`
+	Message       string              `json:"message,omitempty"`
+}
+
 // ResolveTool adapts resolver, branch, and repository operations to context-aware tool methods.
 type ResolveTool struct {
 	resolver    *Resolver
 	branches    branch.Service
+	merges      merge.Service
 	queryBudget *QueryBudget
 }
 
@@ -251,8 +263,28 @@ func NewResolveToolWithOptions(repo *repository.Repository, options Options) *Re
 	return &ResolveTool{
 		resolver:    NewResolverWithOptions(repo, options),
 		branches:    branch.NewService(repo),
+		merges:      merge.NewService(repo),
 		queryBudget: options.QueryBudget,
 	}
+}
+
+// EDGMergePreview computes a deterministic, non-mutating three-way merge preview.
+func (t *ResolveTool) EDGMergePreview(ctx context.Context, sourceBranch, targetBranch string) (repository.MergePreview, error) {
+	if err := ctx.Err(); err != nil {
+		return repository.MergePreview{}, err
+	}
+	return t.merges.Preview(sourceBranch, targetBranch)
+}
+
+// EDGApplyMergePreview applies an exact clean preview.
+func (t *ResolveTool) EDGApplyMergePreview(ctx context.Context, request MergeApplyRequest) (repository.ObjectID, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	return t.merges.ApplyPreview(
+		request.SourceBranch, request.TargetBranch, request.TransactionID,
+		request.PreviewID, request.Author, request.Message,
+	)
 }
 
 // EDGResolve honors cancellation, resolves a node, and reports the effective budget.

@@ -49,6 +49,10 @@ var (
 // operations. Repository owns atomic mutation and recovery; this package owns
 // the merge-facing operation boundary.
 type Store interface {
+	// PreviewMerge computes an immutable three-way merge without moving refs.
+	PreviewMerge(string, string) (repository.MergePreview, error)
+	// ApplyMergePreview recomputes and applies an exact clean preview.
+	ApplyMergePreview(string, string, string, repository.ObjectID, string, string) (repository.ObjectID, error)
 	// ApplyCleanBoundMerge validates a preview binding and commits a clean merge.
 	ApplyCleanBoundMerge(string, string, string, repository.MergePreviewBinding) (repository.ObjectID, error)
 	// ApplyConflictedBoundMerge records a conflicted merge transaction.
@@ -68,6 +72,16 @@ type Service struct{ store Store }
 
 // NewService returns a merge lifecycle service backed by store.
 func NewService(store Store) Service { return Service{store: store} }
+
+// Preview computes a deterministic merge preview without changing branch refs.
+func (s Service) Preview(source, target string) (repository.MergePreview, error) {
+	return s.store.PreviewMerge(source, target)
+}
+
+// ApplyPreview applies a reviewed clean preview using caller commit metadata.
+func (s Service) ApplyPreview(source, target, transactionID string, previewID ObjectID, author, message string) (ObjectID, error) {
+	return s.store.ApplyMergePreview(source, target, transactionID, previewID, author, message)
+}
 
 // ApplyClean validates and applies a clean preview-bound merge.
 func (s Service) ApplyClean(source, target, transactionID string, binding PreviewBinding) (ObjectID, error) {

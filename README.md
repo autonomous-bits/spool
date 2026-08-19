@@ -92,6 +92,18 @@ spl branches-containing --entity-id 11111111-1111-4111-8111-111111111111
 
 Run `spl <command> --help` for all commands, flags, response-budget controls, and examples.
 
+Preview a merge before moving a branch, then apply the exact clean preview:
+
+```sh
+spl merge preview --source feature --target main
+spl merge apply --source feature --target main --transaction merge-42 --preview <preview-id> \
+  --author alice --message "Merge feature"
+```
+
+The preview combines independent node/edge fields and property keys, but reports
+overlapping changes and incompatible schema changes as conflicts. `merge apply` recomputes
+the preview and rejects it if either branch changed.
+
 ## Learn more
 
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) explains how to build, test, and contribute to Spool.

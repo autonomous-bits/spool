@@ -125,11 +125,13 @@ exact comparison request.
 
 ### Merge flow
 
-Merge operations are modeled as transactions bound to the source, target, and
-merge-base commits that were previewed. A clean merge advances the target
-directly. A conflicted merge records a target-branch lease and durable
-transaction state; the owner must resolve, restage, and finalize it. Repository
-open recovers valid transactions and discards invalid or stale records.
+`spl merge preview` computes a deterministic three-way comparison of the base,
+source, and target snapshots without moving refs. It merges independent node and
+edge fields and top-level property keys, and reports overlapping structural or
+schema conflicts. A clean preview has a content-derived identifier. `spl merge
+apply` recomputes that exact preview, materializes its merged graph snapshot,
+creates a two-parent commit, and advances the target atomically. Existing
+conflicted-merge transactions retain target leases and recovery behavior.
 
 ## Durability and concurrency
 

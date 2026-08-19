@@ -84,6 +84,19 @@ func TestRootCommandIncludesDiffSubcommand(t *testing.T) {
 	}
 }
 
+func TestRootCommandIncludesMergeSubcommands(t *testing.T) {
+	command := newRootCommand(&bytes.Buffer{}, resolve.NewResolveTool(repository.NewSeedRepository()))
+	for _, path := range [][]string{{"merge", "preview"}, {"merge", "apply"}} {
+		found, _, err := command.Find(path)
+		if err != nil {
+			t.Fatalf("find %v: %v", path, err)
+		}
+		if found.Name() != path[len(path)-1] {
+			t.Fatalf("command = %q, want %q", found.Name(), path[len(path)-1])
+		}
+	}
+}
+
 func TestRootCommandIncludesHistorySubcommands(t *testing.T) {
 	command := newRootCommand(&bytes.Buffer{}, resolve.NewResolveTool(repository.NewSeedRepository()))
 	for _, path := range [][]string{{"history"}, {"branches-containing"}} {
