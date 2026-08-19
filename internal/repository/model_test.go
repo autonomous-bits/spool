@@ -94,6 +94,7 @@ func TestPropertyGraphModelRejectsInvalidFloatsAndStoresBuiltinSchema(t *testing
 	if _, err := FloatPropertyValue(math.NaN()).Normalize(); !errors.Is(err, ErrInvalidPropertyValue) {
 		t.Fatalf("NaN Normalize error = %v, want ErrInvalidPropertyValue", err)
 	}
+
 	if _, err := (SchemaSnapshot{}).Normalize(); !errors.Is(err, ErrInvalidSchemaSnapshot) {
 		t.Fatalf("zero schema Normalize error = %v, want ErrInvalidSchemaSnapshot", err)
 	}
@@ -121,5 +122,45 @@ func TestPropertyGraphModelRejectsInvalidFloatsAndStoresBuiltinSchema(t *testing
 	}
 	if normalized.Type != "DEPENDS_ON" || !normalized.Properties["weight"].Equal(IntegerPropertyValue(3)) {
 		t.Fatalf("normalized edge = %#v", normalized)
+	}
+}
+
+func TestNodeAndEdgeCanonicalizationCollapsesAbsentCollections(t *testing.T) {
+	nodeWithoutCollections := Node{ID: "node-1", Title: "Node"}
+	nodeWithEmptyCollections := Node{
+		ID: "node-1", Title: "Node", Labels: []string{}, Properties: map[string]PropertyValue{},
+	}
+	if !nodeWithoutCollections.Equal(nodeWithEmptyCollections) {
+		t.Fatal("nodes with absent and empty collections are not equivalent")
+	}
+	nodeWithoutBytes, err := canonicalObjectEncoding(nodeWithoutCollections)
+	if err != nil {
+		t.Fatalf("encode node without collections: %v", err)
+	}
+	nodeWithBytes, err := canonicalObjectEncoding(nodeWithEmptyCollections)
+	if err != nil {
+		t.Fatalf("encode node with empty collections: %v", err)
+	}
+	if !bytes.Equal(nodeWithoutBytes, nodeWithBytes) {
+		t.Fatal("equivalent nodes have distinct canonical encodings")
+	}
+
+	edgeWithoutProperties := Edge{ID: "edge-1", Source: "node-1", Target: "node-2"}
+	edgeWithEmptyProperties := Edge{
+		ID: "edge-1", Source: "node-1", Target: "node-2", Properties: map[string]PropertyValue{},
+	}
+	if !edgeWithoutProperties.Equal(edgeWithEmptyProperties) {
+		t.Fatal("edges with absent and empty properties are not equivalent")
+	}
+	edgeWithoutBytes, err := canonicalObjectEncoding(edgeWithoutProperties)
+	if err != nil {
+		t.Fatalf("encode edge without properties: %v", err)
+	}
+	edgeWithBytes, err := canonicalObjectEncoding(edgeWithEmptyProperties)
+	if err != nil {
+		t.Fatalf("encode edge with empty properties: %v", err)
+	}
+	if !bytes.Equal(edgeWithoutBytes, edgeWithBytes) {
+		t.Fatal("equivalent edges have distinct canonical encodings")
 	}
 }

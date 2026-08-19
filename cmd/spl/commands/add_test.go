@@ -258,7 +258,7 @@ func TestAddCLIRejectsInvalidBatchesWithoutReplacingStagedSet(t *testing.T) {
 	if err := run(valid); err != nil {
 		t.Fatalf("stage valid batch: %v", err)
 	}
-	statePath := filepath.Join(stateDir, "repository.json")
+	statePath := filepath.Join(stateDir, "staged", "main.json")
 	before, err := os.ReadFile(statePath)
 	if err != nil {
 		t.Fatalf("read staged state: %v", err)

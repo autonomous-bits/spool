@@ -265,7 +265,7 @@ func (r *Repository) StageSchemaMigrationBatch(request SchemaMigrationRequest) (
 func (r *Repository) replaceStagedMutationsLocked(staged StagedMutationSet) (StageMutationResult, error) {
 	previous, hadPrevious := r.stagedMutations[staged.Branch]
 	r.stagedMutations[staged.Branch] = staged
-	if err := r.persistRepositoryLocked(); err != nil {
+	if err := r.writeStagedLocked(staged.Branch, &staged); err != nil {
 		if durableWriteCommitted(err) {
 			return StageMutationResult{
 				Branch: staged.Branch, BaseCommit: staged.BaseCommit, Operations: len(staged.Operations),
@@ -505,7 +505,12 @@ func (r *Repository) CommitStagedMutationBatch(request CommitStagedMutationReque
 
 	schemaRoot := r.snapshots[base].SchemaRoot
 	if staged.TargetSchema != nil {
-		schemaRoot = r.store("schema-root", *staged.TargetSchema)
+		schemaRoot, err = r.storeObject("schema-root", *staged.TargetSchema)
+		if err != nil {
+			r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
+			r.commits, r.branches, r.stagedMutations = commits, branches, stagedMutations
+			return CommitStagedMutationResult{}, fmt.Errorf("store staged schema: %w", err)
+		}
 	}
 	snapshot, err := r.materializeSnapshotLocked(nodes, edges, schemaRoot)
 	if err != nil {
@@ -513,64 +518,97 @@ func (r *Repository) CommitStagedMutationBatch(request CommitStagedMutationReque
 		r.commits, r.branches, r.stagedMutations = commits, branches, stagedMutations
 		return CommitStagedMutationResult{}, fmt.Errorf("materialize staged mutations: %w", err)
 	}
-	snapshotID := r.store("graph-snapshot", snapshot)
-	r.snapshots[snapshotID], r.edgeProjections[snapshotID] = snapshot, edges
-	if _, exists := r.projections[snapshot.NodeRoot]; !exists {
-		r.projections[snapshot.NodeRoot] = nodes
+	snapshotID, err := r.storeObject("graph-snapshot", snapshot)
+	if err != nil {
+		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
+		r.commits, r.branches, r.stagedMutations = commits, branches, stagedMutations
+		return CommitStagedMutationResult{}, fmt.Errorf("store staged snapshot: %w", err)
+	}
+	r.snapshots[snapshotID] = snapshot
+	if err := r.reconstructSnapshotProjectionsLocked(snapshotID, snapshot); err != nil {
+		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
+		r.commits, r.branches, r.stagedMutations = commits, branches, stagedMutations
+		return CommitStagedMutationResult{}, fmt.Errorf("reconstruct staged snapshot: %w", err)
 	}
 	next := r.newCommit(snapshotID, []ObjectID{head}, request.Author, request.Message)
-	nextID := r.store("commit", next)
+	nextID, err := r.storeObject("commit", next)
+	if err != nil {
+		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
+		r.commits, r.branches, r.stagedMutations = commits, branches, stagedMutations
+		return CommitStagedMutationResult{}, fmt.Errorf("store staged commit: %w", err)
+	}
 	r.commits[nextID], r.branches[request.Branch] = next, nextID
 	delete(r.stagedMutations, request.Branch)
 	result := CommitStagedMutationResult{Branch: request.Branch, Commit: nextID}
-	if err := r.persistRepositoryLocked(); err != nil {
-		if durableWriteCommitted(err) {
-			return result, &CommittedWithWarningError{Result: result, err: fmt.Errorf("staged mutations committed but directory sync failed: %w", err)}
-		}
+	refErr := r.writeRefLocked(request.Branch, head, nextID, "commit")
+	if refErr != nil && !durableWriteCommitted(refErr) {
 		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
 		r.commits, r.branches, r.stagedMutations = commits, branches, stagedMutations
-		return CommitStagedMutationResult{}, err
+		return CommitStagedMutationResult{}, refErr
+	}
+	cleanupErr := r.writeStagedLocked(request.Branch, nil)
+	if refErr != nil || cleanupErr != nil {
+		return result, &CommittedWithWarningError{Result: result, err: fmt.Errorf("staged mutations committed with durability warning: %w", errors.Join(refErr, cleanupErr))}
 	}
 	return result, nil
 }
 
 func (r *Repository) materializeSnapshotLocked(nodes map[string]Node, edges map[string]Edge, schemaRoot ObjectID) (graphSnapshot, error) {
 	nodeIDs := sortedNodeIDs(nodes)
-	nodeObjects := make([]ObjectID, 0, len(nodeIDs))
+	nodeEntries := make([]prollyTreeEntry, 0, len(nodeIDs))
 	for _, id := range nodeIDs {
 		node, err := nodes[id].Normalize()
 		if err != nil {
 			return graphSnapshot{}, fmt.Errorf("normalize node %q: %w", id, err)
 		}
+		node = canonicalNodeCollections(node)
 		nodes[id] = node
-		nodeObjects = append(nodeObjects, r.store("node", node))
+		object, err := r.storeObject("node", node)
+		if err != nil {
+			return graphSnapshot{}, fmt.Errorf("store node %q: %w", node.ID, err)
+		}
+		nodeEntries = append(nodeEntries, prollyTreeEntry{Key: node.ID, Value: object})
 	}
-	edgeObjects, err := edgeObjectIDs(r, edges, func(a, b Edge) bool { return a.ID < b.ID })
+	edgeIDs := sortedEdgeIDs(edges)
+	edgeEntries := make([]prollyTreeEntry, 0, len(edgeIDs))
+	outEntries := make([]prollyTreeEntry, 0, len(edgeIDs))
+	inEntries := make([]prollyTreeEntry, 0, len(edgeIDs))
+	for _, id := range edgeIDs {
+		edge, err := edges[id].Normalize()
+		if err != nil {
+			return graphSnapshot{}, fmt.Errorf("normalize edge %q: %w", id, err)
+		}
+		edge = canonicalEdgeProperties(edge)
+		edges[id] = edge
+		object, err := r.storeObject("edge", edge)
+		if err != nil {
+			return graphSnapshot{}, fmt.Errorf("store edge %q: %w", edge.ID, err)
+		}
+		edgeEntries = append(edgeEntries, prollyTreeEntry{Key: edge.ID, Value: object})
+		outEntries = append(outEntries, prollyTreeEntry{Key: adjacencyKey(edge.Source, edge.ID), Value: object})
+		inEntries = append(inEntries, prollyTreeEntry{Key: adjacencyKey(edge.Target, edge.ID), Value: object})
+	}
+	outEntries = sortedProllyEntries(outEntries)
+	inEntries = sortedProllyEntries(inEntries)
+	nodeRoot, err := r.storeProllyTreeLocked(nodeEntries)
 	if err != nil {
 		return graphSnapshot{}, err
 	}
-	outObjects, err := edgeObjectIDs(r, edges, func(a, b Edge) bool {
-		if a.Source != b.Source {
-			return a.Source < b.Source
-		}
-		return a.ID < b.ID
-	})
+	edgeRoot, err := r.storeProllyTreeLocked(edgeEntries)
 	if err != nil {
 		return graphSnapshot{}, err
 	}
-	inObjects, err := edgeObjectIDs(r, edges, func(a, b Edge) bool {
-		if a.Target != b.Target {
-			return a.Target < b.Target
-		}
-		return a.ID < b.ID
-	})
+	outAdjRoot, err := r.storeProllyTreeLocked(outEntries)
+	if err != nil {
+		return graphSnapshot{}, err
+	}
+	inAdjRoot, err := r.storeProllyTreeLocked(inEntries)
 	if err != nil {
 		return graphSnapshot{}, err
 	}
 	return graphSnapshot{
-		NodeRoot: r.store("prolly-node-root", nodeObjects), EdgeRoot: r.store("prolly-edge-root", edgeObjects),
-		OutAdjRoot: r.store("prolly-out-adjacency-root", outObjects), InAdjRoot: r.store("prolly-in-adjacency-root", inObjects),
-		SchemaRoot: schemaRoot,
+		NodeRoot: nodeRoot, EdgeRoot: edgeRoot, OutAdjRoot: outAdjRoot, InAdjRoot: inAdjRoot,
+		SchemaRoot: schemaRoot, NodeCount: uint64(len(nodeEntries)), EdgeCount: uint64(len(edgeEntries)),
 	}, nil
 }
 
@@ -581,24 +619,6 @@ func sortedNodeIDs(nodes map[string]Node) []string {
 	}
 	sort.Strings(ids)
 	return ids
-}
-
-func edgeObjectIDs(r *Repository, edges map[string]Edge, less func(Edge, Edge) bool) ([]ObjectID, error) {
-	ids := make([]string, 0, len(edges))
-	for id := range edges {
-		ids = append(ids, id)
-	}
-	sort.Slice(ids, func(i, j int) bool { return less(edges[ids[i]], edges[ids[j]]) })
-	objects := make([]ObjectID, 0, len(ids))
-	for _, id := range ids {
-		edge, err := edges[id].Normalize()
-		if err != nil {
-			return nil, fmt.Errorf("normalize edge %q: %w", id, err)
-		}
-		edges[id] = edge
-		objects = append(objects, r.store("edge", edge))
-	}
-	return objects, nil
 }
 
 func cloneNodes(source map[string]Node) map[string]Node {

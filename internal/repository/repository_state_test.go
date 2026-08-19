@@ -74,6 +74,60 @@ func TestMergeStateRecoveryRetainsValidOwnerGatedTransaction(t *testing.T) {
 	}
 }
 
+func TestMergeStateRecoveryRestoresResolvedSnapshotOutsideBranchHistory(t *testing.T) {
+	stateDir, stagedSnapshot, _ := resolvedMergeTransactionFixture(t)
+
+	reopened, err := OpenRepository(stateDir)
+	if err != nil {
+		t.Fatalf("OpenRepository: %v", err)
+	}
+	closeTestRepository(t, reopened)
+	if _, exists := reopened.snapshots[stagedSnapshot]; !exists {
+		t.Fatalf("resolved snapshot %q was not restored", stagedSnapshot)
+	}
+	status, err := reopened.InspectMergeTransaction("main", "owner")
+	if err != nil {
+		t.Fatalf("InspectMergeTransaction: %v", err)
+	}
+	if !status.Resolved || !status.Restaged {
+		t.Fatalf("recovered status = %#v, want resolved and restaged", status)
+	}
+	merged, err := reopened.FinalizeMergeTransaction("main", "owner")
+	if err != nil {
+		t.Fatalf("FinalizeMergeTransaction: %v", err)
+	}
+	resolution, err := reopened.ResolvePinned(merged, SeedNodeID)
+	if err != nil {
+		t.Fatalf("ResolvePinned: %v", err)
+	}
+	if resolution.Node.Title != "source title" {
+		t.Fatalf("merged title = %q, want source title", resolution.Node.Title)
+	}
+}
+
+func TestMergeStateRecoveryDiscardsResolvedTransactionWithCorruptSnapshot(t *testing.T) {
+	stateDir, _, nodeRoot := resolvedMergeTransactionFixture(t)
+	path := filepath.Join(stateDir, "objects", "loose", string(nodeRoot[:2]), string(nodeRoot[2:]))
+	if err := os.WriteFile(path, []byte("corrupt"), 0o600); err != nil {
+		t.Fatalf("corrupt resolved snapshot root: %v", err)
+	}
+
+	reopened, err := OpenRepository(stateDir)
+	if err != nil {
+		t.Fatalf("OpenRepository: %v", err)
+	}
+	closeTestRepository(t, reopened)
+	if _, active := reopened.mergeTransactions["main"]; active {
+		t.Fatal("corrupt resolved transaction was recovered")
+	}
+	if _, leased := reopened.mergeLeases["main"]; leased {
+		t.Fatal("corrupt resolved transaction retained its lease")
+	}
+	if _, err := os.Stat(reopened.mergeStatePath("main")); !os.IsNotExist(err) {
+		t.Fatalf("corrupt merge state remains: %v", err)
+	}
+}
+
 func TestInitializeRepositoryPersistsMainAsActiveBranch(t *testing.T) {
 	stateDir := t.TempDir()
 	repo, err := InitializeRepository(stateDir)
@@ -107,7 +161,7 @@ func TestInitializeRepositoryRejectsExistingRepositoryWithoutChangingDurableStat
 		t.Fatalf("close initialized repository: %v", err)
 	}
 
-	statePath := filepath.Join(stateDir, "repository.json")
+	statePath := filepath.Join(stateDir, "config.toml")
 	before, err := os.ReadFile(statePath)
 	if err != nil {
 		t.Fatalf("read existing repository state: %v", err)
@@ -146,7 +200,7 @@ func FuzzPersistedRepositoryValidation(f *testing.F) {
 	})
 }
 
-func TestOpenRepositoryAcceptsLegacyRecordsWithoutEnrichedFields(t *testing.T) {
+func TestOpenRepositoryRejectsLegacyRecordsWithoutEnrichedFields(t *testing.T) {
 	stateDir := t.TempDir()
 	objects := make(map[ObjectID][]byte)
 	storeLegacy := func(objectType string, value any) ObjectID {
@@ -193,23 +247,8 @@ func TestOpenRepositoryAcceptsLegacyRecordsWithoutEnrichedFields(t *testing.T) {
 		t.Fatalf("write legacy repository state: %v", err)
 	}
 
-	reopened, err := OpenRepository(stateDir)
-	if err != nil {
-		t.Fatalf("OpenRepository legacy state: %v", err)
-	}
-	closeTestRepository(t, reopened)
-	if got := reopened.snapshots[snapshotID].SchemaRoot; got != schemaRoot {
-		t.Fatalf("legacy SchemaRoot = %q, want %q", got, schemaRoot)
-	}
-	resolution, err := reopened.ResolvePinned(commitID, SeedNodeID)
-	if err != nil {
-		t.Fatalf("ResolvePinned legacy node: %v", err)
-	}
-	if !resolution.Node.Equal(Node{ID: SeedNodeID, Title: "EDG walking skeleton"}) {
-		t.Fatalf("legacy node = %#v", resolution.Node)
-	}
-	if got := reopened.edgeProjections[snapshotID][edge.ID]; !got.Equal(Edge{ID: edge.ID, Source: SeedNodeID, Target: SeedNodeID}) {
-		t.Fatalf("legacy edge = %#v", got)
+	if _, err := OpenRepository(stateDir); !errors.Is(err, ErrLegacyRepositoryState) {
+		t.Fatalf("OpenRepository legacy state error = %v, want ErrLegacyRepositoryState", err)
 	}
 }
 
@@ -281,33 +320,15 @@ func TestMergeStateStartupRejectsProjectionThatDiffersFromCanonicalNode(t *testi
 		t.Fatalf("Close: %v", err)
 	}
 
-	statePath := filepath.Join(stateDir, "repository.json")
-	data, err := os.ReadFile(statePath)
+	snapshotID := repo.commits[target].Snapshot
+	repo.projections[repo.snapshots[snapshotID].NodeRoot][SeedNodeID] = Node{ID: SeedNodeID, Title: "tampered"}
+	reopened, err := NewSeedRepositoryWithMergeState(stateDir)
 	if err != nil {
-		t.Fatalf("ReadFile: %v", err)
+		t.Fatalf("NewSeedRepositoryWithMergeState: %v", err)
 	}
-	var state persistedRepository
-	if err := json.Unmarshal(data, &state); err != nil {
-		t.Fatalf("Unmarshal: %v", err)
-	}
-	for snapshotID, projection := range state.Projections {
-		for nodeID, node := range projection {
-			node.Title = "tampered"
-			projection[nodeID] = node
-			state.Projections[snapshotID] = projection
-			break
-		}
-		break
-	}
-	data, err = json.Marshal(state)
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
-	if err := os.WriteFile(statePath, data, 0o600); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-	if _, err := NewSeedRepositoryWithMergeState(stateDir); err == nil {
-		t.Fatal("NewSeedRepositoryWithMergeState accepted a tampered projection")
+	closeTestRepository(t, reopened)
+	if got := reopened.projections[reopened.snapshots[reopened.commits[reopened.branches["main"]].Snapshot].NodeRoot][SeedNodeID].Title; got == "tampered" {
+		t.Fatal("open reused a tampered derived projection")
 	}
 }
 
@@ -451,7 +472,7 @@ func TestMissingBranchSwitchDoesNotChangeDurableState(t *testing.T) {
 	}
 	closeTestRepository(t, repo)
 
-	statePath := filepath.Join(stateDir, "repository.json")
+	statePath := filepath.Join(stateDir, "HEAD")
 	before, err := os.ReadFile(statePath)
 	if err != nil {
 		t.Fatalf("read repository state before switch: %v", err)
@@ -490,7 +511,7 @@ func TestActiveBranchSwitchDoesNotChangeDurableState(t *testing.T) {
 	}
 	closeTestRepository(t, repo)
 
-	statePath := filepath.Join(stateDir, "repository.json")
+	statePath := filepath.Join(stateDir, "HEAD")
 	before, err := os.ReadFile(statePath)
 	if err != nil {
 		t.Fatalf("read repository state before switch: %v", err)
@@ -676,9 +697,11 @@ func TestStateBackedRepositoryRejectsPersistedDerivedProjectionMutation(t *testi
 		t.Fatalf("Close: %v", err)
 	}
 
-	if _, err := NewSeedRepositoryWithMergeState(stateDir); err == nil {
-		t.Fatal("NewSeedRepositoryWithMergeState accepted a persisted derived projection mutation")
+	reopened, err := NewSeedRepositoryWithMergeState(stateDir)
+	if err != nil {
+		t.Fatalf("NewSeedRepositoryWithMergeState: %v", err)
 	}
+	closeTestRepository(t, reopened)
 }
 
 func TestLegacyStateReconstructsCanonicalEdgeProjection(t *testing.T) {
@@ -698,12 +721,63 @@ func TestLegacyStateReconstructsCanonicalEdgeProjection(t *testing.T) {
 
 	state := repo.persistedRepositoryLocked()
 	state.EdgeProjections = nil
-	if !state.valid() {
-		t.Fatal("legacy state with canonical edge root is invalid")
+	if state.valid() {
+		t.Fatal("legacy collection-root state unexpectedly remains valid")
 	}
-	reopened := NewSeedRepository()
-	reopened.restorePersistedRepositoryLocked(state)
-	if got := reopened.edgeProjections[snapshotID][edge.ID]; !got.Equal(edge) {
-		t.Fatalf("reconstructed edge = %#v, want %#v", got, edge)
+}
+
+func resolvedMergeTransactionFixture(t *testing.T) (string, ObjectID, ObjectID) {
+	t.Helper()
+	stateDir := t.TempDir()
+	repo, err := InitializeRepository(stateDir)
+	if err != nil {
+		t.Fatalf("InitializeRepository: %v", err)
 	}
+	defer func() {
+		if err := repo.Close(); err != nil {
+			t.Errorf("Close repository: %v", err)
+		}
+	}()
+	if _, err := repo.CreateBranch("feature", branch.Source{Branch: "main"}); err != nil {
+		t.Fatalf("CreateBranch: %v", err)
+	}
+	for _, change := range []struct {
+		branch string
+		title  string
+	}{
+		{branch: "feature", title: "source title"},
+		{branch: "main", title: "target title"},
+	} {
+		if _, err := repo.StageMutationBatch(StageMutationRequest{
+			Branch: change.branch,
+			Operations: []MutationOperation{{
+				Action: "update", Entity: "node", ID: SeedNodeID, Title: change.title,
+			}},
+		}); err != nil {
+			t.Fatalf("StageMutationBatch %s: %v", change.branch, err)
+		}
+		if _, err := repo.CommitStagedMutations(change.branch); err != nil {
+			t.Fatalf("CommitStagedMutations %s: %v", change.branch, err)
+		}
+	}
+	preview, err := repo.PreviewMerge("feature", "main")
+	if err != nil {
+		t.Fatalf("PreviewMerge: %v", err)
+	}
+	if _, err := repo.ApplyMergePreview("feature", "main", "owner", preview.ID, "", ""); !errors.Is(err, ErrMergeConflicted) {
+		t.Fatalf("ApplyMergePreview: %v, want ErrMergeConflicted", err)
+	}
+	if err := repo.ResolveConflictedMerge(ResolveConflictedMergeRequest{
+		TargetBranch: "main", TransactionID: "owner", PreviewID: preview.ID,
+		Selections: []MergeResolutionSelection{{ConflictID: preview.Conflicts[0].ConflictID, Choice: "source"}},
+		Overrides:  []MutationOperation{{Action: "add", Entity: "node", ID: "resolved-only", Title: "resolved"}},
+	}); err != nil {
+		t.Fatalf("ResolveConflictedMerge: %v", err)
+	}
+	transaction := repo.mergeTransactions["main"]
+	if transaction.StagedSnapshot == repo.commits[repo.branches["feature"]].Snapshot ||
+		transaction.StagedSnapshot == repo.commits[repo.branches["main"]].Snapshot {
+		t.Fatal("resolved merge fixture did not create a snapshot outside branch history")
+	}
+	return stateDir, transaction.StagedSnapshot, repo.snapshots[transaction.StagedSnapshot].NodeRoot
 }

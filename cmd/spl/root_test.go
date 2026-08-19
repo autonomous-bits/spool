@@ -41,6 +41,7 @@ func TestCommandHelpIncludesExamples(t *testing.T) {
 		{[]string{"diff", "--help"}, "spl diff --base-branch main --target-branch feature"},
 		{[]string{"history", "--help"}, "spl history --branch main --entity-id"},
 		{[]string{"branches-containing", "--help"}, "spl branches-containing --entity-id"},
+		{[]string{"fsck", "--help"}, "spl fsck"},
 	}
 
 	for _, testCase := range testCases {
@@ -107,6 +108,17 @@ func TestRootCommandIncludesHistorySubcommands(t *testing.T) {
 		if found.Name() != path[0] {
 			t.Fatalf("command = %q, want %q", found.Name(), path[0])
 		}
+	}
+}
+
+func TestRootCommandIncludesFsckSubcommand(t *testing.T) {
+	command := newRootCommand(&bytes.Buffer{}, resolve.NewResolveTool(repository.NewSeedRepository()))
+	found, _, err := command.Find([]string{"fsck"})
+	if err != nil {
+		t.Fatalf("find fsck command: %v", err)
+	}
+	if found.Name() != "fsck" {
+		t.Fatalf("command = %q, want fsck", found.Name())
 	}
 }
 

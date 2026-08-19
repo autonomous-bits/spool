@@ -14,6 +14,8 @@ func newRootCommand(stdout io.Writer, tool *resolve.ResolveTool) *cobra.Command 
 		return tool, nil
 	}, func() (*repository.Repository, error) {
 		return repository.NewSeedRepository(), nil
+	}, func() (*resolve.FsckTool, error) {
+		return tool.FsckTool(), nil
 	})
 }
 
@@ -21,7 +23,18 @@ func newRootCommandWithLifecycle(
 	stdout io.Writer,
 	toolProvider func() (*resolve.ResolveTool, error),
 	initialize func() (*repository.Repository, error),
+	fsckProviders ...func() (*resolve.FsckTool, error),
 ) *cobra.Command {
+	fsckProvider := func() (*resolve.FsckTool, error) {
+		tool, err := toolProvider()
+		if err != nil {
+			return nil, err
+		}
+		return tool.FsckTool(), nil
+	}
+	if len(fsckProviders) > 0 {
+		fsckProvider = fsckProviders[0]
+	}
 	root := &cobra.Command{
 		Use:          "spl",
 		SilenceUsage: true,
@@ -40,5 +53,6 @@ func newRootCommandWithLifecycle(
 	root.AddCommand(commands.NewHistoryCommand(toolProvider))
 	root.AddCommand(commands.NewBranchesContainingCommand(toolProvider))
 	root.AddCommand(commands.NewMergeCommand(toolProvider))
+	root.AddCommand(commands.NewFsckCommand(fsckProvider))
 	return root
 }

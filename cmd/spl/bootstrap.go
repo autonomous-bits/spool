@@ -36,7 +36,9 @@ func bootstrapRootCommand(stdout io.Writer, stateDir string) (*cobra.Command, fu
 		}
 		return closeRepository()
 	}
-	return newRootCommandWithLifecycle(stdout, toolProvider, initialize), close
+	return newRootCommandWithLifecycle(stdout, toolProvider, initialize, func() (*resolve.FsckTool, error) {
+		return resolve.NewPersistentFsckTool(stateDir), nil
+	}), close
 }
 
 func openPersistentTool(stateDir string) (*resolve.ResolveTool, func() error, error) {

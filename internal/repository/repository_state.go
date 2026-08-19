@@ -7,14 +7,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
-	"strconv"
+	"strings"
 
 	"github.com/fxamacker/cbor/v2"
 	"github.com/gofrs/flock"
-	"lukechampine.com/blake3"
+	"github.com/pelletier/go-toml/v2"
 )
 
 type persistedMergeTransaction struct {
@@ -36,6 +37,13 @@ type persistedRepository struct {
 	StagedMutations map[string]StagedMutationSet `json:"stagedMutations,omitempty"`
 }
 
+const repositoryFormatVersion = 1
+
+type repositoryConfig struct {
+	FormatVersion int    `toml:"format_version"`
+	DefaultBranch string `toml:"default_branch"`
+}
+
 type legacyNode struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`
@@ -55,13 +63,17 @@ func (e durableWriteCommittedError) Error() string { return e.err.Error() }
 // Unwrap returns the underlying durability warning.
 func (e durableWriteCommittedError) Unwrap() error { return e.err }
 
-// NewSeedRepositoryWithMergeState opens or creates stateDir, acquires its process lock, and recovers state.
+// NewSeedRepositoryWithMergeState opens stateDir or initializes a new seeded repository.
 func NewSeedRepositoryWithMergeState(stateDir string) (*Repository, error) {
-	repo := NewSeedRepository()
-	if err := os.MkdirAll(stateDir, 0o700); err != nil {
-		return nil, fmt.Errorf("create merge state directory: %w", err)
+	if err := rejectLegacyRepositoryState(stateDir); err != nil {
+		return nil, err
 	}
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		return nil, fmt.Errorf("create repository state directory: %w", err)
+	}
+	repo := newRepository()
 	repo.mergeStateDir = stateDir
+	repo.objectStore = newLooseObjectStore(stateDir, &repo.objects)
 	repo.stateLock = flock.New(filepath.Join(stateDir, "repository.lock"))
 	locked, err := repo.stateLock.TryLock()
 	if err != nil {
@@ -70,8 +82,17 @@ func NewSeedRepositoryWithMergeState(stateDir string) (*Repository, error) {
 	if !locked {
 		return nil, ErrMergeRepositoryLocked
 	}
-	if err := repo.loadPersistedRepository(); err != nil {
+	loaded, err := repo.loadControlState()
+	if err != nil {
 		return nil, unlockAfterFailedOpen(repo.stateLock, err)
+	}
+	if !loaded {
+		if err := repo.seed(); err != nil {
+			return nil, unlockAfterFailedOpen(repo.stateLock, fmt.Errorf("seed repository: %w", err))
+		}
+		if err := repo.initializeControlStateLocked(); err != nil {
+			return nil, unlockAfterFailedOpen(repo.stateLock, fmt.Errorf("initialize repository control state: %w", err))
+		}
 	}
 	if err := repo.RecoverMergeTransactions(); err != nil {
 		return nil, unlockAfterFailedOpen(repo.stateLock, err)
@@ -88,33 +109,53 @@ func unlockAfterFailedOpen(lock *flock.Flock, operationErr error) error {
 
 // InitializeRepository creates and durably stores a seeded repository.
 func InitializeRepository(stateDir string) (*Repository, error) {
-	if _, err := os.Stat(filepath.Join(stateDir, "repository.json")); err == nil {
-		return nil, ErrRepositoryAlreadyInitialized
-	} else if !os.IsNotExist(err) {
-		return nil, fmt.Errorf("inspect repository state: %w", err)
-	}
-	repo, err := NewSeedRepositoryWithMergeState(stateDir)
-	if err != nil {
+	if err := rejectLegacyRepositoryState(stateDir); err != nil {
 		return nil, err
 	}
-	repo.mu.Lock()
-	if err := repo.persistRepositoryLocked(); err != nil {
-		repo.mu.Unlock()
-		_ = repo.Close()
-		return nil, fmt.Errorf("persist initialized repository: %w", err)
+	if _, err := os.Stat(filepath.Join(stateDir, "config.toml")); err == nil {
+		return nil, ErrRepositoryAlreadyInitialized
+	} else if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("inspect repository configuration: %w", err)
 	}
-	repo.mu.Unlock()
-	return repo, nil
+	return NewSeedRepositoryWithMergeState(stateDir)
 }
 
 // OpenRepository opens an initialized repository without creating state for a new target.
 func OpenRepository(stateDir string) (*Repository, error) {
-	if _, err := os.Stat(filepath.Join(stateDir, "repository.json")); os.IsNotExist(err) {
+	if err := rejectLegacyRepositoryState(stateDir); err != nil {
+		return nil, err
+	}
+	if _, err := os.Stat(filepath.Join(stateDir, "config.toml")); os.IsNotExist(err) {
 		return nil, ErrRepositoryNotInitialized
 	} else if err != nil {
-		return nil, fmt.Errorf("inspect repository state: %w", err)
+		return nil, fmt.Errorf("inspect repository configuration: %w", err)
 	}
-	return NewSeedRepositoryWithMergeState(stateDir)
+	return openControlRepository(stateDir)
+}
+
+func openControlRepository(stateDir string) (*Repository, error) {
+	repo := newRepository()
+	repo.mergeStateDir = stateDir
+	repo.objectStore = newLooseObjectStore(stateDir, &repo.objects)
+	repo.stateLock = flock.New(filepath.Join(stateDir, "repository.lock"))
+	locked, err := repo.stateLock.TryLock()
+	if err != nil {
+		return nil, fmt.Errorf("lock repository: %w", err)
+	}
+	if !locked {
+		return nil, ErrMergeRepositoryLocked
+	}
+	loaded, err := repo.loadControlState()
+	if err != nil {
+		return nil, unlockAfterFailedOpen(repo.stateLock, err)
+	}
+	if !loaded {
+		return nil, unlockAfterFailedOpen(repo.stateLock, ErrRepositoryNotInitialized)
+	}
+	if err := repo.RecoverMergeTransactions(); err != nil {
+		return nil, unlockAfterFailedOpen(repo.stateLock, err)
+	}
+	return repo, nil
 }
 
 // Close marks the repository unusable and releases its process lock; it is safe to call repeatedly.
@@ -146,21 +187,23 @@ func (r *Repository) RecoverMergeTransactions() error {
 	if r.mergeStateDir == "" {
 		return nil
 	}
-	entries, err := os.ReadDir(r.mergeStateDir)
+	entries, err := os.ReadDir(r.mergeDirectory())
 	if err != nil {
 		return fmt.Errorf("read merge state directory: %w", err)
 	}
 	for _, entry := range entries {
-		if entry.IsDir() || entry.Name() == filepath.Base(r.repositoryStatePath()) || filepath.Ext(entry.Name()) != ".json" {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
 			continue
 		}
-		path := filepath.Join(r.mergeStateDir, entry.Name())
+		path := filepath.Join(r.mergeDirectory(), entry.Name())
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return fmt.Errorf("read merge state %q: %w", path, err)
 		}
 		var state persistedMergeTransaction
-		if err := json.Unmarshal(data, &state); err == nil && r.validPersistedMergeTransactionLocked(state) {
+		if err := json.Unmarshal(data, &state); err == nil &&
+			r.loadMergeTransactionSnapshotLocked(state) &&
+			r.validPersistedMergeTransactionLocked(state) {
 			r.mergeLeases[state.TargetBranch] = state.LeaseOwner
 			r.mergeTransactions[state.TargetBranch] = state.Transaction
 			continue
@@ -168,11 +211,24 @@ func (r *Repository) RecoverMergeTransactions() error {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("discard invalid merge state %q: %w", path, err)
 		}
-		if err := syncMergeStateDirectory(r.mergeStateDir); err != nil {
+		if err := syncMergeStateDirectory(r.mergeDirectory()); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// loadMergeTransactionSnapshotLocked restores the otherwise-unreachable graph
+// selected by a resolved merge before validating its durable transaction.
+func (r *Repository) loadMergeTransactionSnapshotLocked(state persistedMergeTransaction) bool {
+	transaction := state.Transaction
+	if !transaction.Resolved {
+		return true
+	}
+	if transaction.StagedSnapshot == "" || !validLooseObjectID(transaction.StagedSnapshot) {
+		return false
+	}
+	return r.loadSnapshotLocked(transaction.StagedSnapshot) == nil
 }
 
 func (r *Repository) validPersistedMergeTransactionLocked(state persistedMergeTransaction) bool {
@@ -216,72 +272,513 @@ func (r *Repository) validPersistedMergeTransactionLocked(state persistedMergeTr
 	if !ok || mergeBase != transaction.Binding.MergeBase {
 		return false
 	}
-	candidate, err := r.previewMergeLocked(transaction.SourceBranch, state.TargetBranch)
-	return err == nil && candidate.preview.ID == transaction.Preview.ID && reflect.DeepEqual(candidate.preview, transaction.Preview)
+	// The immutable commits and their graph objects were reconstructed and
+	// validated before recovery. Retain the durable preview rather than
+	// regenerating it here: recovery must not alter a recorded transaction.
+	return true
 }
 
-func (r *Repository) persistedRepositoryLocked() persistedRepository {
-	return persistedRepository{
-		DefaultBranch:   r.defaultBranch,
-		ActiveBranch:    r.activeBranch,
-		Branches:        r.branches,
-		Commits:         r.commits,
-		Snapshots:       r.snapshots,
-		Projections:     r.projections,
-		EdgeProjections: r.edgeProjections,
-		Objects:         r.objects,
-		StagedMutations: r.stagedMutations,
-	}
-}
-
-func (r *Repository) loadPersistedRepository() error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	data, err := os.ReadFile(r.repositoryStatePath())
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("read repository state: %w", err)
-	}
-	var state persistedRepository
-	if err := json.Unmarshal(data, &state); err != nil || !state.valid() {
-		return fmt.Errorf("decode repository state: invalid durable repository")
-	}
-	r.restorePersistedRepositoryLocked(state)
-	return nil
-}
-
+// persistRepositoryLocked exists for test injection and for callers that need
+// to reconcile every mutable control file. Normal mutation paths use the
+// narrower helpers below so each ref transition has one reflog entry.
 func (r *Repository) persistRepositoryLocked() error {
-	if r.persistRepositoryFn != nil {
-		return r.persistRepositoryFn()
+	if err := r.persistenceHook(); err != nil {
+		return err
 	}
 	if r.mergeStateDir == "" {
 		return nil
 	}
-	data, err := json.Marshal(r.persistedRepositoryLocked())
-	if err != nil {
-		return fmt.Errorf("encode repository state: %w", err)
+	if err := r.writeConfigLocked(); err != nil {
+		return err
 	}
-	return writeDurableStateFile(r.repositoryStatePath(), data)
-}
-
-func (r *Repository) restorePersistedRepositoryLocked(state persistedRepository) {
-	r.defaultBranch, r.activeBranch = state.DefaultBranch, state.ActiveBranch
-	r.branches, r.commits, r.snapshots = state.Branches, state.Commits, state.Snapshots
-	r.projections, r.objects = state.Projections, state.Objects
-	r.edgeProjections = state.EdgeProjections
-	if r.edgeProjections == nil {
-		r.edgeProjections = make(map[ObjectID]map[string]Edge, len(r.snapshots))
-		for snapshotID, snapshot := range r.snapshots {
-			edges, _ := state.canonicalEdgeProjection(snapshot)
-			r.edgeProjections[snapshotID] = edges
+	if err := writeDurableStateFile(r.headPath(), []byte(r.activeBranch+"\n")); err != nil {
+		return err
+	}
+	for name, commitID := range r.branches {
+		if err := r.writeRefValueLocked(name, commitID); err != nil {
+			return err
 		}
 	}
-	r.stagedMutations = state.StagedMutations
-	if r.stagedMutations == nil {
-		r.stagedMutations = make(map[string]StagedMutationSet)
+	for name, staged := range r.stagedMutations {
+		if err := r.writeStagedLocked(name, &staged); err != nil {
+			return err
+		}
 	}
+	return nil
+}
+
+func (r *Repository) persistedRepositoryLocked() persistedRepository {
+	return persistedRepository{
+		DefaultBranch: r.defaultBranch, ActiveBranch: r.activeBranch, Branches: r.branches,
+		Commits: r.commits, Snapshots: r.snapshots, Projections: r.projections,
+		EdgeProjections: r.edgeProjections, Objects: r.objects, StagedMutations: r.stagedMutations,
+	}
+}
+
+func rejectLegacyRepositoryState(stateDir string) error {
+	if _, err := os.Stat(filepath.Join(stateDir, "repository.json")); err == nil {
+		return fmt.Errorf("%w: %s", ErrLegacyRepositoryState, filepath.Join(stateDir, "repository.json"))
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("inspect legacy repository state: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) initializeControlStateLocked() error {
+	if err := r.ensureControlDirectories(); err != nil {
+		return err
+	}
+	if err := r.writeConfigLocked(); err != nil {
+		return err
+	}
+	if err := r.writeRefLocked(r.defaultBranch, "", r.branches[r.defaultBranch], "initialize"); err != nil {
+		return err
+	}
+	return r.writeHeadLocked("", r.activeBranch, "initialize")
+}
+
+func (r *Repository) loadControlState() (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	data, err := os.ReadFile(r.configPath())
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read repository configuration: %w", err)
+	}
+	var config repositoryConfig
+	if err := toml.Unmarshal(data, &config); err != nil || config.FormatVersion != repositoryFormatVersion || !validRefName(config.DefaultBranch) {
+		return false, fmt.Errorf("decode repository configuration: invalid durable repository")
+	}
+	head, err := readControlValue(r.headPath())
+	if err != nil || !validRefName(head) {
+		return false, fmt.Errorf("read HEAD: invalid durable repository")
+	}
+	branches, err := r.readRefsLocked()
+	if err != nil {
+		return false, err
+	}
+	if len(branches) == 0 || branches[config.DefaultBranch] == "" || branches[head] == "" {
+		return false, fmt.Errorf("decode repository control state: invalid durable repository")
+	}
+	r.defaultBranch, r.activeBranch, r.branches = config.DefaultBranch, head, branches
+	r.commits, r.snapshots = make(map[ObjectID]commit), make(map[ObjectID]graphSnapshot)
+	r.projections, r.edgeProjections = make(map[ObjectID]map[string]Node), make(map[ObjectID]map[string]Edge)
+	for _, commitID := range branches {
+		if err := r.loadCommitLocked(commitID, make(map[ObjectID]bool)); err != nil {
+			return false, fmt.Errorf("load repository objects: %w", err)
+		}
+	}
+	staged, err := r.readStagedMutationsLocked()
+	if err != nil {
+		return false, err
+	}
+	r.stagedMutations = staged
+	for branch, mutationSet := range staged {
+		if _, exists := branches[branch]; !exists || mutationSet.Branch != branch || mutationSet.BaseCommit == "" ||
+			(len(mutationSet.Operations) == 0 && mutationSet.TargetSchema == nil) {
+			return false, fmt.Errorf("load staged mutations: invalid durable repository")
+		}
+		normalized, err := normalizeStoredMutationOperations(mutationSet.Operations)
+		if err != nil || !reflect.DeepEqual(normalized, mutationSet.Operations) {
+			return false, fmt.Errorf("load staged mutations: invalid durable repository")
+		}
+		if mutationSet.TargetSchema != nil {
+			normalizedSchema, err := mutationSet.TargetSchema.Normalize()
+			if err != nil || !reflect.DeepEqual(normalizedSchema, *mutationSet.TargetSchema) {
+				return false, fmt.Errorf("load staged mutations: invalid durable repository")
+			}
+		}
+		if _, _, err := r.candidateGraphLocked(mutationSet.BaseCommit, mutationSet); err != nil {
+			return false, fmt.Errorf("load staged mutations: invalid durable repository")
+		}
+	}
+	return true, nil
+}
+
+func (r *Repository) loadCommitLocked(id ObjectID, visiting map[ObjectID]bool) error {
+	if _, loaded := r.commits[id]; loaded {
+		return nil
+	}
+	if visiting[id] {
+		return errors.New("commit ancestry contains a cycle")
+	}
+	visiting[id] = true
+	defer delete(visiting, id)
+	var value commit
+	if err := r.loadObject(id, "commit", &value); err != nil {
+		return err
+	}
+	if value.Snapshot == "" {
+		return errors.New("commit has no snapshot")
+	}
+	for _, parent := range value.Parents {
+		if err := r.loadCommitLocked(parent, visiting); err != nil {
+			return err
+		}
+	}
+	if err := r.loadSnapshotLocked(value.Snapshot); err != nil {
+		return err
+	}
+	r.commits[id] = value
+	return nil
+}
+
+func (r *Repository) loadSnapshotLocked(id ObjectID) error {
+	if _, loaded := r.snapshots[id]; loaded {
+		return nil
+	}
+	var snapshot graphSnapshot
+	if err := r.loadObject(id, "graph-snapshot", &snapshot); err != nil {
+		return err
+	}
+	var schema SchemaSnapshot
+	if err := r.loadObject(snapshot.SchemaRoot, "schema-root", &schema); err != nil {
+		return err
+	}
+	normalizedSchema, err := schema.Normalize()
+	if err != nil || !reflect.DeepEqual(schema, normalizedSchema) {
+		return errors.New("invalid snapshot schema")
+	}
+	r.snapshots[id] = snapshot
+	if err := r.reconstructSnapshotProjectionsLocked(id, snapshot); err != nil {
+		delete(r.snapshots, id)
+		return err
+	}
+	nodes, edges := r.projections[snapshot.NodeRoot], r.edgeProjections[id]
+	if err := ValidateSchemaSnapshot(schema, nodes, edges); err != nil {
+		delete(r.snapshots, id)
+		delete(r.projections, snapshot.NodeRoot)
+		delete(r.edgeProjections, id)
+		return fmt.Errorf("validate snapshot schema: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) loadObject(id ObjectID, objectType string, target any) error {
+	data, err := r.objectStore.get(id, objectType)
+	if err != nil {
+		return err
+	}
+	if err := cbor.Unmarshal(data, target); err != nil {
+		return fmt.Errorf("decode %s %s: %w", objectType, id, err)
+	}
+	encoded, err := canonicalObjectEncoding(reflect.ValueOf(target).Elem().Interface())
+	if err != nil || !bytes.Equal(data, encoded) {
+		return fmt.Errorf("decode %s %s: non-canonical object", objectType, id)
+	}
+	return nil
+}
+
+func (r *Repository) readRefsLocked() (map[string]ObjectID, error) {
+	refs := make(map[string]ObjectID)
+	root := r.refsDirectory()
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		if !entry.Type().IsRegular() {
+			return errors.New("non-regular branch ref")
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		name := filepath.ToSlash(relative)
+		if !validRefName(name) {
+			return errors.New("invalid branch ref name")
+		}
+		value, err := readControlValue(path)
+		if err != nil || !validLooseObjectID(ObjectID(value)) {
+			return errors.New("invalid branch ref")
+		}
+		refs[name] = ObjectID(value)
+		return nil
+	})
+	if os.IsNotExist(err) {
+		return nil, errors.New("branch refs directory is missing")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read branch refs: %w", err)
+	}
+	return refs, nil
+}
+
+func (r *Repository) readStagedMutationsLocked() (map[string]StagedMutationSet, error) {
+	staged := make(map[string]StagedMutationSet)
+	root := r.stagedDirectory()
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		if !entry.Type().IsRegular() || filepath.Ext(path) != ".json" {
+			return errors.New("invalid staged mutation file")
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		name := strings.TrimSuffix(filepath.ToSlash(relative), ".json")
+		if !validRefName(name) {
+			return errors.New("invalid staged mutation branch")
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		var mutationSet StagedMutationSet
+		if json.Unmarshal(data, &mutationSet) != nil || mutationSet.Branch != name {
+			return errors.New("invalid staged mutation file")
+		}
+		staged[name] = mutationSet
+		return nil
+	})
+	if os.IsNotExist(err) {
+		return nil, errors.New("staged mutations directory is missing")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read staged mutations: %w", err)
+	}
+	return staged, nil
+}
+
+func (r *Repository) persistenceHook() error {
+	if r.persistRepositoryFn != nil {
+		return r.persistRepositoryFn()
+	}
+	return nil
+}
+
+func (r *Repository) writeConfigLocked() error {
+	if r.mergeStateDir == "" {
+		return nil
+	}
+	data, err := toml.Marshal(repositoryConfig{FormatVersion: repositoryFormatVersion, DefaultBranch: r.defaultBranch})
+	if err != nil {
+		return fmt.Errorf("encode repository configuration: %w", err)
+	}
+	return writeDurableStateFile(r.configPath(), data)
+}
+
+func (r *Repository) writeHeadLocked(previous, next, action string) error {
+	if err := r.persistenceHook(); err != nil {
+		return err
+	}
+	if r.mergeStateDir == "" {
+		return nil
+	}
+	return r.replaceThenReflogLocked(
+		func() error { return writeDurableStateFile(r.headPath(), []byte(next+"\n")) },
+		"HEAD", ObjectID(previous), ObjectID(next), action,
+	)
+}
+
+func (r *Repository) writeRefLocked(branch string, previous, next ObjectID, action string) error {
+	if !validRefName(branch) {
+		return fmt.Errorf("invalid branch name %q", branch)
+	}
+	if err := r.persistenceHook(); err != nil {
+		return err
+	}
+	if r.mergeStateDir == "" {
+		return nil
+	}
+	return r.replaceThenReflogLocked(
+		func() error { return r.writeRefValueLocked(branch, next) },
+		filepath.ToSlash(filepath.Join("refs", "heads", branch)), previous, next, action,
+	)
+}
+
+func (r *Repository) writeRefValueLocked(branch string, next ObjectID) error {
+	path, err := r.refPath(branch)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("create branch ref directory: %w", err)
+	}
+	return writeDurableStateFile(path, []byte(next+"\n"))
+}
+
+func (r *Repository) deleteRefLocked(branch string, previous ObjectID, action string) error {
+	if err := r.persistenceHook(); err != nil {
+		return err
+	}
+	if r.mergeStateDir == "" {
+		return nil
+	}
+	path, err := r.refPath(branch)
+	if err != nil {
+		return err
+	}
+	return r.replaceThenReflogLocked(func() error {
+		if err := os.Remove(path); err != nil {
+			return fmt.Errorf("remove branch ref: %w", err)
+		}
+		if err := syncMergeStateDirectory(filepath.Dir(path)); err != nil {
+			return durableWriteCommittedError{err: err}
+		}
+		return nil
+	}, filepath.ToSlash(filepath.Join("refs", "heads", branch)), previous, "", action)
+}
+
+func (r *Repository) writeStagedLocked(branch string, staged *StagedMutationSet) error {
+	if err := r.persistenceHook(); err != nil {
+		return err
+	}
+	if r.mergeStateDir == "" {
+		return nil
+	}
+	path, err := r.stagedPath(branch)
+	if err != nil {
+		return err
+	}
+	if staged == nil {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove staged mutations: %w", err)
+		}
+		if err := syncMergeStateDirectory(filepath.Dir(path)); err != nil {
+			return durableWriteCommittedError{err: err}
+		}
+		return nil
+	}
+	data, err := json.Marshal(staged)
+	if err != nil {
+		return fmt.Errorf("encode staged mutations: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("create staged mutations directory: %w", err)
+	}
+	return writeDurableStateFile(path, data)
+}
+
+// replaceThenReflogLocked records a reflog entry only after the corresponding
+// ref replacement has happened. Once replacement succeeds, every later error
+// is a committed-with-warning error: rolling back memory would otherwise lie
+// about the durable ref.
+func (r *Repository) replaceThenReflogLocked(replace func() error, ref string, previous, next ObjectID, action string) error {
+	replaceErr := replace()
+	if replaceErr != nil && !durableWriteCommitted(replaceErr) {
+		return replaceErr
+	}
+	reflogErr := r.appendReflogLocked(ref, previous, next, action)
+	if replaceErr == nil && reflogErr == nil {
+		return nil
+	}
+	return durableWriteCommittedError{err: errors.Join(replaceErr, reflogErr)}
+}
+
+func (r *Repository) appendReflogLocked(ref string, previous, next ObjectID, action string) error {
+	if r.appendReflogFn != nil {
+		return r.appendReflogFn(ref, previous, next, action)
+	}
+	if r.mergeStateDir == "" {
+		return nil
+	}
+	path, err := r.reflogPath(ref)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("create reflog directory: %w", err)
+	}
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return fmt.Errorf("open reflog: %w", err)
+	}
+	line := fmt.Sprintf("%s %s %s\n", previous, next, action)
+	if _, err := file.WriteString(line); err != nil {
+		return closeAfterWriteFailure(file, fmt.Errorf("write reflog: %w", err))
+	}
+	if err := file.Sync(); err != nil {
+		return closeAfterWriteFailure(file, fmt.Errorf("sync reflog: %w", err))
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close reflog: %w", err)
+	}
+	if err := syncMergeStateDirectory(filepath.Dir(path)); err != nil {
+		return durableWriteCommittedError{err: err}
+	}
+	return nil
+}
+
+func (r *Repository) ensureControlDirectories() error {
+	if r.mergeStateDir == "" {
+		return nil
+	}
+	for _, path := range []string{r.refsDirectory(), r.reflogDirectory(), r.stagedDirectory(), r.mergeDirectory()} {
+		if err := os.MkdirAll(path, 0o700); err != nil {
+			return fmt.Errorf("create repository control directory: %w", err)
+		}
+	}
+	return nil
+}
+
+func (r *Repository) configPath() string { return filepath.Join(r.mergeStateDir, "config.toml") }
+func (r *Repository) headPath() string   { return filepath.Join(r.mergeStateDir, "HEAD") }
+func (r *Repository) refsDirectory() string {
+	return filepath.Join(r.mergeStateDir, "refs", "heads")
+}
+func (r *Repository) reflogDirectory() string { return filepath.Join(r.mergeStateDir, "logs") }
+func (r *Repository) stagedDirectory() string { return filepath.Join(r.mergeStateDir, "staged") }
+func (r *Repository) mergeDirectory() string  { return filepath.Join(r.mergeStateDir, "merge") }
+
+func (r *Repository) refPath(branch string) (string, error) {
+	return safeControlPath(r.refsDirectory(), branch)
+}
+
+func (r *Repository) stagedPath(branch string) (string, error) {
+	return safeControlPath(r.stagedDirectory(), branch+".json")
+}
+
+func (r *Repository) reflogPath(ref string) (string, error) {
+	if ref == "HEAD" {
+		return filepath.Join(r.reflogDirectory(), "HEAD"), nil
+	}
+	return safeControlPath(r.reflogDirectory(), ref)
+}
+
+func validRefName(name string) bool {
+	if name == "" || strings.HasPrefix(name, "/") || strings.Contains(name, "\\") {
+		return false
+	}
+	for _, part := range strings.Split(name, "/") {
+		if part == "" || part == "." || part == ".." {
+			return false
+		}
+	}
+	return true
+}
+
+func safeControlPath(root, relative string) (string, error) {
+	if !validRefName(relative) && relative != "refs/heads" {
+		return "", fmt.Errorf("unsafe control path %q", relative)
+	}
+	path := filepath.Join(root, filepath.FromSlash(relative))
+	cleanRelative, err := filepath.Rel(root, path)
+	if err != nil || cleanRelative == ".." || strings.HasPrefix(cleanRelative, ".."+string(filepath.Separator)) || filepath.IsAbs(cleanRelative) {
+		return "", fmt.Errorf("unsafe control path %q", relative)
+	}
+	return path, nil
+}
+
+func readControlValue(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	value := strings.TrimSuffix(string(data), "\n")
+	if value == "" || strings.Contains(value, "\n") || strings.Contains(value, "\r") {
+		return "", errors.New("invalid control value")
+	}
+	return value, nil
 }
 
 func (r persistedRepository) valid() bool {
@@ -385,6 +882,10 @@ func (r persistedRepository) validSnapshotSchema(snapshot graphSnapshot) bool {
 	if !ok {
 		return false
 	}
+	if _, tree := r.prollyEntries(snapshot.NodeRoot); tree &&
+		(snapshot.NodeCount != uint64(len(nodes)) || snapshot.EdgeCount != uint64(len(edges))) {
+		return false
+	}
 	schema, err := (&Repository{objects: r.Objects}).schemaSnapshotLocked(snapshot.SchemaRoot)
 	return err == nil && ValidateSchemaSnapshot(schema, nodes, edges) == nil
 }
@@ -423,11 +924,11 @@ func (r persistedRepository) validSnapshotRoots(snapshot graphSnapshot) bool {
 		return false
 	}
 	if cbor.Unmarshal(schemaBytes, &schema) == nil && r.validStoredObject(snapshot.SchemaRoot, "schema-root", schema) {
-		return true
+		return r.validTreeAdjacency(snapshot)
 	}
 	var legacySchema map[string]string
 	return cbor.Unmarshal(schemaBytes, &legacySchema) == nil && legacySchema["version"] == "v1" &&
-		r.validLegacyStoredObject(snapshot.SchemaRoot, "schema-root", legacySchema)
+		r.validLegacyStoredObject(snapshot.SchemaRoot, "schema-root", legacySchema) && r.validTreeAdjacency(snapshot)
 }
 
 func (r persistedRepository) validEdgeProjection(snapshotID ObjectID, snapshot graphSnapshot) bool {
@@ -465,6 +966,18 @@ func (r persistedRepository) canonicalNodeProjection(nodeRoot ObjectID) (map[str
 		if _, duplicate := canonical[node.ID]; duplicate {
 			return nil, false
 		}
+		if entries, tree := r.prollyEntries(nodeRoot); tree {
+			found := false
+			for _, entry := range entries {
+				if entry.Value == nodeID {
+					found = entry.Key == node.ID
+					break
+				}
+			}
+			if !found {
+				return nil, false
+			}
+		}
 		canonical[node.ID] = node
 	}
 	return canonical, true
@@ -495,18 +1008,89 @@ func (r persistedRepository) canonicalEdgeProjection(snapshot graphSnapshot) (ma
 		if _, duplicate := canonical[edge.ID]; duplicate {
 			return nil, false
 		}
+		if entries, tree := r.prollyEntries(snapshot.EdgeRoot); tree {
+			found := false
+			for _, entry := range entries {
+				if entry.Value == edgeID {
+					found = entry.Key == edge.ID
+					break
+				}
+			}
+			if !found {
+				return nil, false
+			}
+		}
 		canonical[edge.ID] = edge
 	}
 	return canonical, true
 }
 
 func (r persistedRepository) canonicalRoot(rootID ObjectID, objectType string) ([]ObjectID, bool) {
+	if entries, ok := r.prollyEntries(rootID); ok {
+		values := make([]ObjectID, len(entries))
+		for i, entry := range entries {
+			values[i] = entry.Value
+		}
+		return values, true
+	}
 	var entries []ObjectID
 	encoded, ok := r.Objects[rootID]
 	if !ok || cbor.Unmarshal(encoded, &entries) != nil || !r.validStoredObject(rootID, objectType, entries) {
 		return nil, false
 	}
 	return entries, true
+}
+
+func (r persistedRepository) prollyEntries(rootID ObjectID) ([]prollyTreeEntry, bool) {
+	encoded, ok := r.Objects[rootID]
+	if !ok {
+		return nil, false
+	}
+	var leaf prollyTreeLeaf
+	if cbor.Unmarshal(encoded, &leaf) == nil && r.validStoredObject(rootID, prollyTreeLeafType, leaf) && validProllyEntries(leaf.Entries, true) {
+		return append([]prollyTreeEntry(nil), leaf.Entries...), true
+	}
+	var internal prollyTreeInternal
+	if cbor.Unmarshal(encoded, &internal) != nil || !r.validStoredObject(rootID, prollyTreeInternalType, internal) || !validProllyChildren(internal.Children) {
+		return nil, false
+	}
+	entries := make([]prollyTreeEntry, 0)
+	for _, child := range internal.Children {
+		childEntries, ok := r.prollyEntries(child.Object)
+		if !ok || len(childEntries) == 0 || childEntries[len(childEntries)-1].Key != child.LastKey {
+			return nil, false
+		}
+		entries = append(entries, childEntries...)
+	}
+	return entries, validProllyEntries(entries, false)
+}
+
+func (r persistedRepository) validTreeAdjacency(snapshot graphSnapshot) bool {
+	edgeEntries, tree := r.prollyEntries(snapshot.EdgeRoot)
+	if !tree {
+		return true // Flat roots are retained only for legacy repository compatibility.
+	}
+	outEntries, outTree := r.prollyEntries(snapshot.OutAdjRoot)
+	inEntries, inTree := r.prollyEntries(snapshot.InAdjRoot)
+	if !outTree || !inTree || len(edgeEntries) != len(outEntries) || len(edgeEntries) != len(inEntries) {
+		return false
+	}
+	expectedOut := make([]prollyTreeEntry, 0, len(edgeEntries))
+	expectedIn := make([]prollyTreeEntry, 0, len(edgeEntries))
+	for _, entry := range edgeEntries {
+		data, ok := r.Objects[entry.Value]
+		if !ok {
+			return false
+		}
+		var edge Edge
+		if cbor.Unmarshal(data, &edge) != nil || edge.ID != entry.Key {
+			return false
+		}
+		expectedOut = append(expectedOut, prollyTreeEntry{Key: adjacencyKey(edge.Source, edge.ID), Value: entry.Value})
+		expectedIn = append(expectedIn, prollyTreeEntry{Key: adjacencyKey(edge.Target, edge.ID), Value: entry.Value})
+	}
+	return reflect.DeepEqual(sortedProllyEntries(expectedOut), outEntries) &&
+		reflect.DeepEqual(sortedProllyEntries(expectedIn), inEntries)
 }
 
 func (r *Repository) persistMergeTransactionLocked(targetBranch, leaseOwner string, transaction *mergeTransaction) error {
@@ -521,7 +1105,7 @@ func (r *Repository) persistMergeTransactionLocked(targetBranch, leaseOwner stri
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("remove merge state: %w", err)
 		}
-		if err := syncMergeStateDirectory(r.mergeStateDir); err != nil {
+		if err := syncMergeStateDirectory(r.mergeDirectory()); err != nil {
 			return durableWriteCommittedError{err: err}
 		}
 		return nil
@@ -577,12 +1161,12 @@ func durableWriteCommitted(err error) bool {
 }
 
 func (r *Repository) mergeStatePath(targetBranch string) string {
-	sum := sha256.Sum256([]byte(targetBranch))
-	return filepath.Join(r.mergeStateDir, hex.EncodeToString(sum[:])+".json")
+	return filepath.Join(r.mergeDirectory(), mergeStateFilename(targetBranch))
 }
 
-func (r *Repository) repositoryStatePath() string {
-	return filepath.Join(r.mergeStateDir, "repository.json")
+func mergeStateFilename(targetBranch string) string {
+	sum := sha256.Sum256([]byte(targetBranch))
+	return hex.EncodeToString(sum[:]) + ".json"
 }
 
 func persistedObjectID(objectType string, value any) ObjectID {
@@ -590,9 +1174,7 @@ func persistedObjectID(objectType string, value any) ObjectID {
 	if err != nil {
 		panic(fmt.Sprintf("encode %s: %v", objectType, err))
 	}
-	header := objectType + " " + strconv.Itoa(len(encoded)) + "\x00"
-	sum := blake3.Sum256(append([]byte(header), encoded...))
-	return ObjectID(hex.EncodeToString(sum[:]))
+	return objectIDForEncoded(objectType, encoded)
 }
 
 func (r persistedRepository) validLegacyStoredObject(id ObjectID, objectType string, value any) bool {
@@ -601,7 +1183,5 @@ func (r persistedRepository) validLegacyStoredObject(id ObjectID, objectType str
 }
 
 func legacyPersistedObjectID(objectType string, encoded []byte) ObjectID {
-	header := objectType + " " + strconv.Itoa(len(encoded)) + "\x00"
-	sum := blake3.Sum256(append([]byte(header), encoded...))
-	return ObjectID(hex.EncodeToString(sum[:]))
+	return objectIDForEncoded(objectType, encoded)
 }

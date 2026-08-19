@@ -8,6 +8,7 @@ import (
 
 	"github.com/autonomous-bits/spool/internal/repository"
 	"github.com/autonomous-bits/spool/internal/repository/branch"
+	"github.com/autonomous-bits/spool/internal/repository/integrity"
 	"github.com/autonomous-bits/spool/internal/repository/merge"
 )
 
@@ -263,6 +264,41 @@ type ResolveTool struct {
 	branches    branch.Service
 	merges      merge.Service
 	queryBudget *QueryBudget
+	repository  *repository.Repository
+}
+
+// FsckTool exposes repository-integrity checks through the context-aware tool surface.
+type FsckTool struct {
+	check func(context.Context) (repository.FsckResult, error)
+}
+
+// NewFsckTool returns a tool that checks an already-open repository.
+func NewFsckTool(repo *repository.Repository) *FsckTool {
+	return &FsckTool{check: func(context.Context) (repository.FsckResult, error) {
+		return repo.Fsck()
+	}}
+}
+
+// FsckTool returns an integrity-check tool for the repository backing t.
+func (t *ResolveTool) FsckTool() *FsckTool {
+	return NewFsckTool(t.repository)
+}
+
+// NewPersistentFsckTool returns a tool that can inspect durable state even
+// when corruption prevents opening the repository normally.
+func NewPersistentFsckTool(stateDir string) *FsckTool {
+	service := integrity.NewService(stateDir)
+	return &FsckTool{check: func(ctx context.Context) (repository.FsckResult, error) {
+		return service.Check(ctx)
+	}}
+}
+
+// EDGFsck honors cancellation and returns a deterministic integrity report.
+func (t *FsckTool) EDGFsck(ctx context.Context) (repository.FsckResult, error) {
+	if err := ctx.Err(); err != nil {
+		return repository.FsckResult{}, err
+	}
+	return t.check(ctx)
 }
 
 // NewResolveTool returns a tool adapter with default policy and budgets.
@@ -277,6 +313,7 @@ func NewResolveToolWithOptions(repo *repository.Repository, options Options) *Re
 		branches:    branch.NewService(repo),
 		merges:      merge.NewService(repo),
 		queryBudget: options.QueryBudget,
+		repository:  repo,
 	}
 }
 
