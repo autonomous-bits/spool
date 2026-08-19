@@ -123,7 +123,7 @@ func (s *looseObjectStore) ensureDurable(path string, id ObjectID, objectType st
 		return fmt.Errorf("inspect loose object %s: %w", id, err)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	if err := ensureLooseObjectDirectory(filepath.Dir(path)); err != nil {
 		return fmt.Errorf("create loose object directory: %w", err)
 	}
 	envelope, err := canonicalCBOR.Marshal(looseObjectEnvelope{Type: objectType, Data: encoded})
@@ -132,6 +132,38 @@ func (s *looseObjectStore) ensureDurable(path string, id ObjectID, objectType st
 	}
 	if err := writeDurableStateFile(path, envelope); err != nil {
 		return fmt.Errorf("write loose object %s: %w", id, err)
+	}
+	return nil
+}
+
+// ensureLooseObjectDirectory makes each newly linked directory durable before
+// an object file can be published below it.
+func ensureLooseObjectDirectory(path string) error {
+	var missing []string
+	for current := path; ; current = filepath.Dir(current) {
+		_, err := os.Stat(current)
+		if err == nil {
+			break
+		}
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("inspect loose object directory: %w", err)
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return fmt.Errorf("find existing loose object directory parent: %w", errLooseObjectCorrupt)
+		}
+		missing = append(missing, current)
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		return err
+	}
+	for index := len(missing) - 1; index >= 0; index-- {
+		if err := syncMergeStateDirectory(filepath.Dir(missing[index])); err != nil {
+			return err
+		}
 	}
 	return nil
 }

@@ -561,6 +561,7 @@ func (r *Repository) materializeSnapshotLocked(nodes map[string]Node, edges map[
 		if err != nil {
 			return graphSnapshot{}, fmt.Errorf("normalize node %q: %w", id, err)
 		}
+		node = canonicalNodeCollections(node)
 		nodes[id] = node
 		object, err := r.storeObject("node", node)
 		if err != nil {
@@ -577,6 +578,7 @@ func (r *Repository) materializeSnapshotLocked(nodes map[string]Node, edges map[
 		if err != nil {
 			return graphSnapshot{}, fmt.Errorf("normalize edge %q: %w", id, err)
 		}
+		edge = canonicalEdgeProperties(edge)
 		edges[id] = edge
 		object, err := r.storeObject("edge", edge)
 		if err != nil {
