@@ -427,7 +427,7 @@ func (r *Repository) candidateGraphLocked(head ObjectID, staged StagedMutationSe
 		return nil, nil, err
 	}
 
-	schema := BuiltinSchemaSnapshot()
+	var schema SchemaSnapshot
 	var err error
 	if staged.TargetSchema != nil {
 		schema, err = staged.TargetSchema.Normalize()
