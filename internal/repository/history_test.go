@@ -91,8 +91,12 @@ func TestHistoryAllParentsAndContainmentTraverseMergedHistory(t *testing.T) {
 		t.Fatalf("merge: %v", err)
 	}
 
-	if _, err := repo.History(HistoryRequest{Selector: DiffSelector{Branch: "main"}, EntityID: "feature-node"}); !errors.Is(err, ErrEntityHistoryNotFound) {
-		t.Fatalf("first-parent history error = %v", err)
+	firstParent, err := repo.History(HistoryRequest{Selector: DiffSelector{Branch: "main"}, EntityID: "feature-node"})
+	if err != nil {
+		t.Fatalf("first-parent history: %v", err)
+	}
+	if len(firstParent.Entries) != 1 {
+		t.Fatalf("first-parent history = %#v", firstParent)
 	}
 	history, err := repo.History(HistoryRequest{
 		Selector: DiffSelector{Branch: "main"}, EntityID: "feature-node", AllParents: true,
@@ -100,7 +104,7 @@ func TestHistoryAllParentsAndContainmentTraverseMergedHistory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("all-parent history: %v", err)
 	}
-	if len(history.Entries) != 1 || history.Entries[0].Commit != feature.Commit {
+	if len(history.Entries) != 2 || history.Entries[0].Commit != firstParent.Entries[0].Commit || history.Entries[1].Commit != feature.Commit {
 		t.Fatalf("history = %#v", history)
 	}
 	contained, err := repo.BranchesContaining(ContainmentSelector{EntityID: "feature-node"})

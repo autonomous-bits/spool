@@ -77,36 +77,73 @@ func (r *Repository) ApplyCleanBoundMerge(sourceBranch, targetBranch, transactio
 	if transaction, active := r.mergeTransactions[targetBranch]; active && transaction.OwnerTransactionID == transactionID {
 		return "", ErrMergeNotInProgress
 	}
-	targetCommit := r.branches[targetBranch]
-	if err := r.validateSnapshotSchemaLocked(r.commits[targetCommit].Snapshot); err != nil {
+	if err := r.validateSnapshotSchemaLocked(r.commits[r.branches[targetBranch]].Snapshot); err != nil {
 		return "", err
 	}
-	if err := r.acquireMergeLeaseLocked(targetBranch, transactionID); err != nil {
+	candidate, err := r.previewMergeLocked(sourceBranch, targetBranch)
+	if err != nil {
 		return "", err
 	}
-	defer delete(r.mergeLeases, targetBranch)
-	sourceCommit := r.branches[sourceBranch]
-	merged := r.newCommit(r.commits[targetCommit].Snapshot, []ObjectID{targetCommit, sourceCommit}, "", "apply clean bound merge")
-	previousObject, objectExisted := r.objects[r.objectID("commit", merged)]
+	if !candidate.preview.Clean {
+		return "", ErrMergePreviewNotClean
+	}
+	return r.applyCleanCandidateLocked(candidate, transactionID, "", "apply clean bound merge")
+}
+
+// ApplyMergePreview recomputes and atomically applies the exact clean preview identified by previewID.
+func (r *Repository) ApplyMergePreview(sourceBranch, targetBranch, transactionID string, previewID ObjectID, author, message string) (ObjectID, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.ensureOpenLocked(); err != nil {
+		return "", err
+	}
+	if _, active := r.mergeTransactions[targetBranch]; active {
+		return "", ErrMergeTargetLeaseHeld
+	}
+	candidate, err := r.previewMergeLocked(sourceBranch, targetBranch)
+	if err != nil {
+		return "", err
+	}
+	if candidate.preview.ID != previewID {
+		return "", ErrMergePreviewMismatch
+	}
+	if !candidate.preview.Clean {
+		return "", ErrMergePreviewNotClean
+	}
+	return r.applyCleanCandidateLocked(candidate, transactionID, author, message)
+}
+
+func (r *Repository) applyCleanCandidateLocked(candidate mergeCandidate, transactionID, author, message string) (ObjectID, error) {
+	targetCommit := candidate.preview.Binding.TargetCommit
+	if err := r.acquireMergeLeaseLocked(candidate.preview.TargetBranch, transactionID); err != nil {
+		return "", err
+	}
+	defer delete(r.mergeLeases, candidate.preview.TargetBranch)
+
+	objects, snapshots, projections, edgeProjections := r.objects, r.snapshots, r.projections, r.edgeProjections
+	commits, branches := r.commits, r.branches
+	r.objects, r.snapshots = cloneObjects(r.objects), cloneSnapshots(r.snapshots)
+	r.projections, r.edgeProjections = cloneProjectionMap(r.projections), cloneEdgeProjectionMap(r.edgeProjections)
+	r.commits, r.branches = cloneCommits(r.commits), cloneBranches(r.branches)
+
+	snapshot, err := r.materializeSnapshotLocked(candidate.nodes, candidate.edges, candidate.schemaRoot)
+	if err != nil {
+		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
+		r.commits, r.branches = commits, branches
+		return "", fmt.Errorf("materialize merge result: %w", err)
+	}
+	snapshotID := r.store("graph-snapshot", snapshot)
+	r.snapshots[snapshotID], r.edgeProjections[snapshotID] = snapshot, candidate.edges
+	r.projections[snapshot.NodeRoot] = candidate.nodes
+	merged := r.newCommit(snapshotID, []ObjectID{targetCommit, candidate.preview.Binding.SourceCommit}, author, message)
 	mergedID := r.store("commit", merged)
-	previousCommit, commitExisted := r.commits[mergedID]
-	r.commits[mergedID] = merged
-	r.branches[targetBranch] = mergedID
+	r.commits[mergedID], r.branches[candidate.preview.TargetBranch] = merged, mergedID
 	if err := r.persistRepositoryLocked(); err != nil {
 		if durableWriteCommitted(err) {
 			return mergedID, fmt.Errorf("clean merge committed but directory sync failed: %w", err)
 		}
-		if commitExisted {
-			r.commits[mergedID] = previousCommit
-		} else {
-			delete(r.commits, mergedID)
-		}
-		r.branches[targetBranch] = targetCommit
-		if objectExisted {
-			r.objects[mergedID] = previousObject
-		} else {
-			delete(r.objects, mergedID)
-		}
+		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
+		r.commits, r.branches = commits, branches
 		return "", err
 	}
 	return mergedID, nil

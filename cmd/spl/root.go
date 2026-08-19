@@ -39,5 +39,6 @@ func newRootCommandWithLifecycle(
 	root.AddCommand(commands.NewDiffCommand(toolProvider))
 	root.AddCommand(commands.NewHistoryCommand(toolProvider))
 	root.AddCommand(commands.NewBranchesContainingCommand(toolProvider))
+	root.AddCommand(commands.NewMergeCommand(toolProvider))
 	return root
 }
