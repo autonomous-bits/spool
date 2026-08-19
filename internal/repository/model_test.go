@@ -104,7 +104,7 @@ func TestPropertyGraphModelRejectsInvalidFloatsAndStoresBuiltinSchema(t *testing
 	if err := cbor.Unmarshal(repo.objects[snapshot.SchemaRoot], &schema); err != nil {
 		t.Fatalf("decode built-in schema: %v", err)
 	}
-	if got, want := schema, BuiltinSchemaSnapshot(); got != want {
+	if got, want := schema, BuiltinSchemaSnapshot(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("seed schema = %#v, want %#v", got, want)
 	}
 

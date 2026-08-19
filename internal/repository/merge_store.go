@@ -77,12 +77,15 @@ func (r *Repository) ApplyCleanBoundMerge(sourceBranch, targetBranch, transactio
 	if transaction, active := r.mergeTransactions[targetBranch]; active && transaction.OwnerTransactionID == transactionID {
 		return "", ErrMergeNotInProgress
 	}
+	targetCommit := r.branches[targetBranch]
+	if err := r.validateSnapshotSchemaLocked(r.commits[targetCommit].Snapshot); err != nil {
+		return "", err
+	}
 	if err := r.acquireMergeLeaseLocked(targetBranch, transactionID); err != nil {
 		return "", err
 	}
 	defer delete(r.mergeLeases, targetBranch)
 	sourceCommit := r.branches[sourceBranch]
-	targetCommit := r.branches[targetBranch]
 	merged := r.newCommit(r.commits[targetCommit].Snapshot, []ObjectID{targetCommit, sourceCommit}, "", "apply clean bound merge")
 	previousObject, objectExisted := r.objects[r.objectID("commit", merged)]
 	mergedID := r.store("commit", merged)
@@ -226,6 +229,9 @@ func (r *Repository) FinalizeMergeTransaction(targetBranch, callerTransactionID 
 	if r.branches[targetBranch] != transaction.OriginalTarget {
 		return "", ErrStaleMergePreview
 	}
+	if err := r.validateSnapshotSchemaLocked(transaction.StagedSnapshot); err != nil {
+		return "", err
+	}
 	merged := r.newCommit(transaction.StagedSnapshot, []ObjectID{transaction.OriginalTarget, transaction.Binding.SourceCommit}, "", "finalize resolved merge")
 	previousObject, objectExisted := r.objects[r.objectID("commit", merged)]
 	mergedID := r.store("commit", merged)
@@ -316,6 +322,27 @@ func (r *Repository) validateMergePreviewBindingLocked(sourceBranch, targetBranc
 		return ErrStaleMergePreview
 	}
 	return nil
+}
+
+func (r *Repository) validateSnapshotSchemaLocked(snapshotID ObjectID) error {
+	snapshot, ok := r.snapshots[snapshotID]
+	if !ok {
+		return ErrInvalidSchemaSnapshot
+	}
+	state := persistedRepository{Objects: r.objects}
+	nodes, ok := state.canonicalNodeProjection(snapshot.NodeRoot)
+	if !ok {
+		return ErrInvalidSchemaSnapshot
+	}
+	edges, ok := state.canonicalEdgeProjection(snapshot)
+	if !ok {
+		return ErrInvalidSchemaSnapshot
+	}
+	schema, err := r.schemaSnapshotLocked(snapshot.SchemaRoot)
+	if err != nil {
+		return err
+	}
+	return ValidateSchemaSnapshot(schema, nodes, edges)
 }
 
 func (r *Repository) mergeBaseLocked(left, right ObjectID) (ObjectID, bool) {

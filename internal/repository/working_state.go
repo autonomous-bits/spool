@@ -42,16 +42,32 @@ type MutationOperation struct {
 // Normalize returns the canonical representation of an operation's enriched
 // node or edge fields while preserving its compatibility fields.
 func (o MutationOperation) Normalize() (MutationOperation, error) {
+	return o.normalize(true)
+}
+
+func (o MutationOperation) normalize(validateIngestion bool) (MutationOperation, error) {
 	normalized := o
 	switch o.Entity {
 	case "node":
-		node, err := (Node{Labels: o.Labels, Properties: o.Properties}).Normalize()
+		node := Node{Labels: o.Labels, Properties: o.Properties}
+		if validateIngestion {
+			if err := validateNodeIngestion(node); err != nil {
+				return MutationOperation{}, err
+			}
+		}
+		node, err := node.Normalize()
 		if err != nil {
 			return MutationOperation{}, err
 		}
 		normalized.Labels, normalized.Properties = node.Labels, node.Properties
 	case "edge":
-		edge, err := (Edge{Properties: o.Properties}).Normalize()
+		edge := Edge{Type: o.Type, Properties: o.Properties}
+		if validateIngestion {
+			if err := validateEdgeIngestion(edge); err != nil {
+				return MutationOperation{}, err
+			}
+		}
+		edge, err := edge.Normalize()
 		if err != nil {
 			return MutationOperation{}, err
 		}
@@ -61,10 +77,18 @@ func (o MutationOperation) Normalize() (MutationOperation, error) {
 }
 
 func normalizeMutationOperations(operations []MutationOperation) ([]MutationOperation, error) {
+	return normalizeMutationOperationsWithIngestion(operations, true)
+}
+
+func normalizeStoredMutationOperations(operations []MutationOperation) ([]MutationOperation, error) {
+	return normalizeMutationOperationsWithIngestion(operations, false)
+}
+
+func normalizeMutationOperationsWithIngestion(operations []MutationOperation, validateIngestion bool) ([]MutationOperation, error) {
 	normalized := make([]MutationOperation, len(operations))
 	for i, operation := range operations {
 		var err error
-		normalized[i], err = operation.Normalize()
+		normalized[i], err = operation.normalize(validateIngestion)
 		if err != nil {
 			return nil, fmt.Errorf("%w: normalize operation %d: %w", ErrInvalidMutationBatch, i, err)
 		}
@@ -80,6 +104,9 @@ type StagedMutationSet struct {
 	BaseCommit ObjectID `json:"baseCommit"`
 	// Operations is the complete replacement set to materialize on commit.
 	Operations []MutationOperation `json:"operations"`
+	// TargetSchema is an optional canonical schema installed with Operations.
+	// A nil value preserves the base snapshot schema.
+	TargetSchema *SchemaSnapshot `json:"targetSchema,omitempty"`
 }
 
 // StageMutationRequest replaces the staged mutations for Branch.
@@ -87,6 +114,18 @@ type StageMutationRequest struct {
 	// Branch identifies the branch to stage against.
 	Branch string `json:"branch"`
 	// Operations is the complete, validated replacement mutation set.
+	Operations []MutationOperation `json:"operations"`
+}
+
+// SchemaMigrationRequest atomically stages a schema replacement and its complete
+// graph mutation batch against Branch.
+type SchemaMigrationRequest struct {
+	// Branch identifies the branch to migrate.
+	Branch string `json:"branch"`
+	// SchemaTOML contains the complete target schema definition.
+	SchemaTOML []byte `json:"schemaToml"`
+	// Operations transforms the base graph into one conforming to the target schema.
+	// It may be empty when the base graph already conforms.
 	Operations []MutationOperation `json:"operations"`
 }
 
@@ -177,32 +216,70 @@ func (r *Repository) StageMutationBatch(request StageMutationRequest) (StageMuta
 	if err != nil {
 		return StageMutationResult{}, err
 	}
-	if err := r.validateMutationBatchLocked(head, operations); err != nil {
-		return StageMutationResult{}, err
-	}
-
 	staged := StagedMutationSet{
 		Branch:     request.Branch,
 		BaseCommit: head,
 		Operations: operations,
 	}
-	previous, hadPrevious := r.stagedMutations[request.Branch]
-	r.stagedMutations[request.Branch] = staged
+	if _, _, err := r.candidateGraphLocked(head, staged); err != nil {
+		return StageMutationResult{}, err
+	}
+	return r.replaceStagedMutationsLocked(staged)
+}
+
+// StageSchemaMigration atomically replaces a branch's staged set with a parsed
+// canonical target schema and the complete graph mutations needed to conform to it.
+func (r *Repository) StageSchemaMigration(request SchemaMigrationRequest) (StageMutationResult, error) {
+	target, err := DecodeSchemaTOML(request.SchemaTOML)
+	if err != nil {
+		return StageMutationResult{}, err
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.ensureOpenLocked(); err != nil {
+		return StageMutationResult{}, err
+	}
+	head, exists := r.branches[request.Branch]
+	if !exists {
+		return StageMutationResult{}, ErrBranchNotFound
+	}
+	operations, err := normalizeMutationOperations(request.Operations)
+	if err != nil {
+		return StageMutationResult{}, err
+	}
+	staged := StagedMutationSet{
+		Branch: request.Branch, BaseCommit: head, Operations: operations, TargetSchema: &target,
+	}
+	if _, _, err := r.candidateGraphLocked(head, staged); err != nil {
+		return StageMutationResult{}, err
+	}
+	return r.replaceStagedMutationsLocked(staged)
+}
+
+// StageSchemaMigrationBatch is an alias for StageSchemaMigration.
+func (r *Repository) StageSchemaMigrationBatch(request SchemaMigrationRequest) (StageMutationResult, error) {
+	return r.StageSchemaMigration(request)
+}
+
+func (r *Repository) replaceStagedMutationsLocked(staged StagedMutationSet) (StageMutationResult, error) {
+	previous, hadPrevious := r.stagedMutations[staged.Branch]
+	r.stagedMutations[staged.Branch] = staged
 	if err := r.persistRepositoryLocked(); err != nil {
 		if durableWriteCommitted(err) {
 			return StageMutationResult{
-				Branch: request.Branch, BaseCommit: head, Operations: len(operations),
+				Branch: staged.Branch, BaseCommit: staged.BaseCommit, Operations: len(staged.Operations),
 			}, fmt.Errorf("mutation batch staged but directory sync failed: %w", err)
 		}
 		if hadPrevious {
-			r.stagedMutations[request.Branch] = previous
+			r.stagedMutations[staged.Branch] = previous
 		} else {
-			delete(r.stagedMutations, request.Branch)
+			delete(r.stagedMutations, staged.Branch)
 		}
 		return StageMutationResult{}, err
 	}
 	return StageMutationResult{
-		Branch: request.Branch, BaseCommit: head, Operations: len(operations),
+		Branch: staged.Branch, BaseCommit: staged.BaseCommit, Operations: len(staged.Operations),
 	}, nil
 }
 
@@ -322,6 +399,60 @@ func (r *Repository) validateMutationBatchLocked(head ObjectID, operations []Mut
 	return nil
 }
 
+// candidateGraphLocked applies staged operations to an isolated graph and
+// validates the complete candidate against the schema it will commit with.
+func (r *Repository) candidateGraphLocked(head ObjectID, staged StagedMutationSet) (map[string]Node, map[string]Edge, error) {
+	if len(staged.Operations) == 0 {
+		if staged.TargetSchema == nil {
+			return nil, nil, ErrInvalidMutationBatch
+		}
+	} else if err := r.validateMutationBatchLocked(head, staged.Operations); err != nil {
+		return nil, nil, err
+	}
+	base, ok := r.commits[head]
+	if !ok {
+		return nil, nil, ErrCommitNotFound
+	}
+	snapshot, ok := r.snapshots[base.Snapshot]
+	if !ok {
+		return nil, nil, ErrInvalidMutationBatch
+	}
+	nodes, edges := cloneNodes(r.projections[snapshot.NodeRoot]), cloneEdges(r.edgeProjections[base.Snapshot])
+	applyMutationOperations(nodes, edges, staged.Operations)
+	if err := validateCandidateValues(nodes, edges); err != nil {
+		return nil, nil, err
+	}
+
+	var schema SchemaSnapshot
+	var err error
+	if staged.TargetSchema != nil {
+		schema, err = staged.TargetSchema.Normalize()
+	} else {
+		schema, err = r.schemaSnapshotLocked(snapshot.SchemaRoot)
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := ValidateSchemaSnapshot(schema, nodes, edges); err != nil {
+		return nil, nil, err
+	}
+	return nodes, edges, nil
+}
+
+func validateCandidateValues(nodes map[string]Node, edges map[string]Edge) error {
+	for _, id := range sortedNodeIDs(nodes) {
+		if _, err := nodes[id].Normalize(); err != nil {
+			return fmt.Errorf("normalize candidate node %q: %w", id, err)
+		}
+	}
+	for _, id := range sortedEdgeIDs(edges) {
+		if _, err := edges[id].Normalize(); err != nil {
+			return fmt.Errorf("normalize candidate edge %q: %w", id, err)
+		}
+	}
+	return nil
+}
+
 func mutationNodeExists(id string, existing map[string]Node, added, deleted map[string]struct{}) bool {
 	if _, removed := deleted[id]; removed {
 		return false
@@ -360,10 +491,11 @@ func (r *Repository) CommitStagedMutationBatch(request CommitStagedMutationReque
 		return CommitStagedMutationResult{}, ErrStaleStagedBase
 	}
 
+	nodes, edges, err := r.candidateGraphLocked(head, staged)
+	if err != nil {
+		return CommitStagedMutationResult{}, err
+	}
 	base := r.commits[head].Snapshot
-	baseSnapshot := r.snapshots[base]
-	nodes, edges := cloneNodes(r.projections[baseSnapshot.NodeRoot]), cloneEdges(r.edgeProjections[base])
-	applyMutationOperations(nodes, edges, staged.Operations)
 
 	objects, snapshots, projections, edgeProjections := r.objects, r.snapshots, r.projections, r.edgeProjections
 	commits, branches, stagedMutations := r.commits, r.branches, r.stagedMutations
@@ -371,7 +503,11 @@ func (r *Repository) CommitStagedMutationBatch(request CommitStagedMutationReque
 	r.projections, r.edgeProjections = cloneProjectionMap(r.projections), cloneEdgeProjectionMap(r.edgeProjections)
 	r.commits, r.branches, r.stagedMutations = cloneCommits(r.commits), cloneBranches(r.branches), cloneStagedMutations(r.stagedMutations)
 
-	snapshot, err := r.materializeSnapshotLocked(nodes, edges, r.snapshots[base].SchemaRoot)
+	schemaRoot := r.snapshots[base].SchemaRoot
+	if staged.TargetSchema != nil {
+		schemaRoot = r.store("schema-root", *staged.TargetSchema)
+	}
+	snapshot, err := r.materializeSnapshotLocked(nodes, edges, schemaRoot)
 	if err != nil {
 		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
 		r.commits, r.branches, r.stagedMutations = commits, branches, stagedMutations
@@ -536,6 +672,10 @@ func cloneStagedMutations(source map[string]StagedMutationSet) map[string]Staged
 		for index, operation := range value.Operations {
 			value.Operations[index].Labels = cloneStringSlice(operation.Labels)
 			value.Operations[index].Properties = cloneProperties(operation.Properties)
+		}
+		if value.TargetSchema != nil {
+			target := *value.TargetSchema
+			value.TargetSchema = &target
 		}
 		result[id] = value
 	}

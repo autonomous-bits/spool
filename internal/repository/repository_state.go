@@ -309,6 +309,9 @@ func (r persistedRepository) valid() bool {
 		if !ok || !r.validStoredObject(snapshotID, "graph-snapshot", snapshot) || !r.validProjection(snapshot.NodeRoot, projection) || !r.validSnapshotRoots(snapshot) {
 			return false
 		}
+		if !r.validSnapshotSchema(snapshot) {
+			return false
+		}
 		if r.EdgeProjections != nil && !r.validEdgeProjection(snapshotID, snapshot) {
 			return false
 		}
@@ -325,7 +328,8 @@ func (r persistedRepository) valid() bool {
 		}
 	}
 	for branch, staged := range r.StagedMutations {
-		if branch == "" || staged.Branch != branch || staged.BaseCommit == "" || len(staged.Operations) == 0 {
+		if branch == "" || staged.Branch != branch || staged.BaseCommit == "" ||
+			(len(staged.Operations) == 0 && staged.TargetSchema == nil) {
 			return false
 		}
 		if _, ok := r.Branches[branch]; !ok {
@@ -334,12 +338,49 @@ func (r persistedRepository) valid() bool {
 		if _, ok := r.Commits[staged.BaseCommit]; !ok {
 			return false
 		}
-		normalized, err := normalizeMutationOperations(staged.Operations)
+		normalized, err := normalizeStoredMutationOperations(staged.Operations)
 		if err != nil || !reflect.DeepEqual(staged.Operations, normalized) {
+			return false
+		}
+		if staged.TargetSchema != nil {
+			normalizedSchema, err := staged.TargetSchema.Normalize()
+			if err != nil || !reflect.DeepEqual(*staged.TargetSchema, normalizedSchema) {
+				return false
+			}
+		}
+		edgeProjections := r.EdgeProjections
+		if edgeProjections == nil {
+			edgeProjections = make(map[ObjectID]map[string]Edge, len(r.Snapshots))
+			for snapshotID, snapshot := range r.Snapshots {
+				edges, ok := r.canonicalEdgeProjection(snapshot)
+				if !ok {
+					return false
+				}
+				edgeProjections[snapshotID] = edges
+			}
+		}
+		validator := Repository{
+			commits: r.Commits, snapshots: r.Snapshots, projections: r.Projections,
+			edgeProjections: edgeProjections, objects: r.Objects,
+		}
+		if _, _, err := validator.candidateGraphLocked(staged.BaseCommit, staged); err != nil {
 			return false
 		}
 	}
 	return true
+}
+
+func (r persistedRepository) validSnapshotSchema(snapshot graphSnapshot) bool {
+	nodes, ok := r.canonicalNodeProjection(snapshot.NodeRoot)
+	if !ok {
+		return false
+	}
+	edges, ok := r.canonicalEdgeProjection(snapshot)
+	if !ok {
+		return false
+	}
+	schema, err := (&Repository{objects: r.Objects}).schemaSnapshotLocked(snapshot.SchemaRoot)
+	return err == nil && ValidateSchemaSnapshot(schema, nodes, edges) == nil
 }
 
 func (r persistedRepository) validStoredObject(id ObjectID, objectType string, value any) bool {
