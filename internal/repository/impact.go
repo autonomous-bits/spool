@@ -68,11 +68,15 @@ func (r *Repository) Impact(request ImpactRequest) (ImpactResult, error) {
 	baseSnapshot := r.commits[commitID].Snapshot
 	snapshot := r.snapshots[baseSnapshot]
 	nodes, edges := cloneNodes(r.projections[snapshot.NodeRoot]), cloneEdges(r.edgeProjections[baseSnapshot])
-	if err := r.validateMutationBatchLocked(commitID, request.Delta); err != nil {
+	delta, err := normalizeMutationOperations(request.Delta)
+	if err != nil {
 		return ImpactResult{}, err
 	}
-	seeds := impactSeeds(request.Delta, edges)
-	applyMutationOperations(nodes, edges, request.Delta)
+	if err := r.validateMutationBatchLocked(commitID, delta); err != nil {
+		return ImpactResult{}, err
+	}
+	seeds := impactSeeds(delta, edges)
+	applyMutationOperations(nodes, edges, delta)
 
 	return ImpactResult{
 		Commit:   commitID,
@@ -86,13 +90,44 @@ func applyMutationOperations(nodes map[string]Node, edges map[string]Edge, opera
 		if operation.Entity == "node" {
 			if operation.Action == "delete" {
 				delete(nodes, operation.ID)
+			} else if operation.Action == "update" {
+				node := nodes[operation.ID]
+				node.Title = operation.Title
+				if operation.Labels != nil {
+					node.Labels = operation.Labels
+				}
+				if operation.Properties != nil {
+					node.Properties = operation.Properties
+				}
+				nodes[operation.ID] = node
 			} else {
-				nodes[operation.ID] = Node{ID: operation.ID, Title: operation.Title}
+				nodes[operation.ID] = Node{
+					ID:         operation.ID,
+					Title:      operation.Title,
+					Labels:     operation.Labels,
+					Properties: operation.Properties,
+				}
 			}
 		} else if operation.Action == "delete" {
 			delete(edges, operation.ID)
+		} else if operation.Action == "update" {
+			edge := edges[operation.ID]
+			edge.Source, edge.Target = operation.Source, operation.Target
+			if operation.Type != "" {
+				edge.Type = operation.Type
+			}
+			if operation.Properties != nil {
+				edge.Properties = operation.Properties
+			}
+			edges[operation.ID] = edge
 		} else {
-			edges[operation.ID] = Edge{ID: operation.ID, Source: operation.Source, Target: operation.Target}
+			edges[operation.ID] = Edge{
+				ID:         operation.ID,
+				Source:     operation.Source,
+				Target:     operation.Target,
+				Type:       operation.Type,
+				Properties: operation.Properties,
+			}
 		}
 	}
 }
@@ -154,7 +189,7 @@ func traverseImpact(nodes map[string]Node, edges map[string]Edge, seeds []string
 		current := queue[0]
 		queue = queue[1:]
 		impacts = append(impacts, ImpactEntry{
-			Node: nodes[current.id], Path: current.path, Distance: len(current.path) - 1,
+			Node: nodes[current.id].clone(), Path: current.path, Distance: len(current.path) - 1,
 		})
 		if len(current.path)-1 == maxDepth {
 			continue

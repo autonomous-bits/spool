@@ -40,10 +40,17 @@ process exit.
 
 The repository is an immutable graph history:
 
-- A **node** has an ID and title; an **edge** has an ID, source node, and target
-  node.
+- A **node** has an ID, compatibility title, sorted labels, and typed properties;
+  an **edge** has an ID, source node, target node, type, and typed properties.
+- A property value is explicitly tagged as `null`, `bool`, `integer`, `float`,
+  `string`, `list`, or `map`. Lists and string-keyed maps recursively contain
+  property values; labels are normalized to sorted, unique values.
 - A **snapshot** references independently content-addressed node, edge,
   outgoing-adjacency, incoming-adjacency, and schema roots.
+- Every seeded snapshot references the built-in versioned permissive schema.
+  It records the schema version but deliberately imposes no label, edge-type,
+  or property validation. Schema authoring, migrations, and enforcement are not
+  currently part of Spool.
 - A **commit** references a snapshot and zero or more parent commits, with
   author, message, and timestamp metadata.
 - A **branch** is a mutable reference to a commit. One default branch (`main`)
@@ -71,6 +78,13 @@ validated against the canonical objects and roots before it is accepted.
 
 Branch creation, deletion, and switching update the same repository state.
 Destructive branch operations protect the default and active branches.
+
+Mutation batches are JSON arrays. Node operations may include `labels` and a
+`properties` object; edge operations may include `type` and `properties`. Each
+property value uses its explicit `kind` and corresponding value field, such as
+`{"kind":"integer","integer":3}` or a recursive
+`{"kind":"list","list":[{"kind":"string","string":"critical"}]}`. The
+built-in schema accepts these fields without user-authored constraints.
 
 ### Read flow
 

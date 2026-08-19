@@ -6,6 +6,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/autonomous-bits/spool/internal/repository/branch"
@@ -143,6 +144,73 @@ func FuzzPersistedRepositoryValidation(f *testing.F) {
 			_ = state.valid()
 		}
 	})
+}
+
+func TestOpenRepositoryAcceptsLegacyRecordsWithoutEnrichedFields(t *testing.T) {
+	stateDir := t.TempDir()
+	objects := make(map[ObjectID][]byte)
+	storeLegacy := func(objectType string, value any) ObjectID {
+		t.Helper()
+		encoded, err := canonicalCBOR.Marshal(value)
+		if err != nil {
+			t.Fatalf("marshal %s: %v", objectType, err)
+		}
+		id := legacyPersistedObjectID(objectType, encoded)
+		objects[id] = encoded
+		return id
+	}
+
+	node := legacyNode{ID: SeedNodeID, Title: "EDG walking skeleton"}
+	nodeID := storeLegacy("node", node)
+	nodeRoot := storeLegacy("prolly-node-root", []ObjectID{nodeID})
+	edge := legacyEdge{ID: "edge-1", Source: SeedNodeID, Target: SeedNodeID}
+	edgeID := storeLegacy("edge", edge)
+	edgeRoot := storeLegacy("prolly-edge-root", []ObjectID{edgeID})
+	outAdjRoot := storeLegacy("prolly-out-adjacency-root", []ObjectID{})
+	inAdjRoot := storeLegacy("prolly-in-adjacency-root", []ObjectID{})
+	schemaRoot := storeLegacy("schema-root", map[string]string{"version": "v1"})
+	snapshot := graphSnapshot{
+		NodeRoot: nodeRoot, EdgeRoot: edgeRoot, OutAdjRoot: outAdjRoot,
+		InAdjRoot: inAdjRoot, SchemaRoot: schemaRoot,
+	}
+	snapshotID := storeLegacy("graph-snapshot", snapshot)
+	seedCommit := commit{Snapshot: snapshotID, Message: "seed resolve snapshot", Author: defaultCommitAuthor}
+	commitID := storeLegacy("commit", seedCommit)
+	state := persistedRepository{
+		DefaultBranch: "main",
+		ActiveBranch:  "main",
+		Branches:      map[string]ObjectID{"main": commitID},
+		Commits:       map[ObjectID]commit{commitID: seedCommit},
+		Snapshots:     map[ObjectID]graphSnapshot{snapshotID: snapshot},
+		Projections:   map[ObjectID]map[string]Node{nodeRoot: {SeedNodeID: {ID: SeedNodeID, Title: "EDG walking skeleton"}}},
+		Objects:       objects,
+	}
+	data, err := json.Marshal(state)
+	if err != nil {
+		t.Fatalf("marshal legacy repository state: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, "repository.json"), data, 0o600); err != nil {
+		t.Fatalf("write legacy repository state: %v", err)
+	}
+
+	reopened, err := OpenRepository(stateDir)
+	if err != nil {
+		t.Fatalf("OpenRepository legacy state: %v", err)
+	}
+	closeTestRepository(t, reopened)
+	if got := reopened.snapshots[snapshotID].SchemaRoot; got != schemaRoot {
+		t.Fatalf("legacy SchemaRoot = %q, want %q", got, schemaRoot)
+	}
+	resolution, err := reopened.ResolvePinned(commitID, SeedNodeID)
+	if err != nil {
+		t.Fatalf("ResolvePinned legacy node: %v", err)
+	}
+	if !resolution.Node.Equal(Node{ID: SeedNodeID, Title: "EDG walking skeleton"}) {
+		t.Fatalf("legacy node = %#v", resolution.Node)
+	}
+	if got := reopened.edgeProjections[snapshotID][edge.ID]; !got.Equal(Edge{ID: edge.ID, Source: SeedNodeID, Target: SeedNodeID}) {
+		t.Fatalf("legacy edge = %#v", got)
+	}
 }
 
 func TestMergeStateRecoveryDiscardsTornRecordWithoutMovingRef(t *testing.T) {
@@ -545,7 +613,7 @@ func TestCanonicalRootsReconstructIndependentlyOfDerivedProjection(t *testing.T)
 	if !ok {
 		t.Fatal("reconstruct canonical seed projection")
 	}
-	if got, want := canonical[SeedNodeID], (Node{ID: SeedNodeID, Title: "EDG walking skeleton"}); got != want {
+	if got, want := canonical[SeedNodeID], (Node{ID: SeedNodeID, Title: "EDG walking skeleton"}); !got.Equal(want) {
 		t.Fatalf("canonical node = %#v, want %#v", got, want)
 	}
 
@@ -583,12 +651,12 @@ func TestCanonicalRootsReconstructIndependentlyOfDerivedProjection(t *testing.T)
 	}
 
 	state.Objects["unreferenced"] = []byte("not a canonical object")
-	if reconstructed, ok := state.canonicalNodeProjection(snapshot.NodeRoot); !ok || !maps.Equal(reconstructed, canonical) {
+	if reconstructed, ok := state.canonicalNodeProjection(snapshot.NodeRoot); !ok || !reflect.DeepEqual(reconstructed, canonical) {
 		t.Fatal("canonical reconstruction depended on an unreferenced stored object")
 	}
 
 	repo.projections[snapshot.NodeRoot][SeedNodeID] = Node{ID: SeedNodeID, Title: "derived projection change"}
-	if reconstructed, ok := state.canonicalNodeProjection(snapshot.NodeRoot); !ok || !maps.Equal(reconstructed, canonical) {
+	if reconstructed, ok := state.canonicalNodeProjection(snapshot.NodeRoot); !ok || !reflect.DeepEqual(reconstructed, canonical) {
 		t.Fatal("derived projection changed canonical reconstruction")
 	}
 }
@@ -635,7 +703,7 @@ func TestLegacyStateReconstructsCanonicalEdgeProjection(t *testing.T) {
 	}
 	reopened := NewSeedRepository()
 	reopened.restorePersistedRepositoryLocked(state)
-	if got := reopened.edgeProjections[snapshotID][edge.ID]; got != edge {
+	if got := reopened.edgeProjections[snapshotID][edge.ID]; !got.Equal(edge) {
 		t.Fatalf("reconstructed edge = %#v, want %#v", got, edge)
 	}
 }

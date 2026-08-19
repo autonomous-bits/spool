@@ -199,21 +199,29 @@ func (r *Repository) diffChangesLocked(base, target ObjectID, filter DiffFilter)
 }
 
 func diffNodeChanges(base, target map[string]Node, filter DiffFilter) []DiffEntry {
-	return diffEntries(base, target, filter.NodeIDs, filter.NodeTitleSubstr, func(node Node) DiffEntry {
-		return DiffEntry{Entity: "node", ID: node.ID, Node: &node}
-	})
+	return diffEntries(base, target, filter.NodeIDs, filter.NodeTitleSubstr,
+		func(node Node) DiffEntry {
+			node = node.clone()
+			return DiffEntry{Entity: "node", ID: node.ID, Node: &node}
+		},
+		func(left, right Node) bool { return left.Equal(right) },
+	)
 }
 
 func diffEdgeChanges(base, target map[string]Edge, filter DiffFilter) []DiffEntry {
 	if filter.NodeTitleSubstr != "" {
 		return nil
 	}
-	return diffEntries(base, target, filter.EdgeIDs, "", func(edge Edge) DiffEntry {
-		return DiffEntry{Entity: "edge", ID: edge.ID, Edge: &edge}
-	})
+	return diffEntries(base, target, filter.EdgeIDs, "",
+		func(edge Edge) DiffEntry {
+			edge = edge.clone()
+			return DiffEntry{Entity: "edge", ID: edge.ID, Edge: &edge}
+		},
+		func(left, right Edge) bool { return left.Equal(right) },
+	)
 }
 
-func diffEntries[T comparable](base, target map[string]T, ids []string, title string, entry func(T) DiffEntry) []DiffEntry {
+func diffEntries[T any](base, target map[string]T, ids []string, title string, entry func(T) DiffEntry, equal func(T, T) bool) []DiffEntry {
 	allowed := make(map[string]struct{}, len(ids))
 	for _, id := range ids {
 		allowed[id] = struct{}{}
@@ -238,7 +246,7 @@ func diffEntries[T comparable](base, target map[string]T, ids []string, title st
 		baseValue, exists := base[id]
 		change := "added"
 		if exists {
-			if baseValue == targetValue {
+			if equal(baseValue, targetValue) {
 				continue
 			}
 			change = "modified"
@@ -315,7 +323,7 @@ func (r *Repository) diffContextLocked(base, target ObjectID, changes []DiffEntr
 	for id, node := range nodes {
 		if _, isChanged := changed["node:"+id]; !isChanged {
 			if _, related := related[id]; related {
-				value := node
+				value := node.clone()
 				context = append(context, DiffContext{Entity: "node", ID: id, Node: &value})
 			}
 		}
@@ -323,7 +331,7 @@ func (r *Repository) diffContextLocked(base, target ObjectID, changes []DiffEntr
 	for id, edge := range edges {
 		if _, isChanged := changed["edge:"+id]; !isChanged {
 			if _, isContext := contextEdges[id]; isContext {
-				value := edge
+				value := edge.clone()
 				context = append(context, DiffContext{Entity: "edge", ID: id, Edge: &value})
 			}
 		}

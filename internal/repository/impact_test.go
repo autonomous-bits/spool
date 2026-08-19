@@ -2,6 +2,7 @@ package repository
 
 import (
 	"errors"
+	"math"
 	"reflect"
 	"testing"
 )
@@ -88,6 +89,24 @@ func TestImpactRejectsMissingDeltaAndInvalidBudget(t *testing.T) {
 		if !errors.Is(err, ErrMissingImpactDelta) && !errors.Is(err, ErrInvalidImpactBudget) {
 			t.Fatalf("Impact(%#v) error = %v", request, err)
 		}
+	}
+}
+
+func TestImpactRejectsInvalidTypedProperties(t *testing.T) {
+	repo := NewSeedRepository()
+	head, err := repo.PinBranch("main")
+	if err != nil {
+		t.Fatalf("PinBranch: %v", err)
+	}
+	if _, err := repo.Impact(ImpactRequest{
+		Selector: DiffSelector{Commit: string(head)},
+		Delta: []MutationOperation{{
+			Action: "update", Entity: "node", ID: SeedNodeID, Title: "Changed",
+			Properties: map[string]PropertyValue{"invalid": FloatPropertyValue(math.NaN())},
+		}},
+		MaxDepth: 1, MaxVisited: 10,
+	}); !errors.Is(err, ErrInvalidPropertyValue) {
+		t.Fatalf("Impact invalid property error = %v, want ErrInvalidPropertyValue", err)
 	}
 }
 

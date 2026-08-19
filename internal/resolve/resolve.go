@@ -4,6 +4,7 @@ package resolve
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/autonomous-bits/spool/internal/repository"
 	"github.com/autonomous-bits/spool/internal/repository/branch"
@@ -132,7 +133,7 @@ func (r *Resolver) Resolve(ctx context.Context, selector SnapshotSelector, nodeI
 		Projection: ProjectionMetadata{
 			NodeRoot:      string(resolution.NodeRoot),
 			State:         "ready",
-			SchemaVersion: "v1",
+			SchemaVersion: fmt.Sprintf("v%d", resolution.SchemaVersion),
 		},
 	}, nil
 }

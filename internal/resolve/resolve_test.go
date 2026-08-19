@@ -96,6 +96,9 @@ func TestEDGResolveReturnsSnapshotAndProjectionMetadata(t *testing.T) {
 	if got.Snapshot.Commit == "" || got.Snapshot.Root == "" || got.Projection.NodeRoot == "" || got.Budget != DefaultQueryBudget() {
 		t.Fatalf("missing resolution metadata: %#v", got)
 	}
+	if got.Projection.SchemaVersion != "v1" {
+		t.Fatalf("schema version = %q, want v1", got.Projection.SchemaVersion)
+	}
 }
 
 func TestEDGImpactNormalizesTraversalBudget(t *testing.T) {

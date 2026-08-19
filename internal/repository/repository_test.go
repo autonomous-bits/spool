@@ -111,7 +111,7 @@ func TestEntityIDRemainsStableAcrossCommits(t *testing.T) {
 	edgeRoot := repo.store("prolly-edge-root", []ObjectID{})
 	outAdjRoot := repo.store("prolly-out-adjacency-root", []ObjectID{})
 	inAdjRoot := repo.store("prolly-in-adjacency-root", []ObjectID{})
-	schemaRoot := repo.store("schema-root", map[string]string{"version": "v1"})
+	schemaRoot := repo.store("schema-root", BuiltinSchemaSnapshot())
 	originalSnapshot := graphSnapshot{
 		NodeRoot: originalNodeRoot, EdgeRoot: edgeRoot, OutAdjRoot: outAdjRoot,
 		InAdjRoot: inAdjRoot, SchemaRoot: schemaRoot,
@@ -142,10 +142,10 @@ func TestEntityIDRemainsStableAcrossCommits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve updated version: %v", err)
 	}
-	if originalResult.Node != original {
+	if !originalResult.Node.Equal(original) {
 		t.Fatalf("original node = %#v, want %#v", originalResult.Node, original)
 	}
-	if updatedResult.Node != updated {
+	if !updatedResult.Node.Equal(updated) {
 		t.Fatalf("updated node = %#v, want %#v", updatedResult.Node, updated)
 	}
 	if originalResult.Commit == updatedResult.Commit {
