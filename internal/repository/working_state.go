@@ -619,28 +619,6 @@ func sortedNodeIDs(nodes map[string]Node) []string {
 	return ids
 }
 
-func edgeObjectIDs(r *Repository, edges map[string]Edge, less func(Edge, Edge) bool) ([]ObjectID, error) {
-	ids := make([]string, 0, len(edges))
-	for id := range edges {
-		ids = append(ids, id)
-	}
-	sort.Slice(ids, func(i, j int) bool { return less(edges[ids[i]], edges[ids[j]]) })
-	objects := make([]ObjectID, 0, len(ids))
-	for _, id := range ids {
-		edge, err := edges[id].Normalize()
-		if err != nil {
-			return nil, fmt.Errorf("normalize edge %q: %w", id, err)
-		}
-		edges[id] = edge
-		object, err := r.storeObject("edge", edge)
-		if err != nil {
-			return nil, fmt.Errorf("store edge %q: %w", edge.ID, err)
-		}
-		objects = append(objects, object)
-	}
-	return objects, nil
-}
-
 func cloneNodes(source map[string]Node) map[string]Node {
 	result := make(map[string]Node, len(source))
 	for id, value := range source {

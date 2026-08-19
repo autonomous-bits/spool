@@ -25,21 +25,6 @@ type persistedMergeTransaction struct {
 	Transaction  mergeTransaction `json:"transaction"`
 }
 
-// restorePersistedRepositoryLocked is retained for in-memory test fixtures.
-// Durable repositories never load repository.json.
-func (r *Repository) restorePersistedRepositoryLocked(state persistedRepository) {
-	r.defaultBranch, r.activeBranch = state.DefaultBranch, state.ActiveBranch
-	r.branches, r.commits, r.snapshots = state.Branches, state.Commits, state.Snapshots
-	r.projections, r.edgeProjections, r.objects = state.Projections, state.EdgeProjections, state.Objects
-	r.stagedMutations = state.StagedMutations
-	if r.edgeProjections == nil {
-		r.edgeProjections = make(map[ObjectID]map[string]Edge)
-	}
-	if r.stagedMutations == nil {
-		r.stagedMutations = make(map[string]StagedMutationSet)
-	}
-}
-
 type persistedRepository struct {
 	DefaultBranch   string                       `json:"defaultBranch"`
 	ActiveBranch    string                       `json:"activeBranch"`
@@ -469,14 +454,6 @@ func (r *Repository) loadSnapshotLocked(id ObjectID) error {
 		return fmt.Errorf("validate snapshot schema: %w", err)
 	}
 	return nil
-}
-
-func (r *Repository) loadObjectIDs(id ObjectID, objectType string) ([]ObjectID, error) {
-	var ids []ObjectID
-	if err := r.loadObject(id, objectType, &ids); err != nil {
-		return nil, err
-	}
-	return ids, nil
 }
 
 func (r *Repository) loadObject(id ObjectID, objectType string, target any) error {
