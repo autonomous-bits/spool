@@ -1,5 +1,5 @@
-// Package fsck exposes the durable repository integrity-check use case.
-package fsck
+// Package integrity exposes the durable repository integrity-check use case.
+package integrity
 
 import (
 	"context"

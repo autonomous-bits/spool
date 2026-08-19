@@ -8,7 +8,7 @@ import (
 
 	"github.com/autonomous-bits/spool/internal/repository"
 	"github.com/autonomous-bits/spool/internal/repository/branch"
-	repositoryfsck "github.com/autonomous-bits/spool/internal/repository/fsck"
+	"github.com/autonomous-bits/spool/internal/repository/integrity"
 	"github.com/autonomous-bits/spool/internal/repository/merge"
 )
 
@@ -287,7 +287,7 @@ func (t *ResolveTool) FsckTool() *FsckTool {
 // NewPersistentFsckTool returns a tool that can inspect durable state even
 // when corruption prevents opening the repository normally.
 func NewPersistentFsckTool(stateDir string) *FsckTool {
-	service := repositoryfsck.NewService(stateDir)
+	service := integrity.NewService(stateDir)
 	return &FsckTool{check: func(ctx context.Context) (repository.FsckResult, error) {
 		return service.Check(ctx)
 	}}
