@@ -88,9 +88,10 @@ func (r *Repository) Impact(request ImpactRequest) (ImpactResult, error) {
 func applyMutationOperations(nodes map[string]Node, edges map[string]Edge, operations []MutationOperation) {
 	for _, operation := range operations {
 		if operation.Entity == "node" {
-			if operation.Action == "delete" {
+			switch operation.Action {
+			case "delete":
 				delete(nodes, operation.ID)
-			} else if operation.Action == "update" {
+			case "update":
 				node := nodes[operation.ID]
 				node.Title = operation.Title
 				if operation.Labels != nil {
@@ -100,7 +101,7 @@ func applyMutationOperations(nodes map[string]Node, edges map[string]Edge, opera
 					node.Properties = operation.Properties
 				}
 				nodes[operation.ID] = node
-			} else {
+			default:
 				nodes[operation.ID] = Node{
 					ID:         operation.ID,
 					Title:      operation.Title,
@@ -108,25 +109,28 @@ func applyMutationOperations(nodes map[string]Node, edges map[string]Edge, opera
 					Properties: operation.Properties,
 				}
 			}
-		} else if operation.Action == "delete" {
-			delete(edges, operation.ID)
-		} else if operation.Action == "update" {
-			edge := edges[operation.ID]
-			edge.Source, edge.Target = operation.Source, operation.Target
-			if operation.Type != "" {
-				edge.Type = operation.Type
-			}
-			if operation.Properties != nil {
-				edge.Properties = operation.Properties
-			}
-			edges[operation.ID] = edge
 		} else {
-			edges[operation.ID] = Edge{
-				ID:         operation.ID,
-				Source:     operation.Source,
-				Target:     operation.Target,
-				Type:       operation.Type,
-				Properties: operation.Properties,
+			switch operation.Action {
+			case "delete":
+				delete(edges, operation.ID)
+			case "update":
+				edge := edges[operation.ID]
+				edge.Source, edge.Target = operation.Source, operation.Target
+				if operation.Type != "" {
+					edge.Type = operation.Type
+				}
+				if operation.Properties != nil {
+					edge.Properties = operation.Properties
+				}
+				edges[operation.ID] = edge
+			default:
+				edges[operation.ID] = Edge{
+					ID:         operation.ID,
+					Source:     operation.Source,
+					Target:     operation.Target,
+					Type:       operation.Type,
+					Properties: operation.Properties,
+				}
 			}
 		}
 	}
