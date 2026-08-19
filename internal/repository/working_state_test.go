@@ -3,6 +3,7 @@ package repository
 import (
 	"encoding/json"
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -29,6 +30,149 @@ func TestStageMutationBatchStagesValidBatchAtomically(t *testing.T) {
 	}
 	if staged.BaseCommit != repo.branches["main"] || !reflect.DeepEqual(staged.Operations, validMutationBatch()) {
 		t.Fatalf("staged set = %#v", staged)
+	}
+}
+
+func TestStagedEnrichedMutationsNormalizeCommitAndPersist(t *testing.T) {
+	stateDir := t.TempDir()
+	repo, err := NewSeedRepositoryWithMergeState(stateDir)
+	if err != nil {
+		t.Fatalf("NewSeedRepositoryWithMergeState: %v", err)
+	}
+	baseSnapshot := repo.snapshots[repo.commits[repo.branches["main"]].Snapshot]
+	operations := []MutationOperation{
+		{
+			Action: "add", Entity: "node", ID: "node-2", Title: "Second node",
+			Labels: []string{"Requirement", "Decision", "Requirement"},
+			Properties: map[string]PropertyValue{
+				"priority": {Kind: PropertyInteger, Integer: 3, String: "discard"},
+			},
+		},
+		{
+			Action: "add", Entity: "edge", ID: "edge-1", Source: SeedNodeID, Target: "node-2",
+			Type: "DEPENDS_ON",
+			Properties: map[string]PropertyValue{
+				"weight": {Kind: PropertyFloat, Float: math.Copysign(0, -1)},
+			},
+		},
+	}
+	if _, err := repo.StageMutationBatch(StageMutationRequest{Branch: "main", Operations: operations}); err != nil {
+		t.Fatalf("StageMutationBatch: %v", err)
+	}
+	operations[0].Labels[0] = "changed"
+	operations[0].Properties["priority"] = StringPropertyValue("changed")
+
+	staged := repo.stagedMutations["main"].Operations
+	if got, want := staged[0].Labels, []string{"Decision", "Requirement"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("staged labels = %#v, want %#v", got, want)
+	}
+	if got := staged[0].Properties["priority"]; !got.Equal(IntegerPropertyValue(3)) {
+		t.Fatalf("staged node property = %#v", got)
+	}
+	if got := staged[1].Properties["weight"]; got.Kind != PropertyFloat || math.Signbit(got.Float) {
+		t.Fatalf("staged edge property = %#v", got)
+	}
+
+	result, err := repo.CommitStagedMutations("main")
+	if err != nil {
+		t.Fatalf("CommitStagedMutations: %v", err)
+	}
+	snapshot := repo.snapshots[repo.commits[result.Commit].Snapshot]
+	if snapshot.SchemaRoot != baseSnapshot.SchemaRoot {
+		t.Fatalf("committed SchemaRoot = %q, want %q", snapshot.SchemaRoot, baseSnapshot.SchemaRoot)
+	}
+	if got := repo.projections[snapshot.NodeRoot]["node-2"]; !got.Equal(Node{
+		ID: "node-2", Title: "Second node", Labels: []string{"Decision", "Requirement"},
+		Properties: map[string]PropertyValue{"priority": IntegerPropertyValue(3)},
+	}) {
+		t.Fatalf("committed node = %#v", got)
+	}
+	if got := repo.edgeProjections[repo.commits[result.Commit].Snapshot]["edge-1"]; !got.Equal(Edge{
+		ID: "edge-1", Source: SeedNodeID, Target: "node-2", Type: "DEPENDS_ON",
+		Properties: map[string]PropertyValue{"weight": FloatPropertyValue(0)},
+	}) {
+		t.Fatalf("committed edge = %#v", got)
+	}
+	if err := repo.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	reopened, err := OpenRepository(stateDir)
+	if err != nil {
+		t.Fatalf("OpenRepository: %v", err)
+	}
+	closeTestRepository(t, reopened)
+	reopenedSnapshot := reopened.snapshots[reopened.commits[result.Commit].Snapshot]
+	if !reopened.projections[reopenedSnapshot.NodeRoot]["node-2"].Equal(repo.projections[snapshot.NodeRoot]["node-2"]) {
+		t.Fatal("reopened node lost enriched values")
+	}
+	if !reopened.edgeProjections[reopened.commits[result.Commit].Snapshot]["edge-1"].Equal(repo.edgeProjections[repo.commits[result.Commit].Snapshot]["edge-1"]) {
+		t.Fatal("reopened edge lost enriched values")
+	}
+}
+
+func TestStageMutationBatchRejectsInvalidEnrichedPropertyBeforeStaging(t *testing.T) {
+	repo := NewSeedRepository()
+	_, err := repo.StageMutationBatch(StageMutationRequest{
+		Branch: "main",
+		Operations: []MutationOperation{{
+			Action: "add", Entity: "node", ID: "node-2", Title: "Second node",
+			Properties: map[string]PropertyValue{"invalid": FloatPropertyValue(math.NaN())},
+		}},
+	})
+	if !errors.Is(err, ErrInvalidMutationBatch) {
+		t.Fatalf("StageMutationBatch error = %v, want ErrInvalidMutationBatch", err)
+	}
+	if _, exists := repo.stagedMutations["main"]; exists {
+		t.Fatal("invalid enriched mutation was staged")
+	}
+}
+
+func TestStageMutationBatchPreservesExplicitEmptyEnrichedFields(t *testing.T) {
+	repo := NewSeedRepository()
+	if _, err := repo.StageMutationBatch(StageMutationRequest{
+		Branch: "main",
+		Operations: []MutationOperation{{
+			Action: "update", Entity: "node", ID: SeedNodeID, Title: "Updated",
+			Labels: []string{}, Properties: map[string]PropertyValue{},
+		}},
+	}); err != nil {
+		t.Fatalf("StageMutationBatch: %v", err)
+	}
+	staged := repo.stagedMutations["main"].Operations[0]
+	if staged.Labels == nil || staged.Properties == nil {
+		t.Fatalf("staged empty fields = %#v, want explicit empty values", staged)
+	}
+	result, err := repo.CommitStagedMutations("main")
+	if err != nil {
+		t.Fatalf("CommitStagedMutations: %v", err)
+	}
+	snapshot := repo.snapshots[repo.commits[result.Commit].Snapshot]
+	node := repo.projections[snapshot.NodeRoot][SeedNodeID]
+	if node.Labels == nil || node.Properties == nil || len(node.Labels) != 0 || len(node.Properties) != 0 {
+		t.Fatalf("committed empty fields = %#v", node)
+	}
+}
+
+func TestCommitStagedMutationsReturnsInvalidPropertyErrorWithoutPanicking(t *testing.T) {
+	repo := NewSeedRepository()
+	if _, err := repo.StageMutationBatch(StageMutationRequest{
+		Branch:     "main",
+		Operations: []MutationOperation{{Action: "update", Entity: "node", ID: SeedNodeID, Title: "Updated"}},
+	}); err != nil {
+		t.Fatalf("StageMutationBatch: %v", err)
+	}
+	head := repo.branches["main"]
+	snapshot := repo.snapshots[repo.commits[head].Snapshot]
+	node := repo.projections[snapshot.NodeRoot][SeedNodeID]
+	node.Properties = map[string]PropertyValue{"invalid": FloatPropertyValue(math.NaN())}
+	repo.projections[snapshot.NodeRoot][SeedNodeID] = node
+
+	if _, err := repo.CommitStagedMutations("main"); !errors.Is(err, ErrInvalidPropertyValue) {
+		t.Fatalf("CommitStagedMutations error = %v, want ErrInvalidPropertyValue", err)
+	}
+	if repo.branches["main"] != head {
+		t.Fatalf("branch head = %q, want unchanged %q", repo.branches["main"], head)
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 
 	"github.com/fxamacker/cbor/v2"
@@ -33,6 +34,17 @@ type persistedRepository struct {
 	EdgeProjections map[ObjectID]map[string]Edge `json:"edgeProjections,omitempty"`
 	Objects         map[ObjectID][]byte          `json:"objects"`
 	StagedMutations map[string]StagedMutationSet `json:"stagedMutations,omitempty"`
+}
+
+type legacyNode struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+}
+
+type legacyEdge struct {
+	ID     string `json:"id"`
+	Source string `json:"source"`
+	Target string `json:"target"`
 }
 
 type durableWriteCommittedError struct{ err error }
@@ -322,12 +334,16 @@ func (r persistedRepository) valid() bool {
 		if _, ok := r.Commits[staged.BaseCommit]; !ok {
 			return false
 		}
+		normalized, err := normalizeMutationOperations(staged.Operations)
+		if err != nil || !reflect.DeepEqual(staged.Operations, normalized) {
+			return false
+		}
 	}
 	return true
 }
 
 func (r persistedRepository) validStoredObject(id ObjectID, objectType string, value any) bool {
-	encoded, err := canonicalCBOR.Marshal(value)
+	encoded, err := canonicalObjectEncoding(value)
 	return err == nil && id == persistedObjectID(objectType, value) && bytes.Equal(r.Objects[id], encoded)
 }
 
@@ -337,7 +353,7 @@ func (r persistedRepository) validProjection(nodeRoot ObjectID, projection map[s
 		return false
 	}
 	for nodeID, node := range canonical {
-		if projection[nodeID] != node {
+		if !projection[nodeID].Equal(node) {
 			return false
 		}
 	}
@@ -354,9 +370,17 @@ func (r persistedRepository) validSnapshotRoots(snapshot graphSnapshot) bool {
 	if _, ok := r.canonicalRoot(snapshot.InAdjRoot, "prolly-in-adjacency-root"); !ok {
 		return false
 	}
-	var schema map[string]string
+	var schema SchemaSnapshot
 	schemaBytes, ok := r.Objects[snapshot.SchemaRoot]
-	return ok && cbor.Unmarshal(schemaBytes, &schema) == nil && r.validStoredObject(snapshot.SchemaRoot, "schema-root", schema)
+	if !ok {
+		return false
+	}
+	if cbor.Unmarshal(schemaBytes, &schema) == nil && r.validStoredObject(snapshot.SchemaRoot, "schema-root", schema) {
+		return true
+	}
+	var legacySchema map[string]string
+	return cbor.Unmarshal(schemaBytes, &legacySchema) == nil && legacySchema["version"] == "v1" &&
+		r.validLegacyStoredObject(snapshot.SchemaRoot, "schema-root", legacySchema)
 }
 
 func (r persistedRepository) validEdgeProjection(snapshotID ObjectID, snapshot graphSnapshot) bool {
@@ -365,7 +389,7 @@ func (r persistedRepository) validEdgeProjection(snapshotID ObjectID, snapshot g
 		return false
 	}
 	for edgeID, edge := range canonical {
-		if r.EdgeProjections[snapshotID][edgeID] != edge {
+		if !r.EdgeProjections[snapshotID][edgeID].Equal(edge) {
 			return false
 		}
 	}
@@ -381,8 +405,15 @@ func (r persistedRepository) canonicalNodeProjection(nodeRoot ObjectID) (map[str
 	for _, nodeID := range nodeIDs {
 		var node Node
 		nodeBytes, ok := r.Objects[nodeID]
-		if !ok || cbor.Unmarshal(nodeBytes, &node) != nil || !r.validStoredObject(nodeID, "node", node) {
+		if !ok {
 			return nil, false
+		}
+		if cbor.Unmarshal(nodeBytes, &node) != nil || !r.validStoredObject(nodeID, "node", node) {
+			var legacy legacyNode
+			if cbor.Unmarshal(nodeBytes, &legacy) != nil || !r.validLegacyStoredObject(nodeID, "node", legacy) {
+				return nil, false
+			}
+			node = Node{ID: legacy.ID, Title: legacy.Title}
 		}
 		if _, duplicate := canonical[node.ID]; duplicate {
 			return nil, false
@@ -401,8 +432,15 @@ func (r persistedRepository) canonicalEdgeProjection(snapshot graphSnapshot) (ma
 	for _, edgeID := range edgeIDs {
 		var edge Edge
 		edgeBytes, ok := r.Objects[edgeID]
-		if !ok || cbor.Unmarshal(edgeBytes, &edge) != nil || !r.validStoredObject(edgeID, "edge", edge) {
+		if !ok {
 			return nil, false
+		}
+		if cbor.Unmarshal(edgeBytes, &edge) != nil || !r.validStoredObject(edgeID, "edge", edge) {
+			var legacy legacyEdge
+			if cbor.Unmarshal(edgeBytes, &legacy) != nil || !r.validLegacyStoredObject(edgeID, "edge", legacy) {
+				return nil, false
+			}
+			edge = Edge{ID: legacy.ID, Source: legacy.Source, Target: legacy.Target}
 		}
 		if edge.ID == "" || edge.Source == "" || edge.Target == "" {
 			return nil, false
@@ -501,10 +539,21 @@ func (r *Repository) repositoryStatePath() string {
 }
 
 func persistedObjectID(objectType string, value any) ObjectID {
-	encoded, err := canonicalCBOR.Marshal(value)
+	encoded, err := canonicalObjectEncoding(value)
 	if err != nil {
 		panic(fmt.Sprintf("encode %s: %v", objectType, err))
 	}
+	header := objectType + " " + strconv.Itoa(len(encoded)) + "\x00"
+	sum := blake3.Sum256(append([]byte(header), encoded...))
+	return ObjectID(hex.EncodeToString(sum[:]))
+}
+
+func (r persistedRepository) validLegacyStoredObject(id ObjectID, objectType string, value any) bool {
+	encoded, err := canonicalCBOR.Marshal(value)
+	return err == nil && id == legacyPersistedObjectID(objectType, encoded) && bytes.Equal(r.Objects[id], encoded)
+}
+
+func legacyPersistedObjectID(objectType string, encoded []byte) ObjectID {
 	header := objectType + " " + strconv.Itoa(len(encoded)) + "\x00"
 	sum := blake3.Sum256(append([]byte(header), encoded...))
 	return ObjectID(hex.EncodeToString(sum[:]))

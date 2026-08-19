@@ -31,6 +31,45 @@ type MutationOperation struct {
 	Source string `json:"source,omitempty"`
 	// Target supplies the target node for added or updated edges.
 	Target string `json:"target,omitempty"`
+	// Labels supplies the labels for added or updated nodes.
+	Labels []string `json:"labels"`
+	// Type supplies the relationship type for added or updated edges.
+	Type string `json:"type,omitempty"`
+	// Properties supplies typed properties for added or updated nodes and edges.
+	Properties map[string]PropertyValue `json:"properties"`
+}
+
+// Normalize returns the canonical representation of an operation's enriched
+// node or edge fields while preserving its compatibility fields.
+func (o MutationOperation) Normalize() (MutationOperation, error) {
+	normalized := o
+	switch o.Entity {
+	case "node":
+		node, err := (Node{Labels: o.Labels, Properties: o.Properties}).Normalize()
+		if err != nil {
+			return MutationOperation{}, err
+		}
+		normalized.Labels, normalized.Properties = node.Labels, node.Properties
+	case "edge":
+		edge, err := (Edge{Properties: o.Properties}).Normalize()
+		if err != nil {
+			return MutationOperation{}, err
+		}
+		normalized.Properties = edge.Properties
+	}
+	return normalized, nil
+}
+
+func normalizeMutationOperations(operations []MutationOperation) ([]MutationOperation, error) {
+	normalized := make([]MutationOperation, len(operations))
+	for i, operation := range operations {
+		var err error
+		normalized[i], err = operation.Normalize()
+		if err != nil {
+			return nil, fmt.Errorf("%w: normalize operation %d: %w", ErrInvalidMutationBatch, i, err)
+		}
+	}
+	return normalized, nil
 }
 
 // StagedMutationSet is the shared, durable staged change set for one branch.
@@ -134,21 +173,25 @@ func (r *Repository) StageMutationBatch(request StageMutationRequest) (StageMuta
 	if !exists {
 		return StageMutationResult{}, ErrBranchNotFound
 	}
-	if err := r.validateMutationBatchLocked(head, request.Operations); err != nil {
+	operations, err := normalizeMutationOperations(request.Operations)
+	if err != nil {
+		return StageMutationResult{}, err
+	}
+	if err := r.validateMutationBatchLocked(head, operations); err != nil {
 		return StageMutationResult{}, err
 	}
 
 	staged := StagedMutationSet{
 		Branch:     request.Branch,
 		BaseCommit: head,
-		Operations: append([]MutationOperation(nil), request.Operations...),
+		Operations: operations,
 	}
 	previous, hadPrevious := r.stagedMutations[request.Branch]
 	r.stagedMutations[request.Branch] = staged
 	if err := r.persistRepositoryLocked(); err != nil {
 		if durableWriteCommitted(err) {
 			return StageMutationResult{
-				Branch: request.Branch, BaseCommit: head, Operations: len(request.Operations),
+				Branch: request.Branch, BaseCommit: head, Operations: len(operations),
 			}, fmt.Errorf("mutation batch staged but directory sync failed: %w", err)
 		}
 		if hadPrevious {
@@ -159,7 +202,7 @@ func (r *Repository) StageMutationBatch(request StageMutationRequest) (StageMuta
 		return StageMutationResult{}, err
 	}
 	return StageMutationResult{
-		Branch: request.Branch, BaseCommit: head, Operations: len(request.Operations),
+		Branch: request.Branch, BaseCommit: head, Operations: len(operations),
 	}, nil
 }
 
@@ -328,7 +371,12 @@ func (r *Repository) CommitStagedMutationBatch(request CommitStagedMutationReque
 	r.projections, r.edgeProjections = cloneProjectionMap(r.projections), cloneEdgeProjectionMap(r.edgeProjections)
 	r.commits, r.branches, r.stagedMutations = cloneCommits(r.commits), cloneBranches(r.branches), cloneStagedMutations(r.stagedMutations)
 
-	snapshot := r.materializeSnapshotLocked(nodes, edges, r.snapshots[base].SchemaRoot)
+	snapshot, err := r.materializeSnapshotLocked(nodes, edges, r.snapshots[base].SchemaRoot)
+	if err != nil {
+		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
+		r.commits, r.branches, r.stagedMutations = commits, branches, stagedMutations
+		return CommitStagedMutationResult{}, fmt.Errorf("materialize staged mutations: %w", err)
+	}
 	snapshotID := r.store("graph-snapshot", snapshot)
 	r.snapshots[snapshotID], r.edgeProjections[snapshotID] = snapshot, edges
 	if _, exists := r.projections[snapshot.NodeRoot]; !exists {
@@ -350,30 +398,44 @@ func (r *Repository) CommitStagedMutationBatch(request CommitStagedMutationReque
 	return result, nil
 }
 
-func (r *Repository) materializeSnapshotLocked(nodes map[string]Node, edges map[string]Edge, schemaRoot ObjectID) graphSnapshot {
+func (r *Repository) materializeSnapshotLocked(nodes map[string]Node, edges map[string]Edge, schemaRoot ObjectID) (graphSnapshot, error) {
 	nodeIDs := sortedNodeIDs(nodes)
 	nodeObjects := make([]ObjectID, 0, len(nodeIDs))
 	for _, id := range nodeIDs {
-		nodeObjects = append(nodeObjects, r.store("node", nodes[id]))
+		node, err := nodes[id].Normalize()
+		if err != nil {
+			return graphSnapshot{}, fmt.Errorf("normalize node %q: %w", id, err)
+		}
+		nodes[id] = node
+		nodeObjects = append(nodeObjects, r.store("node", node))
 	}
-	edgeObjects := edgeObjectIDs(r, edges, func(a, b Edge) bool { return a.ID < b.ID })
-	outObjects := edgeObjectIDs(r, edges, func(a, b Edge) bool {
+	edgeObjects, err := edgeObjectIDs(r, edges, func(a, b Edge) bool { return a.ID < b.ID })
+	if err != nil {
+		return graphSnapshot{}, err
+	}
+	outObjects, err := edgeObjectIDs(r, edges, func(a, b Edge) bool {
 		if a.Source != b.Source {
 			return a.Source < b.Source
 		}
 		return a.ID < b.ID
 	})
-	inObjects := edgeObjectIDs(r, edges, func(a, b Edge) bool {
+	if err != nil {
+		return graphSnapshot{}, err
+	}
+	inObjects, err := edgeObjectIDs(r, edges, func(a, b Edge) bool {
 		if a.Target != b.Target {
 			return a.Target < b.Target
 		}
 		return a.ID < b.ID
 	})
+	if err != nil {
+		return graphSnapshot{}, err
+	}
 	return graphSnapshot{
 		NodeRoot: r.store("prolly-node-root", nodeObjects), EdgeRoot: r.store("prolly-edge-root", edgeObjects),
 		OutAdjRoot: r.store("prolly-out-adjacency-root", outObjects), InAdjRoot: r.store("prolly-in-adjacency-root", inObjects),
 		SchemaRoot: schemaRoot,
-	}
+	}, nil
 }
 
 func sortedNodeIDs(nodes map[string]Node) []string {
@@ -385,7 +447,7 @@ func sortedNodeIDs(nodes map[string]Node) []string {
 	return ids
 }
 
-func edgeObjectIDs(r *Repository, edges map[string]Edge, less func(Edge, Edge) bool) []ObjectID {
+func edgeObjectIDs(r *Repository, edges map[string]Edge, less func(Edge, Edge) bool) ([]ObjectID, error) {
 	ids := make([]string, 0, len(edges))
 	for id := range edges {
 		ids = append(ids, id)
@@ -393,15 +455,20 @@ func edgeObjectIDs(r *Repository, edges map[string]Edge, less func(Edge, Edge) b
 	sort.Slice(ids, func(i, j int) bool { return less(edges[ids[i]], edges[ids[j]]) })
 	objects := make([]ObjectID, 0, len(ids))
 	for _, id := range ids {
-		objects = append(objects, r.store("edge", edges[id]))
+		edge, err := edges[id].Normalize()
+		if err != nil {
+			return nil, fmt.Errorf("normalize edge %q: %w", id, err)
+		}
+		edges[id] = edge
+		objects = append(objects, r.store("edge", edge))
 	}
-	return objects
+	return objects, nil
 }
 
 func cloneNodes(source map[string]Node) map[string]Node {
 	result := make(map[string]Node, len(source))
 	for id, value := range source {
-		result[id] = value
+		result[id] = value.clone()
 	}
 	return result
 }
@@ -409,7 +476,7 @@ func cloneNodes(source map[string]Node) map[string]Node {
 func cloneEdges(source map[string]Edge) map[string]Edge {
 	result := make(map[string]Edge, len(source))
 	for id, value := range source {
-		result[id] = value
+		result[id] = value.clone()
 	}
 	return result
 }
@@ -466,7 +533,31 @@ func cloneStagedMutations(source map[string]StagedMutationSet) map[string]Staged
 	result := make(map[string]StagedMutationSet, len(source))
 	for id, value := range source {
 		value.Operations = append([]MutationOperation(nil), value.Operations...)
+		for index, operation := range value.Operations {
+			value.Operations[index].Labels = cloneStringSlice(operation.Labels)
+			value.Operations[index].Properties = cloneProperties(operation.Properties)
+		}
 		result[id] = value
+	}
+	return result
+}
+
+func cloneStringSlice(source []string) []string {
+	if source == nil {
+		return nil
+	}
+	result := make([]string, len(source))
+	copy(result, source)
+	return result
+}
+
+func cloneProperties(source map[string]PropertyValue) map[string]PropertyValue {
+	if source == nil {
+		return nil
+	}
+	result := make(map[string]PropertyValue, len(source))
+	for key, value := range source {
+		result[key] = value.clone()
 	}
 	return result
 }

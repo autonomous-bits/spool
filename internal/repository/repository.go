@@ -64,24 +64,6 @@ var (
 // ObjectID is the content-derived identifier of a durable repository object.
 type ObjectID string
 
-// Node is the immutable node representation stored in a graph snapshot.
-type Node struct {
-	// ID uniquely identifies the node within a graph snapshot.
-	ID string `json:"id"`
-	// Title is the node's display value.
-	Title string `json:"title"`
-}
-
-// Edge is the immutable edge representation stored in a graph snapshot.
-type Edge struct {
-	// ID uniquely identifies the edge within a graph snapshot.
-	ID string `json:"id"`
-	// Source identifies the edge's originating node.
-	Source string `json:"source"`
-	// Target identifies the edge's destination node.
-	Target string `json:"target"`
-}
-
 // Resolution is an immutable view of a node resolved from a pinned commit.
 type Resolution struct {
 	// Node is the immutable node value read from the pinned commit.
@@ -92,6 +74,8 @@ type Resolution struct {
 	Snapshot ObjectID
 	// NodeRoot identifies the durable root of the snapshot's node projection.
 	NodeRoot ObjectID
+	// SchemaVersion identifies the schema stored by the snapshot.
+	SchemaVersion uint16
 }
 
 type graphSnapshot struct {
@@ -163,7 +147,7 @@ func NewSeedRepository() *Repository {
 	edgeRoot := repo.store("prolly-edge-root", []ObjectID{})
 	outAdjRoot := repo.store("prolly-out-adjacency-root", []ObjectID{})
 	inAdjRoot := repo.store("prolly-in-adjacency-root", []ObjectID{})
-	schemaRoot := repo.store("schema-root", map[string]string{"version": "v1"})
+	schemaRoot := repo.store("schema-root", BuiltinSchemaSnapshot())
 	snapshot := graphSnapshot{
 		NodeRoot: nodeRoot, EdgeRoot: edgeRoot, OutAdjRoot: outAdjRoot,
 		InAdjRoot: inAdjRoot, SchemaRoot: schemaRoot,
@@ -214,7 +198,7 @@ func (r *Repository) ensureOpenLocked() error {
 }
 
 func (r *Repository) store(objectType string, value any) ObjectID {
-	encoded, err := canonicalCBOR.Marshal(value)
+	encoded, err := canonicalObjectEncoding(value)
 	if err != nil {
 		panic(fmt.Sprintf("encode %s: %v", objectType, err))
 	}
@@ -418,10 +402,37 @@ func (r *Repository) ResolvePinned(commitID ObjectID, nodeID string) (Resolution
 	if !ok {
 		return Resolution{}, ErrNodeNotFound
 	}
+	node, err := node.Normalize()
+	if err != nil {
+		return Resolution{}, err
+	}
+	schema, err := r.schemaSnapshotLocked(snapshot.SchemaRoot)
+	if err != nil {
+		return Resolution{}, err
+	}
 	return Resolution{
-		Node:     node,
-		Commit:   commitID,
-		Snapshot: commit.Snapshot,
-		NodeRoot: snapshot.NodeRoot,
+		Node:          node,
+		Commit:        commitID,
+		Snapshot:      commit.Snapshot,
+		NodeRoot:      snapshot.NodeRoot,
+		SchemaVersion: schema.Version,
 	}, nil
+}
+
+func (r *Repository) schemaSnapshotLocked(root ObjectID) (SchemaSnapshot, error) {
+	data, ok := r.objects[root]
+	if !ok {
+		return SchemaSnapshot{}, ErrInvalidSchemaSnapshot
+	}
+	var schema SchemaSnapshot
+	if err := cbor.Unmarshal(data, &schema); err == nil {
+		if normalized, err := schema.Normalize(); err == nil {
+			return normalized, nil
+		}
+	}
+	var legacy map[string]string
+	if err := cbor.Unmarshal(data, &legacy); err == nil && legacy["version"] == "v1" {
+		return BuiltinSchemaSnapshot(), nil
+	}
+	return SchemaSnapshot{}, ErrInvalidSchemaSnapshot
 }

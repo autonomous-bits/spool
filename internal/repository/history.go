@@ -2,6 +2,7 @@ package repository
 
 import (
 	"errors"
+	"reflect"
 	"sort"
 	"time"
 )
@@ -180,25 +181,41 @@ func (r *Repository) historyEntryLocked(id ObjectID, entityID string) (HistoryEn
 	_, beforeEdgeExists := beforeEdges[entityID]
 	_, afterEdgeExists := afterEdges[entityID]
 	affects := beforeNodeExists != afterNodeExists || beforeEdgeExists != afterEdgeExists
-	if beforeNodeExists && afterNodeExists && beforeNode.Title != afterNode.Title {
-		entry.ChangedFields = []string{"title"}
-		affects = true
+	if beforeNodeExists && afterNodeExists {
+		entry.ChangedFields = changedNodeFields(beforeNode, afterNode)
+		if len(entry.ChangedFields) > 0 {
+			affects = true
+		}
 	}
 	for edgeID, edge := range afterEdges {
 		beforeEdge, exists := beforeEdges[edgeID]
-		if (!exists || beforeEdge != edge) && (edge.ID == entityID || edge.Source == entityID || edge.Target == entityID || (exists && (beforeEdge.Source == entityID || beforeEdge.Target == entityID))) {
-			entry.EdgeAdditions = append(entry.EdgeAdditions, edge)
+		if (!exists || !beforeEdge.Equal(edge)) && (edge.ID == entityID || edge.Source == entityID || edge.Target == entityID || (exists && (beforeEdge.Source == entityID || beforeEdge.Target == entityID))) {
+			entry.EdgeAdditions = append(entry.EdgeAdditions, edge.clone())
 			affects = true
 		}
 	}
 	for edgeID, edge := range beforeEdges {
 		afterEdge, exists := afterEdges[edgeID]
-		if (!exists || afterEdge != edge) && (edge.ID == entityID || edge.Source == entityID || edge.Target == entityID || (exists && (afterEdge.Source == entityID || afterEdge.Target == entityID))) {
-			entry.EdgeRemovals = append(entry.EdgeRemovals, edge)
+		if (!exists || !afterEdge.Equal(edge)) && (edge.ID == entityID || edge.Source == entityID || edge.Target == entityID || (exists && (afterEdge.Source == entityID || afterEdge.Target == entityID))) {
+			entry.EdgeRemovals = append(entry.EdgeRemovals, edge.clone())
 			affects = true
 		}
 	}
 	sort.Slice(entry.EdgeAdditions, func(i, j int) bool { return entry.EdgeAdditions[i].ID < entry.EdgeAdditions[j].ID })
 	sort.Slice(entry.EdgeRemovals, func(i, j int) bool { return entry.EdgeRemovals[i].ID < entry.EdgeRemovals[j].ID })
 	return entry, affects
+}
+
+func changedNodeFields(before, after Node) []string {
+	fields := make([]string, 0, 3)
+	if before.Title != after.Title {
+		fields = append(fields, "title")
+	}
+	if !reflect.DeepEqual(before.Labels, after.Labels) {
+		fields = append(fields, "labels")
+	}
+	if !reflect.DeepEqual(before.Properties, after.Properties) {
+		fields = append(fields, "properties")
+	}
+	return fields
 }
