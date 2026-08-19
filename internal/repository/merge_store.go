@@ -97,6 +97,9 @@ func (r *Repository) ApplyMergePreview(sourceBranch, targetBranch, transactionID
 	if err := r.ensureOpenLocked(); err != nil {
 		return "", err
 	}
+	if _, active := r.mergeTransactions[targetBranch]; active {
+		return "", ErrMergeTargetLeaseHeld
+	}
 	candidate, err := r.previewMergeLocked(sourceBranch, targetBranch)
 	if err != nil {
 		return "", err

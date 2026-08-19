@@ -52,6 +52,7 @@ func TestPreviewMergeAppliesSourceGraphAndRejectsStalePreview(t *testing.T) {
 	if _, err := repo.CreateBranch("feature", branch.Source{Branch: "main"}); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
 	}
+
 	if _, err := repo.StageMutationBatch(StageMutationRequest{
 		Branch:     "feature",
 		Operations: []MutationOperation{{Action: "add", Entity: "node", ID: "feature-node", Title: "Feature"}},
@@ -89,5 +90,25 @@ func TestPreviewMergeAppliesSourceGraphAndRejectsStalePreview(t *testing.T) {
 	}
 	if _, err := repo.ResolvePinned(head, "feature-node"); err != nil {
 		t.Fatalf("merged node missing: %v", err)
+	}
+}
+
+func TestApplyMergePreviewPreservesActiveConflictTransactionLease(t *testing.T) {
+	repo := NewSeedRepository()
+	base, source, target := createDivergedBranchHeads(repo)
+	binding := MergePreviewBinding{MergeBase: base, SourceCommit: source, TargetCommit: target}
+	if err := repo.ApplyConflictedBoundMerge("feature", "main", "owner", binding); !errors.Is(err, ErrMergeConflicted) {
+		t.Fatalf("ApplyConflictedBoundMerge: %v", err)
+	}
+
+	preview, err := repo.PreviewMerge("feature", "main")
+	if err != nil {
+		t.Fatalf("PreviewMerge: %v", err)
+	}
+	if _, err := repo.ApplyMergePreview("feature", "main", "owner", preview.ID, "", ""); !errors.Is(err, ErrMergeTargetLeaseHeld) {
+		t.Fatalf("ApplyMergePreview error = %v, want ErrMergeTargetLeaseHeld", err)
+	}
+	if _, err := repo.AdvanceBranch("main"); !errors.Is(err, ErrMergeTargetLeaseHeld) {
+		t.Fatalf("AdvanceBranch error = %v, want ErrMergeTargetLeaseHeld", err)
 	}
 }
