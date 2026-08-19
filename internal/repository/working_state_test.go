@@ -367,6 +367,55 @@ func TestOpenRepositoryAcceptsStateWithoutStagedMutations(t *testing.T) {
 	}
 }
 
+func TestOpenRepositoryAcceptsHistoricalStagingOutsideNewIngestionLimits(t *testing.T) {
+	stateDir := t.TempDir()
+	repo, err := NewSeedRepositoryWithMergeState(stateDir)
+	if err != nil {
+		t.Fatalf("NewSeedRepositoryWithMergeState: %v", err)
+	}
+	if _, err := repo.StageMutationBatch(StageMutationRequest{
+		Branch:     "main",
+		Operations: []MutationOperation{{Action: "add", Entity: "node", ID: "node-2", Title: "Second node"}},
+	}); err != nil {
+		t.Fatalf("StageMutationBatch: %v", err)
+	}
+	if err := repo.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	path := filepath.Join(stateDir, "repository.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read repository state: %v", err)
+	}
+	var state persistedRepository
+	if err := json.Unmarshal(data, &state); err != nil {
+		t.Fatalf("decode repository state: %v", err)
+	}
+	staged := state.StagedMutations["main"]
+	staged.Operations[0].Labels = []string{"legacy/label"}
+	staged.Operations[0].Properties = map[string]PropertyValue{
+		"legacy/key": StringPropertyValue("value"),
+	}
+	state.StagedMutations["main"] = staged
+	data, err = json.Marshal(state)
+	if err != nil {
+		t.Fatalf("encode legacy repository state: %v", err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write legacy repository state: %v", err)
+	}
+
+	reopened, err := OpenRepository(stateDir)
+	if err != nil {
+		t.Fatalf("OpenRepository: %v", err)
+	}
+	closeTestRepository(t, reopened)
+	if got := reopened.stagedMutations["main"].Operations[0].Labels; !reflect.DeepEqual(got, []string{"legacy/label"}) {
+		t.Fatalf("reopened staged labels = %#v, want legacy label", got)
+	}
+}
+
 func TestCommitStagedMutationsAdvancesBranchAndClearsStaging(t *testing.T) {
 	repo := NewSeedRepository()
 	base := repo.branches["main"]

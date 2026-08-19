@@ -36,6 +36,8 @@ func TestCommandHelpIncludesExamples(t *testing.T) {
 		{[]string{"branch", "delete", "--help"}, "spl branch delete feature"},
 		{[]string{"switch", "--help"}, "spl switch feature"},
 		{[]string{"resolve", "--help"}, "spl resolve --branch main --node"},
+		{[]string{"schema", "migrate", "--help"}, "spl schema migrate --branch main --schema"},
+		{[]string{"validate", "--help"}, "spl validate --branch main"},
 		{[]string{"diff", "--help"}, "spl diff --base-branch main --target-branch feature"},
 		{[]string{"history", "--help"}, "spl history --branch main --entity-id"},
 		{[]string{"branches-containing", "--help"}, "spl branches-containing --entity-id"},
@@ -54,6 +56,19 @@ func TestCommandHelpIncludesExamples(t *testing.T) {
 				t.Errorf("help output does not contain %q:\n%s", testCase.example, output.String())
 			}
 		})
+	}
+}
+
+func TestRootCommandIncludesSchemaAndValidateSubcommands(t *testing.T) {
+	command := newRootCommand(&bytes.Buffer{}, resolve.NewResolveTool(repository.NewSeedRepository()))
+	for _, path := range [][]string{{"schema", "migrate"}, {"validate"}} {
+		found, _, err := command.Find(path)
+		if err != nil {
+			t.Fatalf("find %v: %v", path, err)
+		}
+		if found.Name() != path[len(path)-1] {
+			t.Fatalf("command = %q, want %q", found.Name(), path[len(path)-1])
+		}
 	}
 }
 

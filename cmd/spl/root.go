@@ -34,6 +34,8 @@ func newRootCommandWithLifecycle(
 	root.AddCommand(commands.NewBranchCommandWithToolProvider(toolProvider))
 	root.AddCommand(commands.NewSwitchCommand(toolProvider))
 	root.AddCommand(commands.NewResolveCommandWithToolProvider(toolProvider))
+	root.AddCommand(commands.NewSchemaCommand(toolProvider))
+	root.AddCommand(commands.NewValidateCommand(toolProvider))
 	root.AddCommand(commands.NewDiffCommand(toolProvider))
 	root.AddCommand(commands.NewHistoryCommand(toolProvider))
 	root.AddCommand(commands.NewBranchesContainingCommand(toolProvider))

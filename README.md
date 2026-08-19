@@ -45,6 +45,34 @@ spl status --branch main
 spl commit --branch main --author alice --message "Add graph data"
 ```
 
+Author a schema in TOML and stage its migration with the graph changes needed
+to satisfy it:
+
+```toml
+# people.toml
+version = 2
+
+[[node]]
+label = "Person"
+[[node.property]]
+key = "name"
+required = true
+types = ["string"]
+```
+
+```sh
+spl schema migrate --branch main --schema people.toml --batch people-mutations.json
+spl commit --branch main --author alice --message "Migrate people schema"
+spl validate --branch main
+```
+
+`schema migrate` reads the TOML schema and the complete JSON mutation batch,
+validates their resulting graph together, and atomically replaces the branch's
+staged set. The schema and graph changes take effect together only when that
+staged set is committed. `validate` emits a JSON report for one immutable
+branch snapshot; use `--commit <commit-id>` to validate a reachable historical
+commit instead of the branch head.
+
 Create and use a branch:
 
 ```sh

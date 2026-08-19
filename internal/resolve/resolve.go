@@ -70,6 +70,29 @@ type ResolveResult struct {
 	Budget QueryBudget `json:"budget"`
 }
 
+// SchemaMetadata identifies the schema used to validate a snapshot.
+type SchemaMetadata struct {
+	// Root identifies the durable schema object.
+	Root string `json:"root"`
+	// Version identifies the schema version.
+	Version uint16 `json:"version"`
+	// Permissive reports whether the schema only enforces graph integrity and
+	// global invariants.
+	Permissive bool `json:"permissive"`
+}
+
+// SchemaValidationResult reports conformance of one immutable snapshot.
+type SchemaValidationResult struct {
+	// Snapshot identifies the commit and graph snapshot validated.
+	Snapshot SnapshotMetadata `json:"snapshot"`
+	// Schema identifies the schema applied to Snapshot.
+	Schema SchemaMetadata `json:"schema"`
+	// Valid reports whether the snapshot conforms to Schema.
+	Valid bool `json:"valid"`
+	// Violations contains every failed schema constraint when Valid is false.
+	Violations []repository.SchemaViolation `json:"violations"`
+}
+
 // Resolver resolves nodes against pinned repository commits.
 type Resolver struct {
 	repo                *repository.Repository
@@ -89,34 +112,8 @@ func NewResolverWithOptions(repo *repository.Repository, options Options) *Resol
 
 // Resolve pins selector's branch, honors cancellation, and reads nodeID from that immutable commit.
 func (r *Resolver) Resolve(ctx context.Context, selector SnapshotSelector, nodeID string) (ResolveResult, error) {
-	if err := ctx.Err(); err != nil {
-		return ResolveResult{}, err
-	}
-	if selector.Branch == "" {
-		return ResolveResult{}, ErrMissingBranch
-	}
-	var commitID repository.ObjectID
-	var err error
-	if selector.Commit != nil {
-		commitID, err = r.repo.ResolveExplicitCommit(
-			selector.Branch,
-			repository.ObjectID(*selector.Commit),
-			r.allowDetachedCommit,
-		)
-		if errors.Is(err, repository.ErrCommitNotReachable) {
-			return ResolveResult{}, ErrUnsupportedCommit
-		}
-	} else {
-		commitID, err = r.repo.PinBranch(selector.Branch)
-	}
+	commitID, err := r.resolveSnapshotCommit(ctx, selector)
 	if err != nil {
-		return ResolveResult{}, err
-	}
-
-	if r.afterBranchResolved != nil {
-		r.afterBranchResolved()
-	}
-	if err := ctx.Err(); err != nil {
 		return ResolveResult{}, err
 	}
 
@@ -138,6 +135,59 @@ func (r *Resolver) Resolve(ctx context.Context, selector SnapshotSelector, nodeI
 	}, nil
 }
 
+// ValidateSchema pins selector's branch and validates that immutable snapshot.
+func (r *Resolver) ValidateSchema(ctx context.Context, selector SnapshotSelector) (SchemaValidationResult, error) {
+	commitID, err := r.resolveSnapshotCommit(ctx, selector)
+	if err != nil {
+		return SchemaValidationResult{}, err
+	}
+	resolution, err := r.repo.ValidatePinnedSchema(commitID)
+	if err != nil {
+		return SchemaValidationResult{}, err
+	}
+	return SchemaValidationResult{
+		Snapshot: SnapshotMetadata{Commit: string(resolution.Commit), Root: string(resolution.Snapshot)},
+		Schema: SchemaMetadata{
+			Root: string(resolution.SchemaRoot), Version: resolution.Schema.Version, Permissive: resolution.Schema.Permissive,
+		},
+		Valid: resolution.Valid, Violations: resolution.Violations,
+	}, nil
+}
+
+func (r *Resolver) resolveSnapshotCommit(ctx context.Context, selector SnapshotSelector) (repository.ObjectID, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if selector.Branch == "" {
+		return "", ErrMissingBranch
+	}
+	var commitID repository.ObjectID
+	var err error
+	if selector.Commit != nil {
+		commitID, err = r.repo.ResolveExplicitCommit(
+			selector.Branch,
+			repository.ObjectID(*selector.Commit),
+			r.allowDetachedCommit,
+		)
+		if errors.Is(err, repository.ErrCommitNotReachable) {
+			return "", ErrUnsupportedCommit
+		}
+	} else {
+		commitID, err = r.repo.PinBranch(selector.Branch)
+	}
+	if err != nil {
+		return "", err
+	}
+
+	if r.afterBranchResolved != nil {
+		r.afterBranchResolved()
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	return commitID, nil
+}
+
 // ResolveRequest combines a node selector with optional tool query limits.
 type ResolveRequest struct {
 	// Selector identifies the snapshot to resolve.
@@ -146,6 +196,12 @@ type ResolveRequest struct {
 	NodeID string `json:"nodeId"`
 	// Budget optionally narrows configured query limits.
 	Budget QueryBudgetRequest `json:"budget"`
+}
+
+// SchemaValidationRequest identifies the snapshot to validate.
+type SchemaValidationRequest struct {
+	// Selector identifies the branch and optional reachable commit.
+	Selector SnapshotSelector `json:"selector"`
 }
 
 // DiffRequest combines a repository diff request with optional tool query limits.
@@ -210,6 +266,14 @@ func (t *ResolveTool) EDGResolve(ctx context.Context, request ResolveRequest) (R
 	}
 	result.Budget = NormalizeQueryBudget(request.Budget, t.queryBudget)
 	return result, nil
+}
+
+// EDGValidateSchema honors cancellation and validates one immutable snapshot.
+func (t *ResolveTool) EDGValidateSchema(ctx context.Context, request SchemaValidationRequest) (SchemaValidationResult, error) {
+	if err := ctx.Err(); err != nil {
+		return SchemaValidationResult{}, err
+	}
+	return t.resolver.ValidateSchema(ctx, request.Selector)
 }
 
 // EDGDiff honors cancellation and returns a budgeted repository diff page.
@@ -278,6 +342,15 @@ func (t *ResolveTool) EDGStageMutationBatch(ctx context.Context, request reposit
 		return repository.StageMutationResult{}, err
 	}
 	return t.resolver.repo.StageMutationBatch(request)
+}
+
+// EDGStageSchemaMigration honors cancellation and atomically stages a target
+// schema with the graph mutations required to conform to it.
+func (t *ResolveTool) EDGStageSchemaMigration(ctx context.Context, request repository.SchemaMigrationRequest) (repository.StageMutationResult, error) {
+	if err := ctx.Err(); err != nil {
+		return repository.StageMutationResult{}, err
+	}
+	return t.resolver.repo.StageSchemaMigration(request)
 }
 
 // EDGBranchStagingStatus honors cancellation and returns a branch's shared staging summary.

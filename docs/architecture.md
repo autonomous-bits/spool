@@ -49,8 +49,11 @@ The repository is an immutable graph history:
   outgoing-adjacency, incoming-adjacency, and schema roots.
 - Every seeded snapshot references the built-in versioned permissive schema.
   It records the schema version but deliberately imposes no label, edge-type,
-  or property validation. Schema authoring, migrations, and enforcement are not
-  currently part of Spool.
+  or property validation.
+- Later schema versions may define node-label and edge-type property rules,
+  edge endpoint labels and cardinality, natural-key uniqueness, and supported
+  graph-wide invariants. Schema definitions are normalized and
+  content-addressed just like graph data.
 - A **commit** references a snapshot and zero or more parent commits, with
   author, message, and timestamp metadata.
 - A **branch** is a mutable reference to a commit. One default branch (`main`)
@@ -76,6 +79,30 @@ validated against the canonical objects and roots before it is accepted.
    materializes sorted graph roots and a new snapshot, creates a commit, moves
    the branch ref, clears staging, and persists the new state.
 
+### Schema migration and validation
+
+`spl schema migrate --branch <branch> --schema <file> --batch <file>` authors a
+target schema in TOML and supplies the complete JSON mutation batch needed to
+move the base graph to that schema. TOML supports `version`, optional
+`permissive`, `global_invariants`, repeated `[[node]]` and `[[edge]]` rules,
+their repeated `[[node.property]]` and `[[edge.property]]` rules, and an
+edge's `[edge.cardinality]` table. Unknown TOML fields are rejected.
+
+The repository parses and normalizes the schema, applies the mutation batch to
+the selected branch head in memory, and validates the resulting full graph
+against the target schema. Only if all of that succeeds does it atomically
+replace the branch's staged mutation set with both the operations and target
+schema. A normal `spl commit` then materializes one snapshot and commit
+containing both changes. A rejected migration leaves the prior staged set
+unchanged; migration staging itself does not change historical snapshots.
+
+`spl validate --branch <branch> [--commit <commit>]` selects exactly one
+immutable snapshot and returns a JSON conformance report with the snapshot and
+schema metadata plus any violations. Without `--commit`, it pins the branch
+head before validation. An explicit commit must satisfy the same reachable-from
+the-selected-branch policy as `resolve`; it cannot select an unrelated
+detached commit by default.
+
 Branch creation, deletion, and switching update the same repository state.
 Destructive branch operations protect the default and active branches.
 
@@ -88,8 +115,8 @@ built-in schema accepts these fields without user-authored constraints.
 
 ### Read flow
 
-`resolve` pins the selected branch to an immutable commit before reading a
-node. This makes the returned node, commit, snapshot root, and projection root
+`resolve` and `validate` pin the selected branch to an immutable commit before
+reading. This makes their returned metadata and data or validation report
 internally consistent if the branch moves concurrently. `diff`, `history`,
 branch-containment, and impact queries read immutable snapshots through the
 same repository layer. Diff and impact requests have row, response-size, depth,

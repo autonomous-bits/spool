@@ -78,6 +78,23 @@ type Resolution struct {
 	SchemaVersion uint16
 }
 
+// SchemaValidationResolution is an immutable schema-validation result for a
+// pinned commit.
+type SchemaValidationResolution struct {
+	// Commit identifies the commit that was validated.
+	Commit ObjectID
+	// Snapshot identifies the validated graph snapshot.
+	Snapshot ObjectID
+	// SchemaRoot identifies the schema used for validation.
+	SchemaRoot ObjectID
+	// Schema is the normalized schema used for validation.
+	Schema SchemaSnapshot
+	// Valid reports whether the graph conforms to Schema.
+	Valid bool
+	// Violations contains each failed constraint when Valid is false.
+	Violations []SchemaViolation
+}
+
 type graphSnapshot struct {
 	NodeRoot   ObjectID `cbor:"1,keyasint"`
 	EdgeRoot   ObjectID `cbor:"2,keyasint"`
@@ -417,6 +434,49 @@ func (r *Repository) ResolvePinned(commitID ObjectID, nodeID string) (Resolution
 		NodeRoot:      snapshot.NodeRoot,
 		SchemaVersion: schema.Version,
 	}, nil
+}
+
+// ValidatePinnedSchema validates the complete immutable graph at a previously
+// pinned commit against that snapshot's schema.
+func (r *Repository) ValidatePinnedSchema(commitID ObjectID) (SchemaValidationResolution, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if err := r.ensureOpenLocked(); err != nil {
+		return SchemaValidationResolution{}, err
+	}
+	commit, ok := r.commits[commitID]
+	if !ok {
+		return SchemaValidationResolution{}, ErrCommitNotFound
+	}
+	snapshot, ok := r.snapshots[commit.Snapshot]
+	if !ok {
+		return SchemaValidationResolution{}, fmt.Errorf("snapshot %q: %w", commit.Snapshot, ErrCommitNotFound)
+	}
+	schema, err := r.schemaSnapshotLocked(snapshot.SchemaRoot)
+	if err != nil {
+		return SchemaValidationResolution{}, err
+	}
+	nodes, ok := r.projections[snapshot.NodeRoot]
+	if !ok {
+		return SchemaValidationResolution{}, fmt.Errorf("node projection %q: %w", snapshot.NodeRoot, ErrNodeNotFound)
+	}
+	edges, ok := r.edgeProjections[commit.Snapshot]
+	if !ok {
+		return SchemaValidationResolution{}, fmt.Errorf("edge projection %q: %w", commit.Snapshot, ErrNodeNotFound)
+	}
+	result := SchemaValidationResolution{
+		Commit: commitID, Snapshot: commit.Snapshot, SchemaRoot: snapshot.SchemaRoot, Schema: schema, Valid: true,
+		Violations: []SchemaViolation{},
+	}
+	if err := ValidateSchemaSnapshot(schema, nodes, edges); err != nil {
+		var validation *SchemaValidationError
+		if !errors.As(err, &validation) {
+			return SchemaValidationResolution{}, err
+		}
+		result.Valid = false
+		result.Violations = append([]SchemaViolation(nil), validation.Violations...)
+	}
+	return result, nil
 }
 
 func (r *Repository) schemaSnapshotLocked(root ObjectID) (SchemaSnapshot, error) {
