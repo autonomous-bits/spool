@@ -37,6 +37,29 @@ This creates a `.spl` state directory with a default `main` branch. From a subdi
 locates the nearest parent `.spl` directory; when initializing, it uses the directory containing
 `go.work`, or the current directory if none is found.
 
+## Storage and integrity
+
+Spool stores immutable nodes, edges, graph snapshots, schemas, and fixed-fanout
+sorted tree indexes as canonical CBOR loose objects under `.spl/objects/loose`.
+Object IDs are BLAKE3 hashes of the typed canonical bytes. Mutable control
+state is separate: `.spl/config.toml`, `HEAD`, branch refs, staging files,
+reflogs, and merge transactions.
+
+Commit and merge transitions write immutable objects before atomically replacing
+the affected ref. If a process stops during a transition, an unreachable object
+or stale staging file may remain, but a ref never intentionally points to a
+partially written object. Do not edit files inside `.spl` manually.
+
+Use `fsck` after an interrupted process, storage failure, or suspected
+corruption:
+
+```sh
+spl fsck
+```
+
+It writes a JSON integrity report on standard output even when corruption is
+found, exits non-zero for corruption, and does not repair or delete data.
+
 Stage a JSON mutation batch and commit it:
 
 ```sh

@@ -199,9 +199,9 @@ type Node struct {
 	// Title is the node's display value and compatibility field.
 	Title string `json:"title" cbor:"2,keyasint"`
 	// Labels identifies the node's sorted, unique type labels.
-	Labels []string `json:"labels,omitempty" cbor:"3,keyasint,omitempty"`
+	Labels []string `json:"labels,omitempty" cbor:"3,keyasint"`
 	// Properties holds typed, recursively composable node properties.
-	Properties map[string]PropertyValue `json:"properties,omitempty" cbor:"4,keyasint,omitempty"`
+	Properties map[string]PropertyValue `json:"properties,omitempty" cbor:"4,keyasint"`
 }
 
 // Normalize returns a canonical node with sorted, deduplicated labels and
@@ -268,7 +268,7 @@ type Edge struct {
 	// Type identifies the edge's relationship type.
 	Type string `json:"type,omitempty" cbor:"4,keyasint,omitempty"`
 	// Properties holds typed, recursively composable edge properties.
-	Properties map[string]PropertyValue `json:"properties,omitempty" cbor:"5,keyasint,omitempty"`
+	Properties map[string]PropertyValue `json:"properties,omitempty" cbor:"5,keyasint"`
 }
 
 // Normalize returns a canonical edge with normalized property values.

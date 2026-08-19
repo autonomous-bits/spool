@@ -63,11 +63,14 @@ func (r *Repository) AdvanceBranch(branch string) (ObjectID, error) {
 	previous := r.commits[current]
 	next := r.newCommit(previous.Snapshot, []ObjectID{current}, "", "advance branch for a subsequent request")
 	previousObject, objectExisted := r.objects[r.objectID("commit", next)]
-	nextID := r.store("commit", next)
+	nextID, err := r.storeObject("commit", next)
+	if err != nil {
+		return "", fmt.Errorf("store branch advance commit: %w", err)
+	}
 	previousCommit, commitExisted := r.commits[nextID]
 	r.commits[nextID] = next
 	r.branches[branch] = nextID
-	if err := r.persistRepositoryLocked(); err != nil {
+	if err := r.writeRefLocked(branch, current, nextID, "advance"); err != nil {
 		if durableWriteCommitted(err) {
 			return nextID, fmt.Errorf("branch advance committed but directory sync failed: %w", err)
 		}
@@ -158,13 +161,27 @@ func (r *Repository) applyCleanCandidateLocked(candidate mergeCandidate, transac
 		r.commits, r.branches = commits, branches
 		return "", fmt.Errorf("materialize merge result: %w", err)
 	}
-	snapshotID := r.store("graph-snapshot", snapshot)
-	r.snapshots[snapshotID], r.edgeProjections[snapshotID] = snapshot, candidate.edges
-	r.projections[snapshot.NodeRoot] = candidate.nodes
+	snapshotID, err := r.storeObject("graph-snapshot", snapshot)
+	if err != nil {
+		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
+		r.commits, r.branches = commits, branches
+		return "", fmt.Errorf("store merge snapshot: %w", err)
+	}
+	r.snapshots[snapshotID] = snapshot
+	if err := r.reconstructSnapshotProjectionsLocked(snapshotID, snapshot); err != nil {
+		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
+		r.commits, r.branches = commits, branches
+		return "", fmt.Errorf("reconstruct merge result: %w", err)
+	}
 	merged := r.newCommit(snapshotID, []ObjectID{targetCommit, candidate.preview.Binding.SourceCommit}, author, message)
-	mergedID := r.store("commit", merged)
+	mergedID, err := r.storeObject("commit", merged)
+	if err != nil {
+		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
+		r.commits, r.branches = commits, branches
+		return "", fmt.Errorf("store merge commit: %w", err)
+	}
 	r.commits[mergedID], r.branches[candidate.preview.TargetBranch] = merged, mergedID
-	if err := r.persistRepositoryLocked(); err != nil {
+	if err := r.writeRefLocked(candidate.preview.TargetBranch, targetCommit, mergedID, "merge"); err != nil {
 		if durableWriteCommitted(err) {
 			return mergedID, fmt.Errorf("clean merge committed but directory sync failed: %w", err)
 		}
@@ -298,25 +315,25 @@ func (r *Repository) ResolveConflictedMerge(request ResolveConflictedMergeReques
 		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
 		return fmt.Errorf("materialize resolved merge: %w", err)
 	}
-	snapshotID := r.store("graph-snapshot", snapshot)
-	r.snapshots[snapshotID], r.edgeProjections[snapshotID] = snapshot, candidate.edges
-	r.projections[snapshot.NodeRoot] = candidate.nodes
-	repositoryErr := r.persistRepositoryLocked()
-	if repositoryErr != nil && !durableWriteCommitted(repositoryErr) {
+	snapshotID, err := r.storeObject("graph-snapshot", snapshot)
+	if err != nil {
 		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
-		return repositoryErr
+		return fmt.Errorf("store resolved merge snapshot: %w", err)
+	}
+	r.snapshots[snapshotID] = snapshot
+	if err := r.reconstructSnapshotProjectionsLocked(snapshotID, snapshot); err != nil {
+		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
+		return fmt.Errorf("reconstruct resolved merge: %w", err)
 	}
 	transaction.StagedSnapshot, transaction.Resolved, transaction.Restaged = snapshotID, true, true
 	transactionErr := r.persistMergeTransactionLocked(request.TargetBranch, request.TransactionID, &transaction)
 	if transactionErr != nil && !durableWriteCommitted(transactionErr) {
+		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
 		return transactionErr
 	}
 	r.mergeTransactions[request.TargetBranch] = transaction
 	if transactionErr != nil {
 		return fmt.Errorf("merge resolution recorded but directory sync failed: %w", transactionErr)
-	}
-	if repositoryErr != nil {
-		return fmt.Errorf("resolved merge snapshot recorded but directory sync failed: %w", repositoryErr)
 	}
 	return nil
 }
@@ -536,10 +553,13 @@ func (r *Repository) FinalizeMergeTransaction(targetBranch, callerTransactionID 
 	}
 	merged := r.newCommit(transaction.StagedSnapshot, []ObjectID{transaction.OriginalTarget, transaction.Binding.SourceCommit}, "", "finalize resolved merge")
 	previousObject, objectExisted := r.objects[r.objectID("commit", merged)]
-	mergedID := r.store("commit", merged)
+	mergedID, err := r.storeObject("commit", merged)
+	if err != nil {
+		return "", fmt.Errorf("store finalized merge commit: %w", err)
+	}
 	previousCommit, commitExisted := r.commits[mergedID]
 	r.commits[mergedID], r.branches[targetBranch] = merged, mergedID
-	persistErr := r.persistRepositoryLocked()
+	persistErr := r.writeRefLocked(targetBranch, transaction.OriginalTarget, mergedID, "merge-finalize")
 	if persistErr != nil && !durableWriteCommitted(persistErr) {
 		if commitExisted {
 			r.commits[mergedID] = previousCommit

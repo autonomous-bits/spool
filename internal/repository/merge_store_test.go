@@ -4,6 +4,8 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+
+	"github.com/autonomous-bits/spool/internal/repository/branch"
 )
 
 func TestConflictedMergeRetainsLeaseAfterCommittedStateWriteError(t *testing.T) {
@@ -30,6 +32,51 @@ func TestConflictedMergeRetainsLeaseAfterCommittedStateWriteError(t *testing.T) 
 		MergeBase: base, SourceCommit: source, TargetCommit: target,
 	}); !errors.Is(err, ErrMergeLeaseHeldByOther) {
 		t.Fatalf("other owner error = %v, want ErrMergeLeaseHeldByOther", err)
+	}
+}
+
+func TestCleanMergeRefFailureLeavesDurableTargetUnchanged(t *testing.T) {
+	stateDir := t.TempDir()
+	repo, err := InitializeRepository(stateDir)
+	if err != nil {
+		t.Fatalf("InitializeRepository: %v", err)
+	}
+	base := repo.branches["main"]
+	if _, err := repo.CreateBranch("feature", branch.Source{Branch: "main"}); err != nil {
+		t.Fatalf("CreateBranch: %v", err)
+	}
+	source, err := repo.AdvanceBranch("feature")
+	if err != nil {
+		t.Fatalf("AdvanceBranch feature: %v", err)
+	}
+	target, err := repo.AdvanceBranch("main")
+	if err != nil {
+		t.Fatalf("AdvanceBranch main: %v", err)
+	}
+	repo.persistRepositoryFn = func() error { return errors.New("injected merge ref write failure") }
+
+	if _, err := repo.ApplyCleanBoundMerge("feature", "main", "owner", MergePreviewBinding{
+		MergeBase: base, SourceCommit: source, TargetCommit: target,
+	}); err == nil {
+		t.Fatal("ApplyCleanBoundMerge succeeded despite ref write failure")
+	}
+	if got := repo.branches["main"]; got != target {
+		t.Fatalf("main head = %q, want unchanged %q", got, target)
+	}
+	repo.persistRepositoryFn = nil
+	if err := repo.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	reopened, err := OpenRepository(stateDir)
+	if err != nil {
+		t.Fatalf("OpenRepository after interrupted merge: %v", err)
+	}
+	defer closeTestRepository(t, reopened)
+	if got := reopened.branches["main"]; got != target {
+		t.Fatalf("reopened main head = %q, want %q", got, target)
+	}
+	if _, err := reopened.ResolvePinned(target, SeedNodeID); err != nil {
+		t.Fatalf("durable target does not resolve: %v", err)
 	}
 }
 

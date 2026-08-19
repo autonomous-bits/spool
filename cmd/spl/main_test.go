@@ -144,7 +144,7 @@ func TestInitCommandRejectsExistingRepositoryWithoutChangingDurableState(t *test
 		t.Fatalf("close initialized repository: %v", err)
 	}
 
-	statePath := filepath.Join(stateDir, "repository.json")
+	statePath := filepath.Join(stateDir, "config.toml")
 	before, err := os.ReadFile(statePath)
 	if err != nil {
 		t.Fatalf("read existing repository state: %v", err)

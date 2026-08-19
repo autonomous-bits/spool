@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -30,6 +31,74 @@ func TestStageMutationBatchStagesValidBatchAtomically(t *testing.T) {
 	}
 	if staged.BaseCommit != repo.branches["main"] || !reflect.DeepEqual(staged.Operations, validMutationBatch()) {
 		t.Fatalf("staged set = %#v", staged)
+	}
+}
+
+func TestCommitStagedMutationsPersistsCollisionShapedAdjacencyIdentifiers(t *testing.T) {
+	stateDir := t.TempDir()
+	repo, err := InitializeRepository(stateDir)
+	if err != nil {
+		t.Fatalf("InitializeRepository: %v", err)
+	}
+	const (
+		firstSource  = "source"
+		firstEdgeID  = "edge\x00tail"
+		secondSource = "source\x00edge"
+		secondEdgeID = "tail"
+		target       = "target"
+	)
+	if first, second := adjacencyKey(firstSource, firstEdgeID), adjacencyKey(secondSource, secondEdgeID); first == second {
+		t.Fatalf("collision-shaped adjacency keys collide: %q", first)
+	}
+	if _, err := repo.StageMutationBatch(StageMutationRequest{
+		Branch: "main",
+		Operations: []MutationOperation{
+			{Action: "add", Entity: "node", ID: firstSource, Title: "First source"},
+			{Action: "add", Entity: "node", ID: secondSource, Title: "Second source"},
+			{Action: "add", Entity: "node", ID: target, Title: "Target"},
+			{Action: "add", Entity: "edge", ID: firstEdgeID, Source: firstSource, Target: target},
+			{Action: "add", Entity: "edge", ID: secondEdgeID, Source: secondSource, Target: target},
+		},
+	}); err != nil {
+		t.Fatalf("StageMutationBatch: %v", err)
+	}
+	committed, err := repo.CommitStagedMutations("main")
+	if err != nil {
+		t.Fatalf("CommitStagedMutations: %v", err)
+	}
+	if err := repo.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	reopened, err := OpenRepository(stateDir)
+	if err != nil {
+		t.Fatalf("OpenRepository: %v", err)
+	}
+	defer closeTestRepository(t, reopened)
+	snapshotID := reopened.commits[committed.Commit].Snapshot
+	snapshot := reopened.snapshots[snapshotID]
+	edges := reopened.edgeProjections[snapshotID]
+	if _, ok := edges[firstEdgeID]; !ok {
+		t.Fatalf("reopened graph lacks edge %q", firstEdgeID)
+	}
+	if _, ok := edges[secondEdgeID]; !ok {
+		t.Fatalf("reopened graph lacks edge %q", secondEdgeID)
+	}
+	entries, err := reopened.loadProllyTreeLocked(snapshot.OutAdjRoot)
+	if err != nil {
+		t.Fatalf("load outgoing adjacency: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("outgoing adjacency entries = %d, want 2", len(entries))
+	}
+	if got, want := []string{entries[0].Key, entries[1].Key}, []string{
+		adjacencyKey(firstSource, firstEdgeID),
+		adjacencyKey(secondSource, secondEdgeID),
+	}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("outgoing adjacency key order = %#v, want %#v", got, want)
+	}
+	if _, err := reopened.Fsck(); err != nil {
+		t.Fatalf("Fsck reopened repository: %v", err)
 	}
 }
 
@@ -339,24 +408,6 @@ func TestOpenRepositoryAcceptsStateWithoutStagedMutations(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 
-	path := filepath.Join(stateDir, "repository.json")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read repository state: %v", err)
-	}
-	var state map[string]any
-	if err := json.Unmarshal(data, &state); err != nil {
-		t.Fatalf("decode repository state: %v", err)
-	}
-	delete(state, "stagedMutations")
-	data, err = json.Marshal(state)
-	if err != nil {
-		t.Fatalf("encode repository state: %v", err)
-	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatalf("write old repository state: %v", err)
-	}
-
 	reopened, err := OpenRepository(stateDir)
 	if err != nil {
 		t.Fatalf("OpenRepository: %v", err)
@@ -383,27 +434,25 @@ func TestOpenRepositoryAcceptsHistoricalStagingOutsideNewIngestionLimits(t *test
 		t.Fatalf("Close: %v", err)
 	}
 
-	path := filepath.Join(stateDir, "repository.json")
+	path := filepath.Join(stateDir, "staged", "main.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("read repository state: %v", err)
+		t.Fatalf("read staged mutations: %v", err)
 	}
-	var state persistedRepository
-	if err := json.Unmarshal(data, &state); err != nil {
-		t.Fatalf("decode repository state: %v", err)
+	var staged StagedMutationSet
+	if err := json.Unmarshal(data, &staged); err != nil {
+		t.Fatalf("decode staged mutations: %v", err)
 	}
-	staged := state.StagedMutations["main"]
 	staged.Operations[0].Labels = []string{"legacy/label"}
 	staged.Operations[0].Properties = map[string]PropertyValue{
 		"legacy/key": StringPropertyValue("value"),
 	}
-	state.StagedMutations["main"] = staged
-	data, err = json.Marshal(state)
+	data, err = json.Marshal(staged)
 	if err != nil {
-		t.Fatalf("encode legacy repository state: %v", err)
+		t.Fatalf("encode legacy staged mutations: %v", err)
 	}
 	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatalf("write legacy repository state: %v", err)
+		t.Fatalf("write legacy staged mutations: %v", err)
 	}
 
 	reopened, err := OpenRepository(stateDir)
@@ -507,6 +556,122 @@ func TestCommitStagedMutationsRollsBackNewNodeRootProjectionOnPersistenceFailure
 	if len(repo.snapshots) != beforeSnapshots || len(repo.projections) != beforeProjections || repo.branches["main"] != beforeHead {
 		t.Fatal("failed commit left a snapshot, projection, or branch update behind")
 	}
+}
+
+func TestCommitFailureLeavesUnreferencedObjectsAndStagingWithoutAdvancingRef(t *testing.T) {
+	stateDir := t.TempDir()
+	repo, err := InitializeRepository(stateDir)
+	if err != nil {
+		t.Fatalf("InitializeRepository: %v", err)
+	}
+	base := repo.branches["main"]
+	if _, err := repo.StageMutationBatch(StageMutationRequest{
+		Branch: "main", Operations: []MutationOperation{{Action: "add", Entity: "node", ID: "node-2", Title: "Second node"}},
+	}); err != nil {
+		t.Fatalf("StageMutationBatch: %v", err)
+	}
+	beforeObjects := durableObjectCount(t, stateDir)
+	repo.persistRepositoryFn = func() error { return errors.New("injected ref write failure") }
+
+	if _, err := repo.CommitStagedMutations("main"); err == nil {
+		t.Fatal("CommitStagedMutations succeeded despite ref write failure")
+	}
+	if got := repo.branches["main"]; got != base {
+		t.Fatalf("main head = %q, want unchanged %q", got, base)
+	}
+	if _, staged := repo.stagedMutations["main"]; !staged {
+		t.Fatal("failed ref update cleared staging")
+	}
+	if afterObjects := durableObjectCount(t, stateDir); afterObjects <= beforeObjects {
+		t.Fatalf("durable object count = %d, want unreferenced commit objects after %d", afterObjects, beforeObjects)
+	}
+	if data, err := os.ReadFile(filepath.Join(stateDir, "refs", "heads", "main")); err != nil || string(data) != string(base)+"\n" {
+		t.Fatalf("main ref = %q, %v; want %q", data, err, base)
+	}
+	if data, err := os.ReadFile(filepath.Join(stateDir, "logs", "refs", "heads", "main")); err != nil || strings.Contains(string(data), " commit\n") {
+		t.Fatalf("reflog = %q, %v; failed ref update recorded a transition", data, err)
+	}
+
+	repo.persistRepositoryFn = nil
+	if err := repo.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	reopened, err := OpenRepository(stateDir)
+	if err != nil {
+		t.Fatalf("OpenRepository after interrupted commit: %v", err)
+	}
+	defer closeTestRepository(t, reopened)
+	if got := reopened.branches["main"]; got != base {
+		t.Fatalf("reopened main head = %q, want %q", got, base)
+	}
+	if _, staged := reopened.stagedMutations["main"]; !staged {
+		t.Fatal("reopened repository lost staging after failed ref update")
+	}
+}
+
+func TestCommitClearsStagingAfterRefReplacementWarning(t *testing.T) {
+	stateDir := t.TempDir()
+	repo, err := InitializeRepository(stateDir)
+	if err != nil {
+		t.Fatalf("InitializeRepository: %v", err)
+	}
+	if _, err := repo.StageMutationBatch(StageMutationRequest{
+		Branch: "main", Operations: []MutationOperation{{Action: "add", Entity: "node", ID: "node-2", Title: "Second node"}},
+	}); err != nil {
+		t.Fatalf("StageMutationBatch: %v", err)
+	}
+	repo.appendReflogFn = func(ref string, _, next ObjectID, action string) error {
+		if ref != "refs/heads/main" || action != "commit" {
+			t.Fatalf("reflog hook = %q/%q", ref, action)
+		}
+		data, err := os.ReadFile(filepath.Join(stateDir, "refs", "heads", "main"))
+		if err != nil || string(data) != string(next)+"\n" {
+			t.Fatalf("reflog ran before ref replacement: %q, %v", data, err)
+		}
+		return errors.New("injected reflog failure")
+	}
+
+	result, err := repo.CommitStagedMutations("main")
+	var warning *CommittedWithWarningError
+	if !errors.As(err, &warning) || result.Commit == "" {
+		t.Fatalf("CommitStagedMutations = %#v, %v; want committed warning", result, err)
+	}
+	if _, staged := repo.stagedMutations["main"]; staged {
+		t.Fatal("staging remained after successful ref replacement")
+	}
+	if _, err := os.Stat(filepath.Join(stateDir, "staged", "main.json")); !os.IsNotExist(err) {
+		t.Fatalf("staging file remains after successful ref replacement: %v", err)
+	}
+	repo.appendReflogFn = nil
+	if err := repo.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	reopened, err := OpenRepository(stateDir)
+	if err != nil {
+		t.Fatalf("OpenRepository after committed warning: %v", err)
+	}
+	defer closeTestRepository(t, reopened)
+	if got := reopened.branches["main"]; got != result.Commit {
+		t.Fatalf("reopened main head = %q, want %q", got, result.Commit)
+	}
+}
+
+func durableObjectCount(t *testing.T, stateDir string) int {
+	t.Helper()
+	count := 0
+	err := filepath.Walk(filepath.Join(stateDir, "objects", "loose"), func(_ string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.Mode().IsRegular() {
+			count++
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk durable objects: %v", err)
+	}
+	return count
 }
 
 func TestCommitStagedMutationsRejectsStaleBaseWithoutMutation(t *testing.T) {

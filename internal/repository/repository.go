@@ -2,18 +2,15 @@
 package repository
 
 import (
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"sort"
-	"strconv"
 	"sync"
 	"time"
 
 	"github.com/autonomous-bits/spool/internal/repository/branch"
 	"github.com/fxamacker/cbor/v2"
 	"github.com/gofrs/flock"
-	"lukechampine.com/blake3"
 )
 
 // SeedNodeID is the stable identifier of the node in every seeded repository.
@@ -26,6 +23,8 @@ var (
 	ErrRepositoryNotInitialized = errors.New("repository is not initialized")
 	// ErrRepositoryAlreadyInitialized reports an attempt to initialize existing repository state.
 	ErrRepositoryAlreadyInitialized = errors.New("repository is already initialized")
+	// ErrLegacyRepositoryState reports an unsupported monolithic repository.json state file.
+	ErrLegacyRepositoryState = errors.New("legacy repository.json state is unsupported")
 	// ErrBranchNotFound reports a requested branch that is absent from the repository.
 	ErrBranchNotFound = errors.New("branch not found")
 	// ErrCommitNotFound reports a requested commit that is absent from the repository.
@@ -99,13 +98,19 @@ type SchemaValidationResolution struct {
 	Violations []SchemaViolation
 }
 
-type graphSnapshot struct {
+// GraphSnapshot is the immutable, content-addressed root set for one graph version.
+type GraphSnapshot struct {
 	NodeRoot   ObjectID `cbor:"1,keyasint"`
 	EdgeRoot   ObjectID `cbor:"2,keyasint"`
 	OutAdjRoot ObjectID `cbor:"3,keyasint"`
 	InAdjRoot  ObjectID `cbor:"4,keyasint"`
 	SchemaRoot ObjectID `cbor:"5,keyasint"`
+	NodeCount  uint64   `cbor:"6,keyasint"`
+	EdgeCount  uint64   `cbor:"7,keyasint"`
 }
+
+// graphSnapshot remains an internal compatibility alias.
+type graphSnapshot = GraphSnapshot
 
 type commit struct {
 	Snapshot ObjectID   `cbor:"1,keyasint"`
@@ -126,12 +131,14 @@ type Repository struct {
 	projections         map[ObjectID]map[string]Node
 	edgeProjections     map[ObjectID]map[string]Edge
 	objects             map[ObjectID][]byte
+	objectStore         *looseObjectStore
 	stagedMutations     map[string]StagedMutationSet
 	mergeLeases         map[string]string
 	mergeTransactions   map[string]mergeTransaction
 	mergeStateDir       string
 	persistStateFn      func(string, string, *mergeTransaction) error
 	persistRepositoryFn func() error
+	appendReflogFn      func(string, ObjectID, ObjectID, string) error
 	stateLock           *flock.Flock
 	closed              bool
 	now                 func() time.Time
@@ -147,6 +154,14 @@ type Initialization struct {
 
 // NewSeedRepository returns an in-memory repository initialized with the seed graph.
 func NewSeedRepository() *Repository {
+	repo := newRepository()
+	if err := repo.seed(); err != nil {
+		panic(fmt.Sprintf("seed repository: %v", err))
+	}
+	return repo
+}
+
+func newRepository() *Repository {
 	repo := &Repository{
 		defaultBranch:     defaultBranchName,
 		activeBranch:      defaultBranchName,
@@ -161,28 +176,37 @@ func NewSeedRepository() *Repository {
 		mergeTransactions: make(map[string]mergeTransaction),
 		now:               time.Now,
 	}
+	repo.objectStore = newLooseObjectStore("", &repo.objects)
+	return repo
+}
 
+func (r *Repository) seed() error {
 	node := Node{ID: SeedNodeID, Title: "EDG walking skeleton"}
-	nodeID := repo.store("node", node)
-	nodeRoot := repo.store("prolly-node-root", []ObjectID{nodeID})
-	edgeRoot := repo.store("prolly-edge-root", []ObjectID{})
-	outAdjRoot := repo.store("prolly-out-adjacency-root", []ObjectID{})
-	inAdjRoot := repo.store("prolly-in-adjacency-root", []ObjectID{})
-	schemaRoot := repo.store("schema-root", BuiltinSchemaSnapshot())
-	snapshot := graphSnapshot{
-		NodeRoot: nodeRoot, EdgeRoot: edgeRoot, OutAdjRoot: outAdjRoot,
-		InAdjRoot: inAdjRoot, SchemaRoot: schemaRoot,
+	schemaRoot, err := r.objectStore.put("schema-root", BuiltinSchemaSnapshot())
+	if err != nil {
+		return err
 	}
-	snapshotID := repo.store("graph-snapshot", snapshot)
-	repo.snapshots[snapshotID] = snapshot
-	repo.projections[nodeRoot] = map[string]Node{node.ID: node}
-	repo.edgeProjections[snapshotID] = map[string]Edge{}
+	snapshot, err := r.materializeSnapshotLocked(map[string]Node{node.ID: node}, map[string]Edge{}, schemaRoot)
+	if err != nil {
+		return err
+	}
+	snapshotID, err := r.objectStore.put("graph-snapshot", snapshot)
+	if err != nil {
+		return err
+	}
+	r.snapshots[snapshotID] = snapshot
+	if err := r.reconstructSnapshotProjectionsLocked(snapshotID, snapshot); err != nil {
+		return err
+	}
 
 	seedCommit := commit{Snapshot: snapshotID, Message: "seed resolve snapshot", Author: defaultCommitAuthor, Time: time.Unix(0, 0).UTC()}
-	commitID := repo.store("commit", seedCommit)
-	repo.commits[commitID] = seedCommit
-	repo.branches[defaultBranchName] = commitID
-	return repo
+	commitID, err := r.objectStore.put("commit", seedCommit)
+	if err != nil {
+		return err
+	}
+	r.commits[commitID] = seedCommit
+	r.branches[defaultBranchName] = commitID
+	return nil
 }
 
 func (r *Repository) newCommit(snapshot ObjectID, parents []ObjectID, author, message string) commit {
@@ -219,15 +243,18 @@ func (r *Repository) ensureOpenLocked() error {
 }
 
 func (r *Repository) store(objectType string, value any) ObjectID {
-	encoded, err := canonicalObjectEncoding(value)
+	id, err := r.storeObject(objectType, value)
 	if err != nil {
-		panic(fmt.Sprintf("encode %s: %v", objectType, err))
+		panic(fmt.Sprintf("store %s: %v", objectType, err))
 	}
-	header := objectType + " " + strconv.Itoa(len(encoded)) + "\x00"
-	sum := blake3.Sum256(append([]byte(header), encoded...))
-	id := ObjectID(hex.EncodeToString(sum[:]))
-	r.objects[id] = encoded
 	return id
+}
+
+// storeObject persists an immutable object before making it reachable from a
+// mutable control file. Callers handling a user-visible transition must return
+// its error rather than using store, which exists for legacy in-memory helpers.
+func (r *Repository) storeObject(objectType string, value any) (ObjectID, error) {
+	return r.objectStore.put(objectType, value)
 }
 
 func (r *Repository) objectID(objectType string, value any) ObjectID {
@@ -251,7 +278,7 @@ func (r *Repository) CreateBranch(name string, source branch.Source) (branch.Cre
 	}
 
 	r.branches[name] = sourceCommit
-	if err := r.persistRepositoryLocked(); err != nil {
+	if err := r.writeRefLocked(name, "", sourceCommit, "create"); err != nil {
 		if durableWriteCommitted(err) {
 			return branch.CreateResult{Name: name, Commit: string(sourceCommit)}, fmt.Errorf("branch creation committed but directory sync failed: %w", err)
 		}
@@ -298,15 +325,17 @@ func (r *Repository) DeleteBranch(name string) (branch.DeleteResult, error) {
 	staged, hadStaged := r.stagedMutations[name]
 	delete(r.branches, name)
 	delete(r.stagedMutations, name)
-	if err := r.persistRepositoryLocked(); err != nil {
-		if durableWriteCommitted(err) {
-			return branch.DeleteResult{Name: name}, fmt.Errorf("branch deletion committed but directory sync failed: %w", err)
-		}
+	refErr := r.deleteRefLocked(name, commitID, "delete")
+	if refErr != nil && !durableWriteCommitted(refErr) {
 		r.branches[name] = commitID
 		if hadStaged {
 			r.stagedMutations[name] = staged
 		}
-		return branch.DeleteResult{}, err
+		return branch.DeleteResult{}, refErr
+	}
+	cleanupErr := r.writeStagedLocked(name, nil)
+	if refErr != nil || cleanupErr != nil {
+		return branch.DeleteResult{Name: name}, fmt.Errorf("branch deletion committed with durability warning: %w", errors.Join(refErr, cleanupErr))
 	}
 	return branch.DeleteResult{Name: name}, nil
 }
@@ -327,7 +356,7 @@ func (r *Repository) SwitchBranch(name string) (branch.SwitchResult, error) {
 
 	previousActiveBranch := r.activeBranch
 	r.activeBranch = name
-	if err := r.persistRepositoryLocked(); err != nil {
+	if err := r.writeHeadLocked(previousActiveBranch, name, "switch"); err != nil {
 		if durableWriteCommitted(err) {
 			return branch.SwitchResult{ActiveBranch: name}, fmt.Errorf("branch switch committed but directory sync failed: %w", err)
 		}

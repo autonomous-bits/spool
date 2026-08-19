@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestOpenRepositoryRejectsSchemaMismatchedCanonicalSnapshotWithoutRepair(t *testing.T) {
+func TestOpenRepositoryIgnoresUnreachableSchemaMismatchedSnapshot(t *testing.T) {
 	stateDir := t.TempDir()
 	repo, err := NewSeedRepositoryWithMergeState(stateDir)
 	if err != nil {
@@ -20,7 +20,7 @@ func TestOpenRepositoryRejectsSchemaMismatchedCanonicalSnapshotWithoutRepair(t *
 	if err := repo.persistRepositoryLocked(); err != nil {
 		t.Fatalf("persistRepositoryLocked: %v", err)
 	}
-	statePath := filepath.Join(stateDir, "repository.json")
+	statePath := filepath.Join(stateDir, "refs", "heads", "main")
 	before, err := os.ReadFile(statePath)
 	if err != nil {
 		t.Fatalf("ReadFile before open: %v", err)
@@ -29,15 +29,17 @@ func TestOpenRepositoryRejectsSchemaMismatchedCanonicalSnapshotWithoutRepair(t *
 		t.Fatalf("Close: %v", err)
 	}
 
-	if _, err := OpenRepository(stateDir); err == nil {
-		t.Fatal("OpenRepository accepted a schema-mismatched canonical snapshot")
+	reopened, err := OpenRepository(stateDir)
+	if err != nil {
+		t.Fatalf("OpenRepository rejected an unreachable snapshot: %v", err)
 	}
+	closeTestRepository(t, reopened)
 	after, err := os.ReadFile(statePath)
 	if err != nil {
 		t.Fatalf("ReadFile after open: %v", err)
 	}
 	if string(after) != string(before) {
-		t.Fatal("OpenRepository repaired or mutated rejected durable state")
+		t.Fatal("OpenRepository mutated durable control state")
 	}
 }
 

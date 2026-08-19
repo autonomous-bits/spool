@@ -15,8 +15,9 @@ flowchart LR
     Tool --> Repository[repository.Repository]
     Services --> Repository
     Repository --> Memory[In-memory graph and ref indexes]
-    Repository --> State[".spl/repository.json"]
-    Repository --> Merge[".spl/<hashed-branch>.json"]
+    Repository --> Objects[".spl/objects/loose/<id>"]
+    Repository --> State[".spl/config.toml, HEAD, refs, staged, logs"]
+    Repository --> Merge[".spl/merge/<hashed-branch>.json"]
     Repository --> Lock[".spl/repository.lock"]
 ```
 
@@ -61,11 +62,31 @@ The repository is an immutable graph history:
 - A branch may have one durable **staged mutation set**, validated against its
   base commit before it is materialized into a new snapshot and commit.
 
-Objects are encoded with canonical CBOR. Their IDs are BLAKE3 hashes of a
-type-and-length header plus encoded value, so equivalent objects receive the
-same identifier. JSON state stores the object index and the graph projections
-used for efficient node and edge access. On open, the persisted state is
-validated against the canonical objects and roots before it is accepted.
+Every immutable object is encoded with canonical CBOR. Its ID is the BLAKE3
+hash of a type-and-length header plus those bytes, and it is stored as a
+canonical CBOR envelope at `.spl/objects/loose/<first-two-hex>/<rest>`.
+Equivalent objects therefore have the same ID; a type, hash, envelope, or
+payload mismatch is corruption.
+
+Nodes, edges, and the node, edge, outgoing-adjacency, and incoming-adjacency
+indexes are immutable objects. Indexes are fixed-fanout (32) sorted Prolly
+trees: leaves contain key/object-ID pairs and internal nodes contain each
+child's last key. A snapshot names the four tree roots and schema root.
+Repositories reconstruct their in-memory projections only from those roots on
+open and reject non-canonical objects, malformed trees, invalid adjacency, or
+schema-invalid reachable graphs.
+
+Mutable state is intentionally separate from immutable objects:
+
+- `config.toml` records the format and default branch; `HEAD` records the
+  active branch.
+- `refs/heads/<branch>` maps each branch name to a commit ID.
+- `staged/<branch>.json` is that branch's complete staged replacement set.
+- `logs/` records ref and HEAD transitions after the corresponding replacement.
+- `merge/` contains owner-gated unresolved merge transactions.
+
+The old monolithic `.spl/repository.json` format is rejected rather than
+migrated implicitly.
 
 ## Primary flows
 
@@ -76,8 +97,8 @@ validated against the canonical objects and roots before it is accepted.
    operations and valid edge endpoints, then atomically replaces that branch's
    staged set.
 3. `spl commit` verifies that staging still targets the branch head,
-   materializes sorted graph roots and a new snapshot, creates a commit, moves
-   the branch ref, clears staging, and persists the new state.
+   writes all node, edge, tree, schema, snapshot, and commit objects, then
+   atomically moves the branch ref and clears staging.
 
 ### Schema migration and validation
 
@@ -103,8 +124,9 @@ head before validation. An explicit commit must satisfy the same reachable-from
 the-selected-branch policy as `resolve`; it cannot select an unrelated
 detached commit by default.
 
-Branch creation, deletion, and switching update the same repository state.
-Destructive branch operations protect the default and active branches.
+Branch creation, deletion, and switching atomically update their individual
+control files. Destructive branch operations protect the default and active
+branches.
 
 Mutation batches are JSON arrays. Node operations may include `labels` and a
 `properties` object; edge operations may include `type` and `properties`. Each
@@ -146,11 +168,28 @@ restart only when their persisted binding and preview remain valid.
 
 `Repository` uses an in-process read/write mutex and a `.spl/repository.lock`
 file to prevent concurrent processes from mutating the same local repository.
-State writes use a synced temporary file followed by an atomic replacement and
-directory sync. Operations roll back in-memory changes when persistence fails
-before replacement; when replacement succeeds but final directory sync fails,
-they return a result together with a durability warning so callers do not treat
-a committed write as failed.
+Each immutable object is made durable before a mutable ref can point to it.
+Control-file writes use a synced temporary file, atomic replacement, and
+directory sync. A ref transition is recorded in its reflog only after its
+replacement has succeeded. Staging cleanup follows a successful commit-ref
+replacement, so an interruption can retain safe, stale staging but cannot make
+a ref name a missing object. Unreachable immutable objects left by an
+interrupted transition are safe and may be collected by a future maintenance
+operation.
+
+Operations roll back in-memory changes when persistence fails before
+replacement. When replacement succeeds but the final directory sync or reflog
+append fails, they return a result with a durability warning: callers must not
+retry as though the transition did not happen.
+
+### Integrity checking
+
+`spl fsck` is read-only and emits a complete JSON report. It verifies control
+files, refs, staged state, merge bindings, every reachable commit and snapshot,
+all Prolly-tree ordering and boundaries, graph/schema invariants, and every
+loose-object envelope (including unreachable objects). It returns a non-zero
+status for corruption while still writing the report, so automation can retain
+the diagnostics. `fsck` does not repair or delete data.
 
 ## Extension points and current scope
 
