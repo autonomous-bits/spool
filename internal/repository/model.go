@@ -142,6 +142,23 @@ func (v PropertyValue) Equal(other PropertyValue) bool {
 	return err == nil && reflect.DeepEqual(normalized, otherNormalized)
 }
 
+func (v PropertyValue) clone() PropertyValue {
+	cloned := v
+	if v.List != nil {
+		cloned.List = make([]PropertyValue, len(v.List))
+		for i, item := range v.List {
+			cloned.List[i] = item.clone()
+		}
+	}
+	if v.Map != nil {
+		cloned.Map = make(map[string]PropertyValue, len(v.Map))
+		for key, item := range v.Map {
+			cloned.Map[key] = item.clone()
+		}
+	}
+	return cloned
+}
+
 // Node is the immutable node representation stored in a graph snapshot.
 type Node struct {
 	// ID uniquely identifies the node within a graph snapshot.
@@ -158,17 +175,18 @@ type Node struct {
 // normalized property values.
 func (n Node) Normalize() (Node, error) {
 	normalized := Node{ID: n.ID, Title: n.Title}
-	if len(n.Labels) > 0 {
-		labels := append([]string(nil), n.Labels...)
+	if n.Labels != nil {
+		labels := make([]string, len(n.Labels))
+		copy(labels, n.Labels)
 		sort.Strings(labels)
-		normalized.Labels = labels[:0]
+		normalized.Labels = make([]string, 0, len(labels))
 		for _, label := range labels {
 			if len(normalized.Labels) == 0 || normalized.Labels[len(normalized.Labels)-1] != label {
 				normalized.Labels = append(normalized.Labels, label)
 			}
 		}
 	}
-	if len(n.Properties) > 0 {
+	if n.Properties != nil {
 		normalized.Properties = make(map[string]PropertyValue, len(n.Properties))
 		for key, value := range n.Properties {
 			value, err := value.Normalize()
@@ -192,11 +210,18 @@ func (n Node) Equal(other Node) bool {
 }
 
 func (n Node) clone() Node {
-	normalized, err := n.Normalize()
-	if err != nil {
-		panic(fmt.Sprintf("clone node %q: %v", n.ID, err))
+	cloned := Node{ID: n.ID, Title: n.Title}
+	if n.Labels != nil {
+		cloned.Labels = make([]string, len(n.Labels))
+		copy(cloned.Labels, n.Labels)
 	}
-	return normalized
+	if n.Properties != nil {
+		cloned.Properties = make(map[string]PropertyValue, len(n.Properties))
+		for key, value := range n.Properties {
+			cloned.Properties[key] = value.clone()
+		}
+	}
+	return cloned
 }
 
 // Edge is the immutable edge representation stored in a graph snapshot.
@@ -216,7 +241,7 @@ type Edge struct {
 // Normalize returns a canonical edge with normalized property values.
 func (e Edge) Normalize() (Edge, error) {
 	normalized := Edge{ID: e.ID, Source: e.Source, Target: e.Target, Type: e.Type}
-	if len(e.Properties) > 0 {
+	if e.Properties != nil {
 		normalized.Properties = make(map[string]PropertyValue, len(e.Properties))
 		for key, value := range e.Properties {
 			value, err := value.Normalize()
@@ -240,11 +265,14 @@ func (e Edge) Equal(other Edge) bool {
 }
 
 func (e Edge) clone() Edge {
-	normalized, err := e.Normalize()
-	if err != nil {
-		panic(fmt.Sprintf("clone edge %q: %v", e.ID, err))
+	cloned := Edge{ID: e.ID, Source: e.Source, Target: e.Target, Type: e.Type}
+	if e.Properties != nil {
+		cloned.Properties = make(map[string]PropertyValue, len(e.Properties))
+		for key, value := range e.Properties {
+			cloned.Properties[key] = value.clone()
+		}
 	}
-	return normalized
+	return cloned
 }
 
 // SchemaSnapshot is the canonical schema object referenced by a graph snapshot.

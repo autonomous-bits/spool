@@ -144,7 +144,10 @@ func TestReadSurfacesRetainTypedGraphFields(t *testing.T) {
 func commitReadSurfaceSnapshot(t *testing.T, repo *Repository, nodes map[string]Node, edges map[string]Edge, schemaRoot ObjectID) ObjectID {
 	t.Helper()
 	parent := repo.branches["main"]
-	snapshot := repo.materializeSnapshotLocked(nodes, edges, schemaRoot)
+	snapshot, err := repo.materializeSnapshotLocked(nodes, edges, schemaRoot)
+	if err != nil {
+		t.Fatalf("materialize snapshot: %v", err)
+	}
 	snapshotID := repo.store("graph-snapshot", snapshot)
 	repo.snapshots[snapshotID] = snapshot
 	repo.projections[snapshot.NodeRoot] = nodes

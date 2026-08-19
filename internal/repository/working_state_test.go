@@ -128,6 +128,54 @@ func TestStageMutationBatchRejectsInvalidEnrichedPropertyBeforeStaging(t *testin
 	}
 }
 
+func TestStageMutationBatchPreservesExplicitEmptyEnrichedFields(t *testing.T) {
+	repo := NewSeedRepository()
+	if _, err := repo.StageMutationBatch(StageMutationRequest{
+		Branch: "main",
+		Operations: []MutationOperation{{
+			Action: "update", Entity: "node", ID: SeedNodeID, Title: "Updated",
+			Labels: []string{}, Properties: map[string]PropertyValue{},
+		}},
+	}); err != nil {
+		t.Fatalf("StageMutationBatch: %v", err)
+	}
+	staged := repo.stagedMutations["main"].Operations[0]
+	if staged.Labels == nil || staged.Properties == nil {
+		t.Fatalf("staged empty fields = %#v, want explicit empty values", staged)
+	}
+	result, err := repo.CommitStagedMutations("main")
+	if err != nil {
+		t.Fatalf("CommitStagedMutations: %v", err)
+	}
+	snapshot := repo.snapshots[repo.commits[result.Commit].Snapshot]
+	node := repo.projections[snapshot.NodeRoot][SeedNodeID]
+	if node.Labels == nil || node.Properties == nil || len(node.Labels) != 0 || len(node.Properties) != 0 {
+		t.Fatalf("committed empty fields = %#v", node)
+	}
+}
+
+func TestCommitStagedMutationsReturnsInvalidPropertyErrorWithoutPanicking(t *testing.T) {
+	repo := NewSeedRepository()
+	if _, err := repo.StageMutationBatch(StageMutationRequest{
+		Branch:     "main",
+		Operations: []MutationOperation{{Action: "update", Entity: "node", ID: SeedNodeID, Title: "Updated"}},
+	}); err != nil {
+		t.Fatalf("StageMutationBatch: %v", err)
+	}
+	head := repo.branches["main"]
+	snapshot := repo.snapshots[repo.commits[head].Snapshot]
+	node := repo.projections[snapshot.NodeRoot][SeedNodeID]
+	node.Properties = map[string]PropertyValue{"invalid": FloatPropertyValue(math.NaN())}
+	repo.projections[snapshot.NodeRoot][SeedNodeID] = node
+
+	if _, err := repo.CommitStagedMutations("main"); !errors.Is(err, ErrInvalidPropertyValue) {
+		t.Fatalf("CommitStagedMutations error = %v, want ErrInvalidPropertyValue", err)
+	}
+	if repo.branches["main"] != head {
+		t.Fatalf("branch head = %q, want unchanged %q", repo.branches["main"], head)
+	}
+}
+
 func TestBranchStagingStatusReportsSharedBranchDelta(t *testing.T) {
 	repo := NewSeedRepository()
 	if _, err := repo.StageMutationBatch(StageMutationRequest{Branch: "main", Operations: validMutationBatch()}); err != nil {
