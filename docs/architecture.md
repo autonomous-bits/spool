@@ -127,11 +127,20 @@ exact comparison request.
 
 `spl merge preview` computes a deterministic three-way comparison of the base,
 source, and target snapshots without moving refs. It merges independent node and
-edge fields and top-level property keys, and reports overlapping structural or
-schema conflicts. A clean preview has a content-derived identifier. `spl merge
-apply` recomputes that exact preview, materializes its merged graph snapshot,
-creates a two-parent commit, and advances the target atomically. Existing
-conflicted-merge transactions retain target leases and recovery behavior.
+edge fields and top-level property keys, and reports structural, schema, and
+schema-derived semantic conflicts with stable IDs and affected paths. A clean
+preview has a content-derived identifier. `spl merge apply` recomputes that exact
+preview, materializes its merged graph snapshot, creates a two-parent commit, and
+advances the target atomically.
+
+Applying a conflicted exact preview persists the preview in an owner-gated merge
+transaction and leases its target branch. `spl merge conflicts` reads that durable
+preview; `spl merge resolve` requires one source-or-target selection for every
+reported conflict and may apply a validated mutation override batch. It stores a
+schema-valid resolution snapshot without advancing the target. `spl merge finalize`
+revalidates the original preview binding and atomically creates the two-parent
+commit; `spl merge abort` removes the transaction and lease. Transactions survive
+restart only when their persisted binding and preview remain valid.
 
 ## Durability and concurrency
 

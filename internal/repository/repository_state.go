@@ -180,7 +180,9 @@ func (r *Repository) validPersistedMergeTransactionLocked(state persistedMergeTr
 	if state.Version != 1 || state.TargetBranch == "" || state.LeaseOwner == "" ||
 		state.TargetBranch != transaction.TargetBranch || state.LeaseOwner != transaction.OwnerTransactionID ||
 		transaction.SourceBranch == "" || transaction.Binding.MergeBase == "" ||
-		transaction.Binding.SourceCommit == "" || transaction.Binding.TargetCommit == "" || transaction.OriginalTarget == "" {
+		transaction.Binding.SourceCommit == "" || transaction.Binding.TargetCommit == "" || transaction.OriginalTarget == "" ||
+		transaction.Preview.ID == "" || transaction.Preview.Binding != transaction.Binding ||
+		transaction.Preview.SourceBranch != transaction.SourceBranch || transaction.Preview.TargetBranch != transaction.TargetBranch {
 		return false
 	}
 	if transaction.Restaged && !transaction.Resolved {
@@ -211,7 +213,11 @@ func (r *Repository) validPersistedMergeTransactionLocked(state persistedMergeTr
 		return false
 	}
 	mergeBase, ok := r.mergeBaseLocked(transaction.Binding.SourceCommit, transaction.Binding.TargetCommit)
-	return ok && mergeBase == transaction.Binding.MergeBase
+	if !ok || mergeBase != transaction.Binding.MergeBase {
+		return false
+	}
+	candidate, err := r.previewMergeLocked(transaction.SourceBranch, state.TargetBranch)
+	return err == nil && candidate.preview.ID == transaction.Preview.ID && reflect.DeepEqual(candidate.preview, transaction.Preview)
 }
 
 func (r *Repository) persistedRepositoryLocked() persistedRepository {

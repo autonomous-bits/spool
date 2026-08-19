@@ -100,9 +100,23 @@ spl merge apply --source feature --target main --transaction merge-42 --preview 
   --author alice --message "Merge feature"
 ```
 
-The preview combines independent node/edge fields and property keys, but reports
-overlapping changes and incompatible schema changes as conflicts. `merge apply` recomputes
-the preview and rejects it if either branch changed.
+The preview combines independent node/edge fields and property keys, and reports structural,
+schema, and schema-derived semantic conflicts with stable conflict IDs and affected paths.
+Applying a conflicted exact preview creates a durable, target-branch lease rather than moving the
+branch. Inspect it with `spl merge conflicts --target main --transaction merge-42`, resolve every
+conflict from a JSON selection array, then finalize or abort:
+
+```sh
+spl merge resolve --target main --transaction merge-42 --preview <preview-id> \
+  --selections selections.json [--overrides mutations.json]
+spl merge finalize --target main --transaction merge-42
+# or: spl merge abort --target main --transaction merge-42
+```
+
+Each selection is `{"conflictId":"...","choice":"source"}` or `target`. Overrides use the same
+mutation-array format as `spl add` and can repair a schema-derived semantic conflict. Resolution
+and finalization reject stale previews, require transaction ownership, and keep the target lease
+until finalization or abort.
 
 ## Learn more
 

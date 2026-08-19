@@ -245,6 +245,18 @@ type MergeApplyRequest struct {
 	Message       string              `json:"message,omitempty"`
 }
 
+// MergeConflictsRequest identifies an owning conflicted merge transaction.
+type MergeConflictsRequest struct {
+	TargetBranch  string `json:"targetBranch"`
+	TransactionID string `json:"transactionId"`
+}
+
+// MergeTransactionRequest identifies an owning conflicted merge transaction.
+type MergeTransactionRequest = MergeConflictsRequest
+
+// MergeResolveRequest supplies conflict selections and optional corrective mutations.
+type MergeResolveRequest = repository.ResolveConflictedMergeRequest
+
 // ResolveTool adapts resolver, branch, and repository operations to context-aware tool methods.
 type ResolveTool struct {
 	resolver    *Resolver
@@ -285,6 +297,38 @@ func (t *ResolveTool) EDGApplyMergePreview(ctx context.Context, request MergeApp
 		request.SourceBranch, request.TargetBranch, request.TransactionID,
 		request.PreviewID, request.Author, request.Message,
 	)
+}
+
+// EDGMergeConflicts returns the durable preview and resolution state for its owner.
+func (t *ResolveTool) EDGMergeConflicts(ctx context.Context, request MergeConflictsRequest) (repository.MergeTransactionStatus, error) {
+	if err := ctx.Err(); err != nil {
+		return repository.MergeTransactionStatus{}, err
+	}
+	return t.merges.Conflicts(request.TargetBranch, request.TransactionID)
+}
+
+// EDGFinalizeMerge commits a fully resolved conflicted merge.
+func (t *ResolveTool) EDGFinalizeMerge(ctx context.Context, request MergeTransactionRequest) (repository.ObjectID, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	return t.merges.Finalize(request.TargetBranch, request.TransactionID)
+}
+
+// EDGResolveMerge persists a complete, schema-valid conflict resolution.
+func (t *ResolveTool) EDGResolveMerge(ctx context.Context, request MergeResolveRequest) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return t.merges.ResolveConflicts(request)
+}
+
+// EDGAbortMerge durably abandons a conflicted merge and releases its target lease.
+func (t *ResolveTool) EDGAbortMerge(ctx context.Context, request MergeTransactionRequest) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return t.merges.Abort(request.TargetBranch, request.TransactionID)
 }
 
 // EDGResolve honors cancellation, resolves a node, and reports the effective budget.

@@ -17,10 +17,33 @@ type mergeTransaction struct {
 	SourceBranch       string
 	TargetBranch       string
 	Binding            MergePreviewBinding
+	Preview            MergePreview
 	OriginalTarget     ObjectID
 	StagedSnapshot     ObjectID
 	Resolved           bool
 	Restaged           bool
+}
+
+// MergeTransactionStatus is the owner-gated public view of a conflicted merge.
+type MergeTransactionStatus struct {
+	Preview  MergePreview `json:"preview"`
+	Resolved bool         `json:"resolved"`
+	Restaged bool         `json:"restaged"`
+}
+
+// MergeResolutionSelection selects one side for a reported structural or schema conflict.
+type MergeResolutionSelection struct {
+	ConflictID string `json:"conflictId"`
+	Choice     string `json:"choice"`
+}
+
+// ResolveConflictedMergeRequest supplies every conflict selection and optional corrective mutations.
+type ResolveConflictedMergeRequest struct {
+	TargetBranch  string                     `json:"targetBranch"`
+	TransactionID string                     `json:"transactionId"`
+	PreviewID     ObjectID                   `json:"previewId"`
+	Selections    []MergeResolutionSelection `json:"selections"`
+	Overrides     []MutationOperation        `json:"overrides,omitempty"`
 }
 
 // AdvanceBranch creates and persists a no-content commit on branch unless it is merge leased.
@@ -108,7 +131,10 @@ func (r *Repository) ApplyMergePreview(sourceBranch, targetBranch, transactionID
 		return "", ErrMergePreviewMismatch
 	}
 	if !candidate.preview.Clean {
-		return "", ErrMergePreviewNotClean
+		if err := r.applyConflictedPreviewLocked(candidate.preview, transactionID); err != nil {
+			return "", err
+		}
+		return "", ErrMergeConflicted
 	}
 	return r.applyCleanCandidateLocked(candidate, transactionID, author, message)
 }
@@ -159,6 +185,15 @@ func (r *Repository) ApplyConflictedBoundMerge(sourceBranch, targetBranch, trans
 	if err := r.validateMergePreviewBindingLocked(sourceBranch, targetBranch, binding); err != nil {
 		return err
 	}
+	candidate, err := r.previewMergeLocked(sourceBranch, targetBranch)
+	if err != nil {
+		return err
+	}
+	return r.applyConflictedPreviewLocked(candidate.preview, transactionID)
+}
+
+func (r *Repository) applyConflictedPreviewLocked(preview MergePreview, transactionID string) error {
+	targetBranch := preview.TargetBranch
 	if transactionID == "" {
 		return ErrMissingMergeTransactionID
 	}
@@ -166,7 +201,10 @@ func (r *Repository) ApplyConflictedBoundMerge(sourceBranch, targetBranch, trans
 		return ErrMergeLeaseHeldByOther
 	}
 	if _, active := r.mergeTransactions[targetBranch]; !active {
-		transaction := mergeTransaction{OwnerTransactionID: transactionID, SourceBranch: sourceBranch, TargetBranch: targetBranch, Binding: binding, OriginalTarget: r.branches[targetBranch]}
+		transaction := mergeTransaction{
+			OwnerTransactionID: transactionID, SourceBranch: preview.SourceBranch, TargetBranch: targetBranch,
+			Binding: preview.Binding, Preview: preview, OriginalTarget: r.branches[targetBranch],
+		}
 		if err := r.persistRepositoryLocked(); err != nil {
 			return err
 		}
@@ -181,6 +219,225 @@ func (r *Repository) ApplyConflictedBoundMerge(sourceBranch, targetBranch, trans
 		}
 	}
 	return ErrMergeConflicted
+}
+
+// InspectMergeTransaction returns the persisted preview and resolution state to its owner.
+func (r *Repository) InspectMergeTransaction(targetBranch, callerTransactionID string) (MergeTransactionStatus, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if err := r.ensureOpenLocked(); err != nil {
+		return MergeTransactionStatus{}, err
+	}
+	transaction, err := r.ownedMergeTransactionLocked(targetBranch, callerTransactionID)
+	if err != nil {
+		return MergeTransactionStatus{}, err
+	}
+	return MergeTransactionStatus{Preview: transaction.Preview, Resolved: transaction.Resolved, Restaged: transaction.Restaged}, nil
+}
+
+// ResolveConflictedMerge materializes an owner-selected, schema-valid resolution snapshot.
+func (r *Repository) ResolveConflictedMerge(request ResolveConflictedMergeRequest) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.ensureOpenLocked(); err != nil {
+		return err
+	}
+	transaction, err := r.ownedMergeTransactionLocked(request.TargetBranch, request.TransactionID)
+	if err != nil {
+		return err
+	}
+	if transaction.Preview.ID != request.PreviewID {
+		return ErrMergeResolutionPreviewMismatch
+	}
+	if err := r.validateMergePreviewBindingLocked(transaction.SourceBranch, request.TargetBranch, transaction.Binding); err != nil {
+		return err
+	}
+	candidate, err := r.previewMergeLocked(transaction.SourceBranch, request.TargetBranch)
+	if err != nil {
+		return err
+	}
+	if candidate.preview.ID != transaction.Preview.ID {
+		return ErrStaleMergePreview
+	}
+	choices, err := mergeResolutionChoices(transaction.Preview.Conflicts, request.Selections)
+	if err != nil {
+		return err
+	}
+	sourceSnapshot := r.snapshots[r.commits[transaction.Binding.SourceCommit].Snapshot]
+	sourceNodes := r.projections[sourceSnapshot.NodeRoot]
+	sourceEdges := r.edgeProjections[r.commits[transaction.Binding.SourceCommit].Snapshot]
+	for _, conflict := range transaction.Preview.Conflicts {
+		if choices[conflict.ConflictID] == "source" {
+			applySourceResolution(conflict, candidate.nodes, candidate.edges, sourceNodes, sourceEdges, &candidate.schemaRoot, sourceSnapshot.SchemaRoot)
+		}
+	}
+	overrides, err := normalizeMutationOperations(request.Overrides)
+	if err != nil {
+		return err
+	}
+	if err := validateResolutionOverrides(candidate.nodes, candidate.edges, overrides); err != nil {
+		return err
+	}
+	applyMutationOperations(candidate.nodes, candidate.edges, overrides)
+	if err := validateCandidateValues(candidate.nodes, candidate.edges); err != nil {
+		return err
+	}
+	schema, err := r.schemaSnapshotLocked(candidate.schemaRoot)
+	if err != nil {
+		return err
+	}
+	if err := ValidateSchemaSnapshot(schema, candidate.nodes, candidate.edges); err != nil {
+		return err
+	}
+
+	objects, snapshots, projections, edgeProjections := r.objects, r.snapshots, r.projections, r.edgeProjections
+	r.objects, r.snapshots = cloneObjects(r.objects), cloneSnapshots(r.snapshots)
+	r.projections, r.edgeProjections = cloneProjectionMap(r.projections), cloneEdgeProjectionMap(r.edgeProjections)
+	snapshot, err := r.materializeSnapshotLocked(candidate.nodes, candidate.edges, candidate.schemaRoot)
+	if err != nil {
+		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
+		return fmt.Errorf("materialize resolved merge: %w", err)
+	}
+	snapshotID := r.store("graph-snapshot", snapshot)
+	r.snapshots[snapshotID], r.edgeProjections[snapshotID] = snapshot, candidate.edges
+	r.projections[snapshot.NodeRoot] = candidate.nodes
+	if err := r.persistRepositoryLocked(); err != nil && !durableWriteCommitted(err) {
+		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
+		return err
+	}
+	transaction.StagedSnapshot, transaction.Resolved, transaction.Restaged = snapshotID, true, true
+	if err := r.persistMergeTransactionLocked(request.TargetBranch, request.TransactionID, &transaction); err != nil && !durableWriteCommitted(err) {
+		return err
+	}
+	r.mergeTransactions[request.TargetBranch] = transaction
+	return nil
+}
+
+func mergeResolutionChoices(conflicts []MergeConflict, selections []MergeResolutionSelection) (map[string]string, error) {
+	if len(conflicts) != len(selections) {
+		return nil, ErrMergeResolutionSelection
+	}
+	known := make(map[string]struct{}, len(conflicts))
+	for _, conflict := range conflicts {
+		known[conflict.ConflictID] = struct{}{}
+	}
+	result := make(map[string]string, len(selections))
+	for _, selection := range selections {
+		if _, exists := known[selection.ConflictID]; !exists || (selection.Choice != "source" && selection.Choice != "target") {
+			return nil, ErrMergeResolutionSelection
+		}
+		if _, duplicate := result[selection.ConflictID]; duplicate {
+			return nil, ErrMergeResolutionSelection
+		}
+		result[selection.ConflictID] = selection.Choice
+	}
+	return result, nil
+}
+
+func applySourceResolution(conflict MergeConflict, nodes map[string]Node, edges map[string]Edge, sourceNodes map[string]Node, sourceEdges map[string]Edge, schemaRoot *ObjectID, sourceSchemaRoot ObjectID) {
+	if conflict.Entity == "schema" {
+		*schemaRoot = sourceSchemaRoot
+		return
+	}
+	if conflict.Entity == "node" {
+		source, exists := sourceNodes[conflict.ID]
+		if conflict.Field == "existence" {
+			if exists {
+				nodes[conflict.ID] = source.clone()
+			} else {
+				delete(nodes, conflict.ID)
+			}
+			return
+		}
+		node := nodes[conflict.ID]
+		switch conflict.Field {
+		case "title":
+			node.Title = source.Title
+		case "labels":
+			node.Labels = append([]string(nil), source.Labels...)
+		default:
+			if len(conflict.Field) > len("properties.") {
+				key := conflict.Field[len("properties."):]
+				if source.Properties == nil {
+					delete(node.Properties, key)
+				} else if value, ok := source.Properties[key]; ok {
+					if node.Properties == nil {
+						node.Properties = make(map[string]PropertyValue)
+					}
+					node.Properties[key] = value.clone()
+				} else {
+					delete(node.Properties, key)
+				}
+			}
+		}
+		nodes[conflict.ID] = node
+		return
+	}
+	if conflict.Entity == "edge" {
+		source, exists := sourceEdges[conflict.ID]
+		if conflict.Field == "existence" {
+			if exists {
+				edges[conflict.ID] = source.clone()
+			} else {
+				delete(edges, conflict.ID)
+			}
+			return
+		}
+		edge := edges[conflict.ID]
+		switch conflict.Field {
+		case "source":
+			edge.Source = source.Source
+		case "target":
+			edge.Target = source.Target
+		case "type":
+			edge.Type = source.Type
+		default:
+			if len(conflict.Field) > len("properties.") {
+				key := conflict.Field[len("properties."):]
+				if source.Properties == nil {
+					delete(edge.Properties, key)
+				} else if value, ok := source.Properties[key]; ok {
+					if edge.Properties == nil {
+						edge.Properties = make(map[string]PropertyValue)
+					}
+					edge.Properties[key] = value.clone()
+				} else {
+					delete(edge.Properties, key)
+				}
+			}
+		}
+		edges[conflict.ID] = edge
+	}
+}
+
+func validateResolutionOverrides(nodes map[string]Node, edges map[string]Edge, operations []MutationOperation) error {
+	seen := make(map[string]struct{}, len(operations))
+	for _, operation := range operations {
+		if operation.ID == "" || (operation.Entity != "node" && operation.Entity != "edge") ||
+			(operation.Action != "add" && operation.Action != "update" && operation.Action != "delete") {
+			return ErrInvalidMutationBatch
+		}
+		key := operation.Entity + ":" + operation.ID
+		if _, duplicate := seen[key]; duplicate {
+			return ErrInvalidMutationBatch
+		}
+		seen[key] = struct{}{}
+		if operation.Entity == "node" {
+			_, exists := nodes[operation.ID]
+			if (operation.Action == "add" && exists) || ((operation.Action == "update" || operation.Action == "delete") && !exists) {
+				return ErrInvalidMutationBatch
+			}
+			continue
+		}
+		_, exists := edges[operation.ID]
+		if (operation.Action == "add" && exists) || ((operation.Action == "update" || operation.Action == "delete") && !exists) {
+			return ErrInvalidMutationBatch
+		}
+		if operation.Action != "delete" && (operation.Source == "" || operation.Target == "") {
+			return ErrInvalidMutationBatch
+		}
+	}
+	return nil
 }
 
 func (r *Repository) acquireMergeLeaseLocked(targetBranch, transactionID string) error {
