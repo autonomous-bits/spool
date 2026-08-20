@@ -1,6 +1,9 @@
 package repository
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 // MergePreviewBinding pins the commits and merge base inspected by a merge preview.
 type MergePreviewBinding struct {
@@ -72,7 +75,7 @@ func (r *Repository) AdvanceBranch(branch string) (ObjectID, error) {
 	r.branches[branch] = nextID
 	if err := r.writeRefLocked(branch, current, nextID, "advance"); err != nil {
 		if durableWriteCommitted(err) {
-			return nextID, fmt.Errorf("branch advance committed but directory sync failed: %w", err)
+			return nextID, fmt.Errorf("branch advance committed but projection maintenance failed: %w", errors.Join(err, r.maintainActiveProjectionLocked(branch)))
 		}
 		if commitExisted {
 			r.commits[nextID] = previousCommit
@@ -86,6 +89,9 @@ func (r *Repository) AdvanceBranch(branch string) (ObjectID, error) {
 			delete(r.objects, nextID)
 		}
 		return "", err
+	}
+	if err := r.maintainActiveProjectionLocked(branch); err != nil {
+		return nextID, fmt.Errorf("branch advance completed but projection maintenance failed: %w", err)
 	}
 	return nextID, nil
 }
@@ -183,11 +189,14 @@ func (r *Repository) applyCleanCandidateLocked(candidate mergeCandidate, transac
 	r.commits[mergedID], r.branches[candidate.preview.TargetBranch] = merged, mergedID
 	if err := r.writeRefLocked(candidate.preview.TargetBranch, targetCommit, mergedID, "merge"); err != nil {
 		if durableWriteCommitted(err) {
-			return mergedID, fmt.Errorf("clean merge committed but directory sync failed: %w", err)
+			return mergedID, fmt.Errorf("clean merge committed but projection maintenance failed: %w", errors.Join(err, r.maintainActiveProjectionLocked(candidate.preview.TargetBranch)))
 		}
 		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
 		r.commits, r.branches = commits, branches
 		return "", err
+	}
+	if err := r.maintainActiveProjectionLocked(candidate.preview.TargetBranch); err != nil {
+		return mergedID, fmt.Errorf("merge completed but projection maintenance failed: %w", err)
 	}
 	return mergedID, nil
 }
@@ -579,11 +588,15 @@ func (r *Repository) FinalizeMergeTransaction(targetBranch, callerTransactionID 
 		delete(r.mergeTransactions, targetBranch)
 		delete(r.mergeLeases, targetBranch)
 	}
+	projectionErr := r.maintainActiveProjectionLocked(targetBranch)
 	if cleanupErr != nil {
-		return mergedID, fmt.Errorf("merge committed but transaction cleanup failed: %w", cleanupErr)
+		return mergedID, fmt.Errorf("merge committed but transaction cleanup failed: %w", errors.Join(cleanupErr, projectionErr))
 	}
 	if persistErr != nil {
-		return mergedID, fmt.Errorf("merge committed but directory sync failed: %w", persistErr)
+		return mergedID, fmt.Errorf("merge committed but directory sync failed: %w", errors.Join(persistErr, projectionErr))
+	}
+	if projectionErr != nil {
+		return mergedID, fmt.Errorf("merge finalization completed but projection maintenance failed: %w", projectionErr)
 	}
 	return mergedID, nil
 }

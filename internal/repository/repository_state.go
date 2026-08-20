@@ -99,6 +99,10 @@ func NewSeedRepositoryWithMergeState(stateDir string) (*Repository, error) {
 	if err := repo.RecoverMergeTransactions(); err != nil {
 		return nil, unlockAfterFailedOpen(repo.stateLock, err)
 	}
+	if err := repo.ensureProjectionForActiveBranchLocked(); err != nil {
+		closeErr := repo.closeProjectionLocked()
+		return nil, unlockAfterFailedOpen(repo.stateLock, errors.Join(err, closeErr))
+	}
 	return repo, nil
 }
 
@@ -157,6 +161,10 @@ func openControlRepository(stateDir string) (*Repository, error) {
 	if err := repo.RecoverMergeTransactions(); err != nil {
 		return nil, unlockAfterFailedOpen(repo.stateLock, err)
 	}
+	if err := repo.ensureProjectionForActiveBranchLocked(); err != nil {
+		closeErr := repo.closeProjectionLocked()
+		return nil, unlockAfterFailedOpen(repo.stateLock, errors.Join(err, closeErr))
+	}
 	return repo, nil
 }
 
@@ -170,13 +178,14 @@ func (r *Repository) Close() error {
 	r.closed = true
 	lock := r.stateLock
 	r.stateLock = nil
+	projectionErr := r.closeProjectionLocked()
 	r.mu.Unlock()
 	if lock != nil {
 		if err := lock.Unlock(); err != nil {
-			return fmt.Errorf("unlock merge repository: %w", err)
+			return errors.Join(projectionErr, fmt.Errorf("unlock merge repository: %w", err))
 		}
 	}
-	return nil
+	return projectionErr
 }
 
 // RecoverMergeTransactions restores valid durable merge transactions and discards invalid records.

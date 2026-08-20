@@ -547,8 +547,12 @@ func (r *Repository) CommitStagedMutationBatch(request CommitStagedMutationReque
 		return CommitStagedMutationResult{}, refErr
 	}
 	cleanupErr := r.writeStagedLocked(request.Branch, nil)
+	projectionErr := r.maintainActiveProjectionLocked(request.Branch)
 	if refErr != nil || cleanupErr != nil {
-		return result, &CommittedWithWarningError{Result: result, err: fmt.Errorf("staged mutations committed with durability warning: %w", errors.Join(refErr, cleanupErr))}
+		return result, &CommittedWithWarningError{Result: result, err: fmt.Errorf("staged mutations committed with durability warning: %w", errors.Join(refErr, cleanupErr, projectionErr))}
+	}
+	if projectionErr != nil {
+		return result, fmt.Errorf("commit completed but projection maintenance failed: %w", projectionErr)
 	}
 	return result, nil
 }

@@ -402,11 +402,12 @@ type EdgeTypeRule struct {
 	Cardinality  Cardinality    `json:"cardinality" cbor:"5,keyasint"`
 }
 
-// PropertyRule defines whether a property is required and its allowed value kinds.
+// PropertyRule defines whether a property is required, indexed, and its allowed value kinds.
 type PropertyRule struct {
 	Key      string         `json:"key" cbor:"1,keyasint"`
 	Required bool           `json:"required" cbor:"2,keyasint"`
 	Types    []PropertyKind `json:"types" cbor:"3,keyasint"`
+	Indexed  bool           `json:"indexed,omitempty" cbor:"4,keyasint,omitempty"`
 }
 
 // Cardinality bounds incoming and outgoing edges of an edge type. A maximum of
@@ -576,7 +577,14 @@ func normalizePropertyRules(rules []PropertyRule) ([]PropertyRule, error) {
 				return nil, fmt.Errorf("%w: property %q repeats type %q", ErrInvalidSchemaDefinition, rule.Key, kind)
 			}
 		}
-		normalized[i] = PropertyRule{Key: rule.Key, Required: rule.Required, Types: types}
+		if rule.Indexed {
+			for _, kind := range types {
+				if kind != PropertyString && kind != PropertyInteger && kind != PropertyFloat {
+					return nil, fmt.Errorf("%w: indexed property %q must have only scalar string or number types", ErrInvalidSchemaDefinition, rule.Key)
+				}
+			}
+		}
+		normalized[i] = PropertyRule{Key: rule.Key, Required: rule.Required, Types: types, Indexed: rule.Indexed}
 	}
 	sort.Slice(normalized, func(i, j int) bool { return normalized[i].Key < normalized[j].Key })
 	for i := 1; i < len(normalized); i++ {
