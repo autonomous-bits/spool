@@ -133,10 +133,10 @@ func (r *Repository) SearchNodesContext(ctx context.Context, request SearchNodes
 
 	rows, err := r.projectionDB.QueryContext(ctx, `
 SELECT f.node_id, n.properties_json, f.title, bm25(node_fts),
-       highlight(node_fts, 1, '<mark>', '</mark>'), snippet(node_fts, 1, '<mark>', '</mark>', '…', 12),
-       highlight(node_fts, 2, '<mark>', '</mark>'), snippet(node_fts, 2, '<mark>', '</mark>', '…', 12),
-       highlight(node_fts, 3, '<mark>', '</mark>'), snippet(node_fts, 3, '<mark>', '</mark>', '…', 12),
-       highlight(node_fts, 4, '<mark>', '</mark>'), snippet(node_fts, 4, '<mark>', '</mark>', '…', 12)
+       snippet(node_fts, 1, '<mark>', '</mark>', '…', 12),
+       snippet(node_fts, 2, '<mark>', '</mark>', '…', 12),
+       snippet(node_fts, 3, '<mark>', '</mark>', '…', 12),
+       snippet(node_fts, 4, '<mark>', '</mark>', '…', 12)
 FROM node_fts AS f
 JOIN nodes AS n ON n.node_id = f.node_id
 WHERE node_fts MATCH ?
@@ -148,19 +148,18 @@ LIMIT ? OFFSET ?`, request.Query, request.MaxRows+1, offset)
 		}
 		return SearchNodesResult{}, fmt.Errorf("%w: %v", ErrInvalidProjectionSearch, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	type searchRow struct {
 		id, properties, title string
 		score                 float64
-		highlights, snippets  [4]string
+		snippets              [4]string
 	}
 	matches := make([]searchRow, 0, projectionPageCapacity(request.MaxRows))
 	for rows.Next() {
 		var row searchRow
 		if err := rows.Scan(&row.id, &row.properties, &row.title, &row.score,
-			&row.highlights[0], &row.snippets[0], &row.highlights[1], &row.snippets[1],
-			&row.highlights[2], &row.snippets[2], &row.highlights[3], &row.snippets[3]); err != nil {
+			&row.snippets[0], &row.snippets[1], &row.snippets[2], &row.snippets[3]); err != nil {
 			return SearchNodesResult{}, fmt.Errorf("read projection search result: %w", err)
 		}
 		matches = append(matches, row)
@@ -197,7 +196,7 @@ LIMIT ? OFFSET ?`, request.Query, request.MaxRows+1, offset)
 		}
 		match := SearchNodeMatch{Node: node, Score: row.score, MatchedFields: make([]string, 0), Snippets: make(map[string]string)}
 		for fieldIndex, field := range fields {
-			if strings.Contains(row.highlights[fieldIndex], "<mark>") {
+			if strings.Contains(row.snippets[fieldIndex], "<mark>") {
 				match.MatchedFields = append(match.MatchedFields, field)
 				match.Snippets[field] = row.snippets[fieldIndex]
 			}
@@ -284,7 +283,7 @@ func (r *Repository) FilterNodesContext(ctx context.Context, request FilterNodes
 		}
 		return FilterNodesResult{}, fmt.Errorf("filter projection: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	type filterRow struct{ id, properties, title string }
 	matches := make([]filterRow, 0, projectionPageCapacity(request.MaxRows))
 	for rows.Next() {
@@ -413,7 +412,7 @@ func (r *Repository) projectionNodeLocked(ctx context.Context, id, title, encode
 		}
 		return Node{}, fmt.Errorf("read projected node %s labels: %w", id, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	labels := make([]string, 0)
 	for rows.Next() {
 		var label string

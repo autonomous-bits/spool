@@ -206,6 +206,9 @@ func newContextualCommand(use, short, long, example string, toolProvider func() 
 			if err != nil {
 				return err
 			}
+			if err := validateContextualSeedSelector(query, filters.labels, predicates); err != nil {
+				return err
+			}
 			tool, err := toolProvider()
 			if err != nil {
 				return err
@@ -241,6 +244,18 @@ func newContextualCommand(use, short, long, example string, toolProvider func() 
 	budgetFlags.addTraversalBudgetFlags(command)
 	_ = command.MarkFlagRequired("branch")
 	return command
+}
+
+func validateContextualSeedSelector(query string, labels []string, predicates []repository.MetadataPredicate) error {
+	hasQuery := strings.TrimSpace(query) != ""
+	hasFilters := len(labels) > 0 || len(predicates) > 0
+	if !hasQuery && !hasFilters {
+		return fmt.Errorf("provide --query or at least one typed filter")
+	}
+	if hasQuery && hasFilters {
+		return fmt.Errorf("--query cannot be combined with typed filter flags")
+	}
+	return nil
 }
 
 func writeJSON(command *cobra.Command, result any, operation string) error {

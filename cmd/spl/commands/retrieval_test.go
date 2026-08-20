@@ -172,6 +172,34 @@ func TestRetrievalCLIEnforcesBranchAndProjectionSelectorConstraints(t *testing.T
 	}
 }
 
+func TestContextualCLIRequiresExactlyOneSeedSelector(t *testing.T) {
+	tool := resolve.NewResolveTool(retrievalCommandRepository(t))
+	for _, testCase := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "missing selector",
+			args: []string{"--branch", "main"},
+			want: "provide --query or at least one typed filter",
+		},
+		{
+			name: "mixed selectors",
+			args: []string{"--branch", "main", "--query", "evidence", "--label", "Seed"},
+			want: "--query cannot be combined with typed filter flags",
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			command := NewContextCommand(func() (*resolve.ResolveTool, error) { return tool, nil })
+			command.SetArgs(testCase.args)
+			if err := command.Execute(); err == nil || !strings.Contains(err.Error(), testCase.want) {
+				t.Fatalf("context error = %v, want %q", err, testCase.want)
+			}
+		})
+	}
+}
+
 type cobraCommand struct {
 	new  func() *cobra.Command
 	args []string
