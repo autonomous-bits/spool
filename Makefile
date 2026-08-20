@@ -1,13 +1,13 @@
 MAKEFLAGS += --no-print-directory
 
-.PHONY: bench build check fuzz golangci lint staticcheck test test-race tidy fmt fmt-check vet vulncheck clean
+.PHONY: bench build check fuzz golangci lint staticcheck test test-race tidy tidy-check fmt fmt-check vet vulncheck clean
 
 build: check
 	go build ./...
 	mkdir -p dist
 	go build -o dist/spl ./cmd/spl
 
-check: lint test test-race vulncheck
+check: tidy-check lint test test-race vulncheck
 
 test:
 	go test ./...
@@ -28,6 +28,10 @@ tidy:
 	go work sync
 	go mod tidy
 	cd cmd/spl && go mod tidy
+
+tidy-check:
+	go mod tidy -diff
+	cd cmd/spl && go mod tidy -diff
 
 fmt:
 	gofmt -l -w .
