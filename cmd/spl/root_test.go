@@ -41,6 +41,10 @@ func TestCommandHelpIncludesExamples(t *testing.T) {
 		{[]string{"diff", "--help"}, "spl diff --base-branch main --target-branch feature"},
 		{[]string{"history", "--help"}, "spl history --branch main --entity-id"},
 		{[]string{"branches-containing", "--help"}, "spl branches-containing --entity-id"},
+		{[]string{"filter", "--help"}, "spl filter --branch main --label Task"},
+		{[]string{"search", "--help"}, "spl search --branch main --query incident"},
+		{[]string{"search-expand", "--help"}, "spl search-expand --branch main --query incident"},
+		{[]string{"context", "--help"}, "spl context --branch main --label Task"},
 		{[]string{"fsck", "--help"}, "spl fsck"},
 		{[]string{"gc", "--help"}, "spl gc"},
 	}
@@ -106,8 +110,22 @@ func TestRootCommandIncludesHistorySubcommands(t *testing.T) {
 		if err != nil {
 			t.Fatalf("find %v: %v", path, err)
 		}
+
 		if found.Name() != path[0] {
 			t.Fatalf("command = %q, want %q", found.Name(), path[0])
+		}
+	}
+}
+
+func TestRootCommandIncludesRetrievalSubcommands(t *testing.T) {
+	command := newRootCommand(&bytes.Buffer{}, resolve.NewResolveTool(repository.NewSeedRepository()))
+	for _, name := range []string{"filter", "search", "search-expand", "context"} {
+		found, _, err := command.Find([]string{name})
+		if err != nil {
+			t.Fatalf("find %s command: %v", name, err)
+		}
+		if found.Name() != name {
+			t.Fatalf("command = %q, want %q", found.Name(), name)
 		}
 	}
 }
