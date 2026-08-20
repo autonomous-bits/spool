@@ -109,6 +109,7 @@ type tomlPropertyRule struct {
 	Key      string   `toml:"key"`
 	Required bool     `toml:"required"`
 	Types    []string `toml:"types"`
+	Indexed  bool     `toml:"indexed"`
 }
 
 func decodePropertyRules(rules []tomlPropertyRule) []PropertyRule {
@@ -121,6 +122,7 @@ func decodePropertyRules(rules []tomlPropertyRule) []PropertyRule {
 			Key:      rule.Key,
 			Required: rule.Required,
 			Types:    propertyKinds(rule.Types),
+			Indexed:  rule.Indexed,
 		}
 	}
 	return decoded

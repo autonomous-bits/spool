@@ -16,6 +16,7 @@ flowchart LR
     Services --> Repository
     Repository --> Memory[In-memory graph and ref indexes]
     Repository --> Objects[".spl/objects/{loose,pack,info}"]
+    Repository --> Projection[".spl/graph.db (derived SQLite/FTS5)"]
     Repository --> State[".spl/config.toml, reflog-retention, HEAD, refs, staged, logs"]
     Repository --> Merge[".spl/merge/<hashed-branch>.json"]
     Repository --> Lock[".spl/repository.lock"]
@@ -54,7 +55,8 @@ The repository is an immutable graph history:
 - Later schema versions may define node-label and edge-type property rules,
   edge endpoint labels and cardinality, natural-key uniqueness, and supported
   graph-wide invariants. Schema definitions are normalized and
-  content-addressed just like graph data.
+  content-addressed just like graph data. Scalar node property rules may set
+  `indexed = true` to opt into the private SQLite typed-property indexes.
 - A **commit** references a snapshot and zero or more parent commits, with
   author, message, and timestamp metadata.
 - A **branch** is a mutable reference to a commit. One default branch (`main`)
@@ -89,6 +91,13 @@ Mutable state is intentionally separate from immutable objects:
 - `staged/<branch>.json` is that branch's complete staged replacement set.
 - `logs/` records ref and HEAD transitions after the corresponding replacement.
 - `merge/` contains owner-gated unresolved merge transactions.
+- `graph.db` is a versioned, private SQLite/FTS5 projection. It is never
+  canonical state: its metadata records the selected branch head, node-root
+  watermark, schema version, and `building`, `ready`, or `failed` state.
+  Repository open rebuilds it from canonical objects when it is absent,
+  incompatible, corrupt, or stale. It indexes node titles, labels, and
+  top-level string properties for FTS; only schema-opted-in scalar properties
+  enter typed filter indexes.
 
 The old monolithic `.spl/repository.json` format is rejected rather than
 migrated implicitly.
@@ -121,6 +130,8 @@ replace the branch's staged mutation set with both the operations and target
 schema. A normal `spl commit` then materializes one snapshot and commit
 containing both changes. A rejected migration leaves the prior staged set
 unchanged; migration staging itself does not change historical snapshots.
+The resulting schema also controls which scalar node properties are emitted to
+the derived typed-property indexes.
 
 `spl validate --branch <branch> [--commit <commit>]` selects exactly one
 immutable snapshot and returns a JSON conformance report with the snapshot and
@@ -150,6 +161,11 @@ same repository layer. Diff and impact requests have row, response-size, depth,
 or visited-node budgets; diff pagination tokens bind the continuation to the
 exact comparison request.
 
+The current SQLite projection is branch-head-only. It is rebuilt against the
+selected active head after commits, active-branch switches, and completed merges.
+Historical or divergent snapshots are deliberately not served from it yet;
+future snapshot-selector work will add an explicit historical projection cache.
+
 ### Merge flow
 
 `spl merge preview` computes a deterministic three-way comparison of the base,
@@ -174,6 +190,9 @@ restart only when their persisted binding and preview remain valid.
 `Repository` uses an in-process read/write mutex and a `.spl/repository.lock`
 file to prevent concurrent processes from mutating the same local repository.
 Each immutable object is made durable before a mutable ref can point to it.
+Projection maintenance runs after the canonical transition. A projection failure
+does not roll back a durable commit or ref; it remains visible as a failed
+derived state and is rebuilt at the next repository open.
 Control-file writes use a synced temporary file, atomic replacement, and
 directory sync. Before a ref transition can succeed, its canonical reflog path
 is atomically recorded in the durable `reflog-retention` inventory; a ref
