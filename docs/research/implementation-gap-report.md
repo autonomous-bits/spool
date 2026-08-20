@@ -38,7 +38,6 @@ system.
 
 | Priority | Gap | Research baseline | Current shortfall and consequence | Recommended next increment |
 | --- | --- | --- | --- | --- |
-| P1 | Query execution safety and observability | v2 §§7, 8.4, and 13 | Current typed reads use a common query executor, propagate cancellation and deadlines into repository scans, cap the complete public envelope, report completion metadata, and bind deterministic continuations to each request. | Apply the same contract to the planned typed search, filtering, traversal, and path surfaces as they are introduced. |
 | P1 | Search and agent context assembly | v2 §9; agent-query research | The private projection now supplies FTS5 candidates and schema-driven scalar indexes, but no public typed search/filter API, ranking response, snippets, provenance assembly, graph expansion, or one-call evidence context exists. | Add typed lexical search and metadata filters over the projection, then add bounded graph expansion and context assembly. Defer embeddings until lexical quality and packaging benchmarks justify them. |
 | P2 | Traversal and path capability | v2 §§8-10 | Impact provides an outgoing, all-edge BFS over a hypothetical delta. It has no direction/edge-type filters, arbitrary start nodes, stop labels, induced subgraph, shortest path, or explicit truncation. | Generalize traversal into typed `traverse` and `path` tools, retaining the existing deterministic BFS as a building block. |
 | P2 | Version-control reasoning completeness | v2 §10 | Diff and history now retain labels, edge types, and properties; history reports title/label/property changes. Diff still has only ID/title filters, and natural-key containment is declared but returns no matches. | Complete schema-aware diff/history/containment after schema policy lands. |
@@ -56,14 +55,12 @@ they should not be selected before the SQLite/FTS retrieval baseline and benchma
 
 ## Suggested delivery sequence
 
-1. **Query-safe retrieval:** add the shared query executor, deadline enforcement, completion
-   metadata, and equivalent response caps before serving more expensive retrieval.
-2. **Agent surface:** expose typed lexical search/filter, merge preview/conflicts, and task-level
+1. **Agent surface:** expose typed lexical search/filter, merge preview/conflicts, and task-level
    context assembly; add historical projection caching only after the selector contract is stable.
-3. **Storage maintenance evidence:** measure loose-object growth, pack size, compaction cost,
+2. **Storage maintenance evidence:** measure loose-object growth, pack size, compaction cost,
    and GC reclaim behavior before introducing delta compression, automatic maintenance, or
    remote pack transfer.
-4. **Evidence-led extensions:** benchmark the baseline, then decide whether vector retrieval,
+3. **Evidence-led extensions:** benchmark the baseline, then decide whether vector retrieval,
    graph-native projections, or remotes are warranted.
 
 ## Validation performed
