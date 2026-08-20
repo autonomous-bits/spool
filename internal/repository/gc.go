@@ -419,7 +419,7 @@ func writePackFile(file *os.File, packID PackID, objects map[ObjectID]verifiedOb
 	if err != nil {
 		return nil, fmt.Errorf("create zstd encoder: %w", err)
 	}
-	defer encoder.Close()
+	defer func() { _ = encoder.Close() }()
 	ids := make([]ObjectID, 0, len(objects))
 	for id := range objects {
 		ids = append(ids, id)

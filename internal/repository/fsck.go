@@ -647,8 +647,8 @@ func (c *fsckChecker) readLooseObject(id ObjectID) fsckLooseObject {
 		c.loose[id] = result
 		return result
 	}
-	result.fsckStoredObject.objectType = envelope.Type
-	result.fsckStoredObject.data = append([]byte(nil), envelope.Data...)
+	result.objectType = envelope.Type
+	result.data = append([]byte(nil), envelope.Data...)
 	result.valid = true
 	c.loose[id] = result
 	return result

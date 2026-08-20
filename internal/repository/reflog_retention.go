@@ -193,7 +193,7 @@ func (r *Repository) writeReflogRetentionInventoryLocked(paths []string) error {
 
 func (r *Repository) initializeReflogRetentionInventoryLocked(inventoryExpected bool) error {
 	inventoryPath := r.reflogRetentionInventoryPath()
-	paths, err := readReflogRetentionInventory(inventoryPath)
+	_, err := readReflogRetentionInventory(inventoryPath)
 	switch {
 	case err == nil:
 		if _, err := validateReflogRetentionInventory(r.reflogDirectory(), inventoryPath); err != nil {
@@ -209,7 +209,7 @@ func (r *Repository) initializeReflogRetentionInventoryLocked(inventoryExpected 
 		return err
 	}
 
-	paths, err = discoverReflogRetentionPaths(r.reflogDirectory())
+	paths, err := discoverReflogRetentionPaths(r.reflogDirectory())
 	if err != nil {
 		return err
 	}
