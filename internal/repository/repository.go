@@ -362,13 +362,13 @@ func (r *Repository) SwitchBranch(name string) (branch.SwitchResult, error) {
 	r.activeBranch = name
 	if err := r.writeHeadLocked(previousActiveBranch, name, "switch"); err != nil {
 		if durableWriteCommitted(err) {
-			return branch.SwitchResult{ActiveBranch: name}, fmt.Errorf("branch switch committed but projection maintenance failed: %w", errors.Join(err, r.ensureProjectionForActiveBranchLocked()))
+			return branch.SwitchResult{ActiveBranch: name}, fmt.Errorf("branch switch committed but directory sync failed: %w", errors.Join(err, r.ensureProjectionForActiveBranchLocked()))
 		}
 		r.activeBranch = previousActiveBranch
 		return branch.SwitchResult{}, err
 	}
 	if err := r.ensureProjectionForActiveBranchLocked(); err != nil {
-		return branch.SwitchResult{ActiveBranch: name}, err
+		return branch.SwitchResult{ActiveBranch: name}, fmt.Errorf("branch switch completed but projection maintenance failed: %w", err)
 	}
 	return branch.SwitchResult{ActiveBranch: name}, nil
 }
