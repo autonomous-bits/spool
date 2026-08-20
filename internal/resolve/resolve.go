@@ -207,7 +207,7 @@ func (r *Resolver) ValidateSchema(ctx context.Context, selector SnapshotSelector
 	}
 	return SchemaValidationResult{
 		Snapshot:   r.snapshotMetadata(selector.Branch, resolution.Commit, resolution.Snapshot),
-		Projection: r.projectionMetadataForCommit(selector.Branch, resolution.Commit),
+		Projection: r.projectionMetadataForCommitContext(ctx, selector.Branch, resolution.Commit),
 		Schema: SchemaMetadata{
 			Root: string(resolution.SchemaRoot), Version: resolution.Schema.Version, Permissive: resolution.Schema.Permissive,
 		},
@@ -224,16 +224,8 @@ func (r *Resolver) snapshotMetadata(branch string, commit, root repository.Objec
 	}
 }
 
-func (r *Resolver) projectionMetadata(branch string, resolution repository.Resolution) ProjectionMetadata {
-	return r.projectionMetadataContext(context.Background(), branch, resolution)
-}
-
 func (r *Resolver) projectionMetadataContext(ctx context.Context, branch string, resolution repository.Resolution) ProjectionMetadata {
 	return r.projectionMetadataForRootsContext(ctx, branch, resolution.Commit, resolution.NodeRoot)
-}
-
-func (r *Resolver) projectionMetadataForCommit(branch string, commit repository.ObjectID) ProjectionMetadata {
-	return r.projectionMetadataForCommitContext(context.Background(), branch, commit)
 }
 
 func (r *Resolver) projectionMetadataForCommitContext(ctx context.Context, branch string, commit repository.ObjectID) ProjectionMetadata {
@@ -245,10 +237,6 @@ func (r *Resolver) projectionMetadataForCommitContext(ctx context.Context, branc
 		return ProjectionMetadata{State: "unavailable"}
 	}
 	return r.projectionMetadataForRootsContext(ctx, branch, record.Commit, record.NodeRoot)
-}
-
-func (r *Resolver) projectionMetadataForRoots(branch string, commit, nodeRoot repository.ObjectID) ProjectionMetadata {
-	return r.projectionMetadataForRootsContext(context.Background(), branch, commit, nodeRoot)
 }
 
 func (r *Resolver) projectionMetadataForRootsContext(ctx context.Context, branch string, commit, nodeRoot repository.ObjectID) ProjectionMetadata {
@@ -265,10 +253,6 @@ func (r *Resolver) projectionMetadataForRootsContext(ctx context.Context, branch
 		State:         status.State,
 		SchemaVersion: fmt.Sprintf("v%d", status.SchemaVersion),
 	}
-}
-
-func (r *Resolver) snapshotMetadataForCommit(branch string, commit repository.ObjectID) (SnapshotMetadata, error) {
-	return r.snapshotMetadataForCommitContext(context.Background(), branch, commit)
 }
 
 func (r *Resolver) snapshotMetadataForCommitContext(ctx context.Context, branch string, commit repository.ObjectID) (SnapshotMetadata, error) {
@@ -613,12 +597,16 @@ func (t *ResolveTool) EDGDiff(ctx context.Context, request DiffRequest) (DiffRes
 }
 
 func queryCompletionTemplate(budget QueryBudget) QueryCompletionMetadata {
+	elapsedMs := budget.Timeout.Milliseconds()
+	if elapsedMs < 0 {
+		elapsedMs = 0
+	}
 	return QueryCompletionMetadata{
 		Complete:      false,
 		Truncated:     false,
 		TimedOut:      false,
 		Visited:       budget.MaxRows,
-		ElapsedMs:     0,
+		ElapsedMs:     elapsedMs,
 		ResponseBytes: budget.MaxResponseBytes,
 	}
 }

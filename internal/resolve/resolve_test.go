@@ -332,7 +332,9 @@ func TestEDGDiffBoundsPublicEnvelope(t *testing.T) {
 		t.Fatalf("Marshal baseline: %v", err)
 	}
 
-	rows, maxBytes := 3, len(encoded)
+	// Reserve room for the conservative elapsed-time metadata used while
+	// calculating the public payload budget.
+	rows, maxBytes := 3, len(encoded)+16
 	got, err := tool.EDGDiff(context.Background(), DiffRequest{
 		Base:   SnapshotSelector{Branch: "main", Commit: &baseCommit},
 		Target: SnapshotSelector{Branch: "main", Commit: &targetCommit},

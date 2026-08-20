@@ -35,7 +35,7 @@ type QueryCompletionMetadata struct {
 	Truncated bool `json:"truncated"`
 	// TimedOut reports whether the effective query deadline ended a paged query.
 	TimedOut bool `json:"timedOut"`
-	// Visited reports the number of result entries examined for this response.
+	// Visited reports the number of entries returned in this response page.
 	Visited int `json:"visited"`
 	// ElapsedMs is the non-negative elapsed execution duration in milliseconds.
 	ElapsedMs int64 `json:"elapsedMs"`

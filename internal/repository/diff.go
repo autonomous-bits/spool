@@ -224,11 +224,6 @@ func (r *Repository) requirePinnedCommitLocked(commit ObjectID) (ObjectID, error
 	return commit, nil
 }
 
-func (r *Repository) diffChangesLocked(base, target ObjectID, filter DiffFilter) []DiffEntry {
-	changes, _ := r.diffChangesContextLocked(context.Background(), base, target, filter)
-	return changes
-}
-
 func (r *Repository) diffChangesContextLocked(ctx context.Context, base, target ObjectID, filter DiffFilter) ([]DiffEntry, error) {
 	baseSnapshot, targetSnapshot := r.commits[base].Snapshot, r.commits[target].Snapshot
 	baseNodes, targetNodes := r.projections[r.snapshots[baseSnapshot].NodeRoot], r.projections[r.snapshots[targetSnapshot].NodeRoot]
@@ -244,11 +239,6 @@ func (r *Repository) diffChangesContextLocked(ctx context.Context, base, target 
 	return append(nodes, edges...), nil
 }
 
-func diffNodeChanges(base, target map[string]Node, filter DiffFilter) []DiffEntry {
-	entries, _ := diffNodeChangesContext(context.Background(), base, target, filter)
-	return entries
-}
-
 func diffNodeChangesContext(ctx context.Context, base, target map[string]Node, filter DiffFilter) ([]DiffEntry, error) {
 	return diffEntriesContext(ctx, base, target, filter.NodeIDs, filter.NodeTitleSubstr,
 		func(node Node) DiffEntry {
@@ -257,11 +247,6 @@ func diffNodeChangesContext(ctx context.Context, base, target map[string]Node, f
 		},
 		func(left, right Node) bool { return left.Equal(right) },
 	)
-}
-
-func diffEdgeChanges(base, target map[string]Edge, filter DiffFilter) []DiffEntry {
-	entries, _ := diffEdgeChangesContext(context.Background(), base, target, filter)
-	return entries
 }
 
 func diffEdgeChangesContext(ctx context.Context, base, target map[string]Edge, filter DiffFilter) ([]DiffEntry, error) {
@@ -275,11 +260,6 @@ func diffEdgeChangesContext(ctx context.Context, base, target map[string]Edge, f
 		},
 		func(left, right Edge) bool { return left.Equal(right) },
 	)
-}
-
-func diffEntries[T any](base, target map[string]T, ids []string, title string, entry func(T) DiffEntry, equal func(T, T) bool) []DiffEntry {
-	result, _ := diffEntriesContext(context.Background(), base, target, ids, title, entry, equal)
-	return result
 }
 
 func diffEntriesContext[T any](ctx context.Context, base, target map[string]T, ids []string, title string, entry func(T) DiffEntry, equal func(T, T) bool) ([]DiffEntry, error) {
@@ -361,11 +341,6 @@ func diffEntriesContext[T any](ctx context.Context, base, target map[string]T, i
 		result = append(result, item)
 	}
 	return result, nil
-}
-
-func (r *Repository) diffContextLocked(base, target ObjectID, changes []DiffEntry) []DiffContext {
-	result, _ := r.diffContextContextLocked(context.Background(), base, target, changes)
-	return result
 }
 
 func (r *Repository) diffContextContextLocked(ctx context.Context, base, target ObjectID, changes []DiffEntry) ([]DiffContext, error) {

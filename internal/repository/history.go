@@ -352,11 +352,6 @@ func (r *Repository) branchesContainingContext(ctx context.Context, selector Con
 	return result, nil
 }
 
-func (r *Repository) historyTraversalLocked(start ObjectID, allParents bool) []ObjectID {
-	result, _ := r.historyTraversalContextLocked(context.Background(), start, allParents)
-	return result
-}
-
 func (r *Repository) historyTraversalContextLocked(ctx context.Context, start ObjectID, allParents bool) ([]ObjectID, error) {
 	result, queue, seen := make([]ObjectID, 0), []ObjectID{start}, map[ObjectID]struct{}{}
 	for len(queue) > 0 {
@@ -407,11 +402,6 @@ func (r *Repository) historyEntriesContextLocked(ctx context.Context, start Obje
 		}
 	}
 	return entries, nil
-}
-
-func (r *Repository) historyEntryLocked(id ObjectID, entityID string) (HistoryEntry, bool) {
-	entry, affects, _ := r.historyEntryContextLocked(context.Background(), id, entityID)
-	return entry, affects
 }
 
 func (r *Repository) historyEntryContextLocked(ctx context.Context, id ObjectID, entityID string) (HistoryEntry, bool, error) {

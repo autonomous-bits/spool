@@ -287,11 +287,6 @@ func impactSeeds(operations []MutationOperation, edges map[string]Edge) []string
 	return result
 }
 
-func traverseImpact(nodes map[string]Node, edges map[string]Edge, seeds []string, maxDepth, maxVisited int) []ImpactEntry {
-	impacts, _, _ := traverseImpactContext(context.Background(), nodes, edges, seeds, maxDepth, maxVisited)
-	return impacts
-}
-
 func traverseImpactContext(ctx context.Context, nodes map[string]Node, edges map[string]Edge, seeds []string, maxDepth, maxVisited int) ([]ImpactEntry, bool, error) {
 	adjacency := make(map[string][]string)
 	for _, edge := range edges {
