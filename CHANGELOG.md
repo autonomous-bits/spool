@@ -8,6 +8,8 @@ generated from commits since the preceding `v*` tag. Commits prefixed with `docs
 
 ## [Unreleased]
 
+## [0.0.1] - 2026-08-20
+
 ### Added
 
 - Typed property-graph snapshots with labels, typed properties, schema policy,
