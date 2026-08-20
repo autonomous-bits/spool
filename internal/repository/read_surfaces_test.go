@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"testing"
@@ -171,6 +172,48 @@ func TestPinnedReadAPIsDoNotMoveBranches(t *testing.T) {
 	}
 	if current != head {
 		t.Fatalf("pinned read APIs moved main from %q to %q", head, current)
+	}
+}
+
+func TestPinnedReadContextAPIsHonorCancellation(t *testing.T) {
+	repo := NewSeedRepository()
+	head, err := repo.PinBranch("main")
+	if err != nil {
+		t.Fatalf("PinBranch: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	for _, read := range []struct {
+		name string
+		call func() error
+	}{
+		{"pin branch", func() error {
+			_, err := repo.PinBranchContext(ctx, "main")
+			return err
+		}},
+		{"explicit commit", func() error {
+			_, err := repo.ResolveExplicitCommitContext(ctx, "main", head, false)
+			return err
+		}},
+		{"snapshot record", func() error {
+			_, err := repo.PinnedSnapshotRecordContext(ctx, head)
+			return err
+		}},
+		{"resolve pinned", func() error {
+			_, err := repo.ResolvePinnedContext(ctx, head, SeedNodeID)
+			return err
+		}},
+		{"projection status", func() error {
+			_, err := repo.ProjectionStatusContext(ctx)
+			return err
+		}},
+	} {
+		t.Run(read.name, func(t *testing.T) {
+			if err := read.call(); !errors.Is(err, context.Canceled) {
+				t.Fatalf("error = %v, want context.Canceled", err)
+			}
+		})
 	}
 }
 

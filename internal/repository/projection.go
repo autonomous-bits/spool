@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -157,8 +158,20 @@ CREATE VIRTUAL TABLE IF NOT EXISTS node_fts USING fts5(
 
 // ProjectionStatus returns the cached projection metadata without exposing physical tables.
 func (r *Repository) ProjectionStatus() (ProjectionStatus, error) {
+	return r.ProjectionStatusContext(context.Background())
+}
+
+// ProjectionStatusContext returns cached projection metadata while honoring
+// cancellation around the repository read.
+func (r *Repository) ProjectionStatusContext(ctx context.Context) (ProjectionStatus, error) {
+	if err := ctx.Err(); err != nil {
+		return ProjectionStatus{}, err
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	if err := ctx.Err(); err != nil {
+		return ProjectionStatus{}, err
+	}
 	if err := r.ensureOpenLocked(); err != nil {
 		return ProjectionStatus{}, err
 	}

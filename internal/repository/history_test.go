@@ -1,7 +1,10 @@
 package repository
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -147,6 +150,7 @@ func TestHistoryRepresentsEdgeUpdatesAsRemovalAndAddition(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("stage graph: %v", err)
 	}
+
 	if _, err := repo.CommitStagedMutations("main"); err != nil {
 		t.Fatalf("commit graph: %v", err)
 	}
@@ -165,4 +169,147 @@ func TestHistoryRepresentsEdgeUpdatesAsRemovalAndAddition(t *testing.T) {
 	if len(history.Entries) != 3 || len(history.Entries[0].EdgeAdditions) != 1 || len(history.Entries[0].EdgeRemovals) != 1 {
 		t.Fatalf("history = %#v", history)
 	}
+}
+
+func TestHistoryAndContainmentPagesBindTokensAndBudgets(t *testing.T) {
+	repo := NewSeedRepository()
+	for _, title := range []string{"first", "second"} {
+		if _, err := repo.StageMutationBatch(StageMutationRequest{
+			Branch: "main", Operations: []MutationOperation{{Action: "update", Entity: "node", ID: SeedNodeID, Title: title}},
+		}); err != nil {
+			t.Fatalf("stage %q: %v", title, err)
+		}
+		if _, err := repo.CommitStagedMutations("main"); err != nil {
+			t.Fatalf("commit %q: %v", title, err)
+		}
+	}
+	request := HistoryRequest{
+		Commit: repo.branches["main"], EntityID: SeedNodeID, MaxRows: 1, MaxResponseBytes: 1 << 20,
+	}
+	first, err := repo.HistoryContext(context.Background(), request)
+	if err != nil {
+		t.Fatalf("HistoryContext first: %v", err)
+	}
+	if len(first.Entries) != 1 || first.ContinuationToken == "" {
+		t.Fatalf("first history page = %#v", first)
+	}
+	encoded, err := json.Marshal(first)
+	if err != nil || len(encoded) > request.MaxResponseBytes {
+		t.Fatalf("encoded history = %d bytes, error = %v", len(encoded), err)
+	}
+	request.ContinuationToken = first.ContinuationToken
+	second, err := repo.HistoryContext(context.Background(), request)
+	if err != nil || len(second.Entries) != 1 {
+		t.Fatalf("second history page/error = %#v/%v", second, err)
+	}
+	request.MaxRows = 2
+	if _, err := repo.HistoryContext(context.Background(), request); !errors.Is(err, ErrInvalidContinuation) {
+		t.Fatalf("mismatched history token error = %v", err)
+	}
+	if _, err := repo.HistoryContext(context.Background(), HistoryRequest{
+		Commit: repo.branches["main"], EntityID: SeedNodeID, MaxRows: 1, MaxResponseBytes: 1,
+	}); !errors.Is(err, ErrResponseBudgetTooSmall) {
+		t.Fatalf("small history budget error = %v", err)
+	}
+
+	if _, err := repo.CreateBranch("feature", branch.Source{Branch: "main"}); err != nil {
+		t.Fatalf("create branch: %v", err)
+	}
+	branchesRequest := BranchesContainingRequest{
+		Selector: ContainmentSelector{EntityID: SeedNodeID}, MaxRows: 1, MaxResponseBytes: 1 << 20,
+	}
+	branches, err := repo.BranchesContainingContext(context.Background(), branchesRequest)
+	if err != nil {
+		t.Fatalf("BranchesContainingContext first: %v", err)
+	}
+	if !reflect.DeepEqual(branches.Branches, []string{"feature"}) || branches.ContinuationToken == "" {
+		t.Fatalf("first branches page = %#v", branches)
+	}
+	branchesRequest.ContinuationToken = branches.ContinuationToken
+	branches, err = repo.BranchesContainingContext(context.Background(), branchesRequest)
+	if err != nil || !reflect.DeepEqual(branches.Branches, []string{"main"}) || branches.ContinuationToken != "" {
+		t.Fatalf("second branches page/error = %#v/%v", branches, err)
+	}
+	branchesRequest.MaxResponseBytes = 1
+	if _, err := repo.BranchesContainingContext(context.Background(), branchesRequest); !errors.Is(err, ErrInvalidContinuation) {
+		t.Fatalf("mismatched branch token error = %v", err)
+	}
+	if _, err := repo.BranchesContainingContext(context.Background(), BranchesContainingRequest{
+		Selector: ContainmentSelector{EntityID: SeedNodeID}, MaxRows: 1, MaxResponseBytes: 1,
+	}); !errors.Is(err, ErrResponseBudgetTooSmall) {
+		t.Fatalf("small branch budget error = %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := repo.HistoryContext(ctx, request); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled history error = %v", err)
+	}
+	if _, err := repo.BranchesContainingContext(ctx, branchesRequest); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled branches error = %v", err)
+	}
+}
+
+func TestHistoryContextReturnsPrefixWhenDeadlineFiresDuringTraversal(t *testing.T) {
+	repo := NewSeedRepository()
+	for i := 0; i < 32; i++ {
+		if _, err := repo.StageMutationBatch(StageMutationRequest{
+			Branch: "main",
+			Operations: []MutationOperation{{
+				Action: "update", Entity: "node", ID: SeedNodeID, Title: fmt.Sprintf("revision-%d", i),
+			}},
+		}); err != nil {
+			t.Fatalf("stage revision %d: %v", i, err)
+		}
+		if _, err := repo.CommitStagedMutations("main"); err != nil {
+			t.Fatalf("commit revision %d: %v", i, err)
+		}
+	}
+	request := HistoryRequest{
+		Commit: repo.branches["main"], EntityID: SeedNodeID, MaxRows: 64, MaxResponseBytes: 1 << 20,
+	}
+	result, err := repo.HistoryContext(&deadlineAfterChecks{remaining: 2}, request)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("HistoryContext deadline error = %v, want context.DeadlineExceeded", err)
+	}
+	if len(result.Entries) != 1 || result.ContinuationToken == "" {
+		t.Fatalf("deadline history prefix = %#v, want one entry with continuation", result)
+	}
+	request.ContinuationToken = result.ContinuationToken
+	continued, err := repo.HistoryContext(context.Background(), request)
+	if err != nil || len(continued.Entries) == 0 || continued.Entries[0].Commit == result.Entries[0].Commit {
+		t.Fatalf("continued deadline history = %#v/%v, want next entry", continued, err)
+	}
+}
+
+func TestBranchesContainingContextReturnsPrefixWhenDeadlineFiresDuringScan(t *testing.T) {
+	repo := NewSeedRepository()
+	names := []string{"a"}
+	for i := 0; i < 32; i++ {
+		names = append(names, fmt.Sprintf("b%02d", i))
+	}
+	for _, name := range names {
+		if _, err := repo.CreateBranch(name, branch.Source{Branch: "main"}); err != nil {
+			t.Fatalf("create %q: %v", name, err)
+		}
+	}
+	request := BranchesContainingRequest{
+		Selector: ContainmentSelector{EntityID: SeedNodeID}, MaxRows: 64, MaxResponseBytes: 1 << 20,
+	}
+	for checks := 1; checks < 64; checks++ {
+		result, err := repo.BranchesContainingContext(&deadlineAfterChecks{remaining: checks}, request)
+		if !errors.Is(err, context.DeadlineExceeded) || !reflect.DeepEqual(result.Branches, []string{"a"}) {
+			continue
+		}
+		if result.ContinuationToken == "" {
+			t.Fatalf("deadline containment prefix = %#v, want continuation", result)
+		}
+		request.ContinuationToken = result.ContinuationToken
+		continued, err := repo.BranchesContainingContext(context.Background(), request)
+		if err != nil || len(continued.Branches) == 0 || continued.Branches[0] != "b00" {
+			t.Fatalf("continued deadline containment = %#v/%v, want b00 prefix", continued, err)
+		}
+		return
+	}
+	t.Fatal("could not trigger a deterministic containment prefix during scanning")
 }

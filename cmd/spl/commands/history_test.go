@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/autonomous-bits/spool/internal/repository"
 	"github.com/autonomous-bits/spool/internal/repository/branch"
@@ -29,7 +30,10 @@ func TestHistoryCLIAndToolReturnEquivalentContracts(t *testing.T) {
 	var output bytes.Buffer
 	command := NewHistoryCommand(func() (*resolve.ResolveTool, error) { return tool, nil })
 	command.SetOut(&output)
-	command.SetArgs([]string{"--branch", "main", "--entity-id", repository.SeedNodeID})
+	command.SetArgs([]string{
+		"--branch", "main", "--entity-id", repository.SeedNodeID,
+		"--max-rows", "1", "--max-response-bytes", "5000", "--timeout", "1s",
+	})
 	if err := command.Execute(); err != nil {
 		t.Fatalf("execute history: %v", err)
 	}
@@ -37,14 +41,51 @@ func TestHistoryCLIAndToolReturnEquivalentContracts(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &cliResult); err != nil {
 		t.Fatalf("decode history: %v", err)
 	}
+	if cliResult.Completion.ResponseBytes != output.Len() {
+		t.Fatalf("CLI history bytes = %d, want responseBytes %d", output.Len(), cliResult.Completion.ResponseBytes)
+	}
+	rows, responseBytes := 1, 5000
+	timeout := time.Second
 	toolResult, err := tool.EDGHistory(context.Background(), resolve.HistoryRequest{
 		Selector: snapshotSelector("main", ""), EntityID: repository.SeedNodeID,
+		Budget: resolve.QueryBudgetRequest{MaxRows: &rows, MaxResponseBytes: &responseBytes, Timeout: &timeout},
 	})
 	if err != nil {
 		t.Fatalf("EDGHistory: %v", err)
 	}
-	if !reflect.DeepEqual(cliResult, toolResult) {
+	if !reflect.DeepEqual(comparableHistoryResult(cliResult), comparableHistoryResult(toolResult)) {
 		t.Fatalf("CLI history %#v, tool history %#v", cliResult, toolResult)
+	}
+	if cliResult.ContinuationToken == "" {
+		t.Fatal("CLI history did not return a continuation token")
+	}
+
+	output.Reset()
+	command = NewHistoryCommand(func() (*resolve.ResolveTool, error) { return tool, nil })
+	command.SetOut(&output)
+	command.SetArgs([]string{
+		"--branch", "main", "--entity-id", repository.SeedNodeID,
+		"--max-rows", "1", "--max-response-bytes", "5000", "--timeout", "1s",
+		"--continuation", cliResult.ContinuationToken,
+	})
+	if err := command.Execute(); err != nil {
+		t.Fatalf("execute continued history: %v", err)
+	}
+	var continuedCLIResult resolve.HistoryResult
+	if err := json.Unmarshal(output.Bytes(), &continuedCLIResult); err != nil {
+		t.Fatalf("decode continued history: %v", err)
+	}
+	toolResult, err = tool.EDGHistory(context.Background(), resolve.HistoryRequest{
+		Selector:          snapshotSelector("main", ""),
+		EntityID:          repository.SeedNodeID,
+		ContinuationToken: cliResult.ContinuationToken,
+		Budget:            resolve.QueryBudgetRequest{MaxRows: &rows, MaxResponseBytes: &responseBytes, Timeout: &timeout},
+	})
+	if err != nil {
+		t.Fatalf("continued EDGHistory: %v", err)
+	}
+	if !reflect.DeepEqual(comparableHistoryResult(continuedCLIResult), comparableHistoryResult(toolResult)) {
+		t.Fatalf("continued CLI history %#v, tool history %#v", continuedCLIResult, toolResult)
 	}
 }
 
@@ -90,23 +131,80 @@ func TestHistoryCLIAndToolRejectUnreachableCommitWithSameCategory(t *testing.T) 
 
 func TestBranchesContainingCLIAndToolReturnEquivalentContracts(t *testing.T) {
 	repo := repository.NewSeedRepository()
+	for _, name := range []string{"feature", "review"} {
+		if _, err := repo.CreateBranch(name, branch.Source{Branch: "main"}); err != nil {
+			t.Fatalf("create %s branch: %v", name, err)
+		}
+	}
 	tool := resolve.NewResolveTool(repo)
 	var output bytes.Buffer
 	command := NewBranchesContainingCommand(func() (*resolve.ResolveTool, error) { return tool, nil })
 	command.SetOut(&output)
-	command.SetArgs([]string{"--entity-id", repository.SeedNodeID})
+	command.SetArgs([]string{
+		"--entity-id", repository.SeedNodeID,
+		"--max-rows", "1", "--max-response-bytes", "5000", "--timeout", "1s",
+	})
 	if err := command.Execute(); err != nil {
 		t.Fatalf("execute containment: %v", err)
 	}
-	var cliResult repository.BranchContainmentResult
+	var cliResult resolve.BranchesContainingResult
 	if err := json.Unmarshal(output.Bytes(), &cliResult); err != nil {
 		t.Fatalf("decode containment: %v", err)
 	}
-	toolResult, err := tool.EDGBranchesContaining(context.Background(), resolve.ContainmentSelector{EntityID: repository.SeedNodeID})
+	if cliResult.Completion.ResponseBytes != output.Len() {
+		t.Fatalf("CLI containment bytes = %d, want responseBytes %d", output.Len(), cliResult.Completion.ResponseBytes)
+	}
+	rows, responseBytes := 1, 5000
+	timeout := time.Second
+	toolResult, err := tool.EDGBranchesContainingPage(context.Background(), resolve.BranchesContainingRequest{
+		Selector: resolve.ContainmentSelector{EntityID: repository.SeedNodeID},
+		Budget:   resolve.QueryBudgetRequest{MaxRows: &rows, MaxResponseBytes: &responseBytes, Timeout: &timeout},
+	})
 	if err != nil {
 		t.Fatalf("EDGBranchesContaining: %v", err)
 	}
-	if !reflect.DeepEqual(cliResult, toolResult) || !reflect.DeepEqual(cliResult.Branches, []string{"main"}) {
+	if !reflect.DeepEqual(comparableBranchesContainingResult(cliResult), comparableBranchesContainingResult(toolResult)) ||
+		!reflect.DeepEqual(cliResult.Branches, []string{"feature"}) {
 		t.Fatalf("CLI containment %#v, tool containment %#v", cliResult, toolResult)
 	}
+	if cliResult.ContinuationToken == "" {
+		t.Fatal("CLI containment did not return a continuation token")
+	}
+
+	output.Reset()
+	command = NewBranchesContainingCommand(func() (*resolve.ResolveTool, error) { return tool, nil })
+	command.SetOut(&output)
+	command.SetArgs([]string{
+		"--entity-id", repository.SeedNodeID,
+		"--max-rows", "1", "--max-response-bytes", "5000", "--timeout", "1s",
+		"--continuation", cliResult.ContinuationToken,
+	})
+	if err := command.Execute(); err != nil {
+		t.Fatalf("execute continued containment: %v", err)
+	}
+	var continuedCLIResult resolve.BranchesContainingResult
+	if err := json.Unmarshal(output.Bytes(), &continuedCLIResult); err != nil {
+		t.Fatalf("decode continued containment: %v", err)
+	}
+	toolResult, err = tool.EDGBranchesContainingPage(context.Background(), resolve.BranchesContainingRequest{
+		Selector:          resolve.ContainmentSelector{EntityID: repository.SeedNodeID},
+		ContinuationToken: cliResult.ContinuationToken,
+		Budget:            resolve.QueryBudgetRequest{MaxRows: &rows, MaxResponseBytes: &responseBytes, Timeout: &timeout},
+	})
+	if err != nil {
+		t.Fatalf("continued EDGBranchesContainingPage: %v", err)
+	}
+	if !reflect.DeepEqual(comparableBranchesContainingResult(continuedCLIResult), comparableBranchesContainingResult(toolResult)) {
+		t.Fatalf("continued CLI containment %#v, tool containment %#v", continuedCLIResult, toolResult)
+	}
+}
+
+func comparableHistoryResult(result resolve.HistoryResult) resolve.HistoryResult {
+	result.Completion = resolve.QueryCompletionMetadata{}
+	return result
+}
+
+func comparableBranchesContainingResult(result resolve.BranchesContainingResult) resolve.BranchesContainingResult {
+	result.Completion = resolve.QueryCompletionMetadata{}
+	return result
 }

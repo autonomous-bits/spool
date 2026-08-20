@@ -1,7 +1,9 @@
 package repository
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"math"
 	"reflect"
 	"testing"
@@ -123,6 +125,7 @@ func TestImpactSeedsBothEndpointsOfAnUpdatedEdge(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Impact: %v", err)
 	}
+
 	got := make([]string, len(result.Impacts))
 	for i, impact := range result.Impacts {
 		got[i] = impact.Node.ID
@@ -130,6 +133,96 @@ func TestImpactSeedsBothEndpointsOfAnUpdatedEdge(t *testing.T) {
 	want := []string{SeedNodeID, "node-2", "node-3", "node-4"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("updated-edge seeds = %#v, want %#v", got, want)
+	}
+}
+
+func TestImpactPagesResponsesAndReportsVisitedCapacity(t *testing.T) {
+	repo := impactRepository(t)
+	base, err := repo.PinBranch("main")
+	if err != nil {
+		t.Fatalf("PinBranch: %v", err)
+	}
+	request := ImpactRequest{
+		Commit: base, Delta: []MutationOperation{{Action: "update", Entity: "node", ID: SeedNodeID, Title: "Changed"}},
+		MaxDepth: 3, MaxVisited: 10, MaxRows: 1, MaxResponseBytes: 1 << 20,
+	}
+	first, err := repo.ImpactContext(context.Background(), request)
+	if err != nil {
+		t.Fatalf("ImpactContext first: %v", err)
+	}
+	if len(first.Impacts) != 1 || first.ContinuationToken == "" {
+		t.Fatalf("first impact page = %#v", first)
+	}
+	request.ContinuationToken = first.ContinuationToken
+	second, err := repo.ImpactContext(context.Background(), request)
+	if err != nil || len(second.Impacts) != 1 {
+		t.Fatalf("second impact page/error = %#v/%v", second, err)
+	}
+	request.MaxRows = 2
+	if _, err := repo.ImpactContext(context.Background(), request); !errors.Is(err, ErrInvalidContinuation) {
+		t.Fatalf("mismatched impact token error = %v", err)
+	}
+	if _, err := repo.ImpactContext(context.Background(), ImpactRequest{
+		Commit: base, Delta: request.Delta, MaxDepth: 3, MaxVisited: 10, MaxRows: 1, MaxResponseBytes: 1,
+	}); !errors.Is(err, ErrResponseBudgetTooSmall) {
+		t.Fatalf("small impact budget error = %v", err)
+	}
+	capacity, err := repo.ImpactContext(context.Background(), ImpactRequest{
+		Commit: base, Delta: request.Delta, MaxDepth: 3, MaxVisited: 2, MaxRows: 2, MaxResponseBytes: 1 << 20,
+	})
+	if err != nil || len(capacity.Impacts) != 2 || !capacity.CapacityExhausted {
+		t.Fatalf("capacity-limited impact/error = %#v/%v", capacity, err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := repo.ImpactContext(ctx, request); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled impact error = %v", err)
+	}
+}
+
+func TestImpactContextReturnsPrefixWhenDeadlineFiresDuringTraversal(t *testing.T) {
+	const length = 32
+	repo := NewSeedRepository()
+	operations := make([]MutationOperation, 0, 2*length)
+	previous := SeedNodeID
+	for i := 0; i < length; i++ {
+		nodeID := fmt.Sprintf("node-%02d", i)
+		operations = append(operations,
+			MutationOperation{Action: "add", Entity: "node", ID: nodeID, Title: nodeID},
+			MutationOperation{Action: "add", Entity: "edge", ID: fmt.Sprintf("edge-%02d", i), Source: previous, Target: nodeID},
+		)
+		previous = nodeID
+	}
+	if _, err := repo.StageMutationBatch(StageMutationRequest{Branch: "main", Operations: operations}); err != nil {
+		t.Fatalf("stage chain: %v", err)
+	}
+	if _, err := repo.CommitStagedMutations("main"); err != nil {
+		t.Fatalf("commit chain: %v", err)
+	}
+	head, err := repo.PinBranch("main")
+	if err != nil {
+		t.Fatalf("pin chain head: %v", err)
+	}
+
+	request := ImpactRequest{
+		Commit: head,
+		Delta: []MutationOperation{
+			{Action: "update", Entity: "node", ID: SeedNodeID, Title: "Changed"},
+		},
+		MaxDepth: length, MaxVisited: length + 1, MaxRows: length + 1, MaxResponseBytes: 1 << 20,
+	}
+	result, err := repo.ImpactContext(&deadlineAfterChecks{remaining: 4*length + 6}, request)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("ImpactContext deadline error = %v, want context.DeadlineExceeded", err)
+	}
+	if len(result.Impacts) != 1 || result.Impacts[0].Node.ID != SeedNodeID || result.ContinuationToken == "" {
+		t.Fatalf("deadline impact prefix = %#v, want seed prefix with continuation", result)
+	}
+	request.ContinuationToken = result.ContinuationToken
+	continued, err := repo.ImpactContext(context.Background(), request)
+	if err != nil || len(continued.Impacts) == 0 || continued.Impacts[0].Node.ID != "node-00" {
+		t.Fatalf("continued deadline impact = %#v/%v, want node-00 prefix", continued, err)
 	}
 }
 

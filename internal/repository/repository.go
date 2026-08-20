@@ -2,6 +2,7 @@
 package repository
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -404,8 +405,20 @@ func (r *Repository) resolveBranchSourceLocked(source branch.Source) (ObjectID, 
 // PinBranch returns the current immutable commit for a branch. The returned
 // ID remains valid if the branch moves after it has been pinned.
 func (r *Repository) PinBranch(name string) (ObjectID, error) {
+	return r.PinBranchContext(context.Background(), name)
+}
+
+// PinBranchContext returns a branch's current immutable commit while honoring
+// cancellation before and after acquiring the repository read lock.
+func (r *Repository) PinBranchContext(ctx context.Context, name string) (ObjectID, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	if err := r.ensureOpenLocked(); err != nil {
 		return "", err
 	}
@@ -418,8 +431,20 @@ func (r *Repository) PinBranch(name string) (ObjectID, error) {
 
 // ResolveExplicitCommit validates an explicit commit selector against a branch.
 func (r *Repository) ResolveExplicitCommit(branch string, requested ObjectID, allowDetached bool) (ObjectID, error) {
+	return r.ResolveExplicitCommitContext(context.Background(), branch, requested, allowDetached)
+}
+
+// ResolveExplicitCommitContext validates an explicit commit selector against a
+// branch while honoring cancellation during reachability traversal.
+func (r *Repository) ResolveExplicitCommitContext(ctx context.Context, branch string, requested ObjectID, allowDetached bool) (ObjectID, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	if err := r.ensureOpenLocked(); err != nil {
 		return "", err
 	}
@@ -437,6 +462,9 @@ func (r *Repository) ResolveExplicitCommit(branch string, requested ObjectID, al
 	seen := map[ObjectID]struct{}{head: {}}
 	queue := []ObjectID{head}
 	for len(queue) > 0 {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
 		current := queue[0]
 		queue = queue[1:]
 		if current == requested {
@@ -456,8 +484,20 @@ func (r *Repository) ResolveExplicitCommit(branch string, requested ObjectID, al
 // PinnedSnapshotRecord returns immutable snapshot roots for a previously pinned
 // commit.
 func (r *Repository) PinnedSnapshotRecord(commitID ObjectID) (PinnedSnapshotRecord, error) {
+	return r.PinnedSnapshotRecordContext(context.Background(), commitID)
+}
+
+// PinnedSnapshotRecordContext returns immutable snapshot roots while honoring
+// cancellation around the repository lookup.
+func (r *Repository) PinnedSnapshotRecordContext(ctx context.Context, commitID ObjectID) (PinnedSnapshotRecord, error) {
+	if err := ctx.Err(); err != nil {
+		return PinnedSnapshotRecord{}, err
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	if err := ctx.Err(); err != nil {
+		return PinnedSnapshotRecord{}, err
+	}
 	if err := r.ensureOpenLocked(); err != nil {
 		return PinnedSnapshotRecord{}, err
 	}
@@ -476,8 +516,20 @@ func (r *Repository) PinnedSnapshotRecord(commitID ObjectID) (PinnedSnapshotReco
 
 // ResolvePinned reads a node from a previously pinned commit.
 func (r *Repository) ResolvePinned(commitID ObjectID, nodeID string) (Resolution, error) {
+	return r.ResolvePinnedContext(context.Background(), commitID, nodeID)
+}
+
+// ResolvePinnedContext reads a node from a previously pinned commit while
+// honoring cancellation during normalization and schema lookup.
+func (r *Repository) ResolvePinnedContext(ctx context.Context, commitID ObjectID, nodeID string) (Resolution, error) {
+	if err := ctx.Err(); err != nil {
+		return Resolution{}, err
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	if err := ctx.Err(); err != nil {
+		return Resolution{}, err
+	}
 	if err := r.ensureOpenLocked(); err != nil {
 		return Resolution{}, err
 	}
@@ -492,6 +544,9 @@ func (r *Repository) ResolvePinned(commitID ObjectID, nodeID string) (Resolution
 	}
 	node, err := node.Normalize()
 	if err != nil {
+		return Resolution{}, err
+	}
+	if err := ctx.Err(); err != nil {
 		return Resolution{}, err
 	}
 	schema, err := r.schemaSnapshotLocked(snapshot.SchemaRoot)

@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"errors"
 	"sort"
 )
@@ -23,6 +24,14 @@ type ImpactRequest struct {
 	MaxDepth int `json:"maxDepth"`
 	// MaxVisited limits nodes traversed and returned.
 	MaxVisited int `json:"maxVisited"`
+	// MaxRows limits impacts in one page. Zero returns up to MaxVisited, preserving
+	// legacy behavior.
+	MaxRows int `json:"maxRows,omitempty"`
+	// MaxResponseBytes limits the JSON-encoded ImpactResult payload. Zero preserves
+	// legacy unbounded behavior; adapters must reserve envelope overhead.
+	MaxResponseBytes int `json:"maxResponseBytes,omitempty"`
+	// ContinuationToken resumes a matching impact query.
+	ContinuationToken string `json:"continuationToken,omitempty"`
 }
 
 // ImpactEntry identifies an impacted node and its canonical supporting path.
@@ -43,6 +52,10 @@ type ImpactResult struct {
 	Snapshot ObjectID `json:"snapshot"`
 	// Impacts contains canonically ordered impacted nodes.
 	Impacts []ImpactEntry `json:"impacts"`
+	// ContinuationToken resumes remaining impacts with the same request.
+	ContinuationToken string `json:"continuationToken,omitempty"`
+	// CapacityExhausted reports that MaxVisited prevented further traversal.
+	CapacityExhausted bool `json:"capacityExhausted,omitempty"`
 }
 
 // Impact applies Delta in memory and analyzes its outgoing dependency impact.
@@ -50,6 +63,15 @@ type ImpactResult struct {
 // validators, every edge is an outgoing unit-weight dependency, all nodes have
 // zero criticality, and there are no validators to evaluate.
 func (r *Repository) Impact(request ImpactRequest) (ImpactResult, error) {
+	return r.ImpactContext(context.Background(), request)
+}
+
+// ImpactContext applies Delta in memory, honors ctx while traversing, and returns
+// a deterministic page. MaxResponseBytes applies only to ImpactResult.
+func (r *Repository) ImpactContext(ctx context.Context, request ImpactRequest) (ImpactResult, error) {
+	if err := ctx.Err(); err != nil {
+		return ImpactResult{}, err
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if err := r.ensureOpenLocked(); err != nil {
@@ -58,7 +80,7 @@ func (r *Repository) Impact(request ImpactRequest) (ImpactResult, error) {
 	if len(request.Delta) == 0 {
 		return ImpactResult{}, ErrMissingImpactDelta
 	}
-	if request.MaxDepth < 0 || request.MaxVisited <= 0 {
+	if request.MaxDepth < 0 || request.MaxVisited <= 0 || request.MaxRows < 0 || request.MaxResponseBytes < 0 {
 		return ImpactResult{}, ErrInvalidImpactBudget
 	}
 	commitID, err := r.requirePinnedCommitLocked(request.Commit)
@@ -67,7 +89,14 @@ func (r *Repository) Impact(request ImpactRequest) (ImpactResult, error) {
 	}
 	baseSnapshot := r.commits[commitID].Snapshot
 	snapshot := r.snapshots[baseSnapshot]
-	nodes, edges := cloneNodes(r.projections[snapshot.NodeRoot]), cloneEdges(r.edgeProjections[baseSnapshot])
+	nodes, err := cloneImpactNodes(ctx, r.projections[snapshot.NodeRoot])
+	if err != nil {
+		return ImpactResult{}, err
+	}
+	edges, err := cloneImpactEdges(ctx, r.edgeProjections[baseSnapshot])
+	if err != nil {
+		return ImpactResult{}, err
+	}
 	delta, err := normalizeMutationOperations(request.Delta)
 	if err != nil {
 		return ImpactResult{}, err
@@ -75,14 +104,111 @@ func (r *Repository) Impact(request ImpactRequest) (ImpactResult, error) {
 	if err := r.validateMutationBatchLocked(commitID, delta); err != nil {
 		return ImpactResult{}, err
 	}
+	if err := ctx.Err(); err != nil {
+		return ImpactResult{}, err
+	}
 	seeds := impactSeeds(delta, edges)
 	applyMutationOperations(nodes, edges, delta)
+	impacts, exhausted, traversalErr := traverseImpactContext(ctx, nodes, edges, seeds, request.MaxDepth, request.MaxVisited)
+	if traversalErr != nil && !errors.Is(traversalErr, context.DeadlineExceeded) {
+		return ImpactResult{}, traversalErr
+	}
+	fingerprint := queryFingerprint(struct {
+		Commit           ObjectID
+		Delta            []MutationOperation
+		MaxDepth         int
+		MaxVisited       int
+		MaxRows          int
+		MaxResponseBytes int
+	}{commitID, delta, request.MaxDepth, request.MaxVisited, request.MaxRows, request.MaxResponseBytes})
+	offset, err := decodeContinuation(request.ContinuationToken, fingerprint)
+	if err != nil {
+		return ImpactResult{}, err
+	}
+	if offset > len(impacts) {
+		return ImpactResult{}, ErrInvalidContinuation
+	}
+	timedOut := errors.Is(traversalErr, context.DeadlineExceeded) && len(impacts) > offset
+	if traversalErr != nil && !timedOut {
+		return ImpactResult{}, traversalErr
+	}
+	result := ImpactResult{
+		Commit:            commitID,
+		Snapshot:          baseSnapshot,
+		Impacts:           make([]ImpactEntry, 0),
+		CapacityExhausted: exhausted,
+	}
+	if !resultFits(result, request.MaxResponseBytes) {
+		return ImpactResult{}, ErrResponseBudgetTooSmall
+	}
+	limit := request.MaxVisited
+	if request.MaxRows > 0 && request.MaxRows < limit {
+		limit = request.MaxRows
+	}
+	next := offset
+	pageCtx := ctx
+	if timedOut {
+		pageCtx = context.Background()
+	}
+	for next < len(impacts) && len(result.Impacts) < limit {
+		if err := pageCtx.Err(); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) && next > offset {
+				result.ContinuationToken = encodeContinuation(fingerprint, next)
+				return result, err
+			}
+			return ImpactResult{}, err
+		}
+		candidate := result
+		candidate.Impacts = append(append([]ImpactEntry(nil), result.Impacts...), impacts[next])
+		candidate.ContinuationToken = encodeContinuation(fingerprint, next+1)
+		if !resultFits(candidate, request.MaxResponseBytes) {
+			break
+		}
+		if next+1 == len(impacts) {
+			candidate.ContinuationToken = ""
+		}
+		result = candidate
+		next++
+	}
+	if next < len(impacts) {
+		if next == offset {
+			return ImpactResult{}, ErrResponseBudgetTooSmall
+		}
+		result.ContinuationToken = encodeContinuation(fingerprint, next)
+		if !resultFits(result, request.MaxResponseBytes) {
+			return ImpactResult{}, ErrResponseBudgetTooSmall
+		}
+	}
+	if timedOut {
+		result.ContinuationToken = encodeContinuation(fingerprint, next)
+		if !resultFits(result, request.MaxResponseBytes) {
+			return ImpactResult{}, ErrResponseBudgetTooSmall
+		}
+		return result, traversalErr
+	}
+	return result, nil
+}
 
-	return ImpactResult{
-		Commit:   commitID,
-		Snapshot: baseSnapshot,
-		Impacts:  traverseImpact(nodes, edges, seeds, request.MaxDepth, request.MaxVisited),
-	}, nil
+func cloneImpactNodes(ctx context.Context, source map[string]Node) (map[string]Node, error) {
+	result := make(map[string]Node, len(source))
+	for id, node := range source {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		result[id] = node.clone()
+	}
+	return result, nil
+}
+
+func cloneImpactEdges(ctx context.Context, source map[string]Edge) (map[string]Edge, error) {
+	result := make(map[string]Edge, len(source))
+	for id, edge := range source {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		result[id] = edge.clone()
+	}
+	return result, nil
 }
 
 func applyMutationOperations(nodes map[string]Node, edges map[string]Edge, operations []MutationOperation) {
@@ -161,9 +287,12 @@ func impactSeeds(operations []MutationOperation, edges map[string]Edge) []string
 	return result
 }
 
-func traverseImpact(nodes map[string]Node, edges map[string]Edge, seeds []string, maxDepth, maxVisited int) []ImpactEntry {
+func traverseImpactContext(ctx context.Context, nodes map[string]Node, edges map[string]Edge, seeds []string, maxDepth, maxVisited int) ([]ImpactEntry, bool, error) {
 	adjacency := make(map[string][]string)
 	for _, edge := range edges {
+		if err := ctx.Err(); err != nil {
+			return nil, false, err
+		}
 		if _, sourceExists := nodes[edge.Source]; !sourceExists {
 			continue
 		}
@@ -173,6 +302,9 @@ func traverseImpact(nodes map[string]Node, edges map[string]Edge, seeds []string
 		adjacency[edge.Source] = append(adjacency[edge.Source], edge.Target)
 	}
 	for source := range adjacency {
+		if err := ctx.Err(); err != nil {
+			return nil, false, err
+		}
 		sort.Strings(adjacency[source])
 	}
 
@@ -182,30 +314,51 @@ func traverseImpact(nodes map[string]Node, edges map[string]Edge, seeds []string
 	}
 	queue := make([]visit, 0, len(seeds))
 	seen := make(map[string]struct{})
+	exhausted := false
 	for _, id := range seeds {
+		if err := ctx.Err(); err != nil {
+			return nil, false, err
+		}
 		if _, exists := nodes[id]; exists && len(seen) < maxVisited {
 			seen[id] = struct{}{}
 			queue = append(queue, visit{id: id, path: []string{id}})
+		} else if _, exists := nodes[id]; exists {
+			exhausted = true
 		}
 	}
 	impacts := make([]ImpactEntry, 0, len(queue))
 	for len(queue) > 0 {
-		current := queue[0]
-		queue = queue[1:]
-		impacts = append(impacts, ImpactEntry{
-			Node: nodes[current.id].clone(), Path: current.path, Distance: len(current.path) - 1,
-		})
-		if len(current.path)-1 == maxDepth {
-			continue
-		}
-		for _, target := range adjacency[current.id] {
-			if _, visited := seen[target]; visited || len(seen) >= maxVisited {
+		nextQueue := make([]visit, 0)
+		levelImpacts := make([]ImpactEntry, 0, len(queue))
+		for _, current := range queue {
+			if err := ctx.Err(); err != nil {
+				return impacts, exhausted, err
+			}
+			levelImpacts = append(levelImpacts, ImpactEntry{
+				Node: nodes[current.id].clone(), Path: current.path, Distance: len(current.path) - 1,
+			})
+			if len(current.path)-1 == maxDepth {
 				continue
 			}
-			seen[target] = struct{}{}
-			path := append(append([]string(nil), current.path...), target)
-			queue = append(queue, visit{id: target, path: path})
+			for _, target := range adjacency[current.id] {
+				if err := ctx.Err(); err != nil {
+					return impacts, exhausted, err
+				}
+				if _, visited := seen[target]; visited {
+					continue
+				}
+				if len(seen) >= maxVisited {
+					exhausted = true
+					continue
+				}
+				seen[target] = struct{}{}
+				path := append(append([]string(nil), current.path...), target)
+				nextQueue = append(nextQueue, visit{id: target, path: path})
+			}
 		}
+		sort.Slice(levelImpacts, func(i, j int) bool { return levelImpacts[i].Node.ID < levelImpacts[j].Node.ID })
+		impacts = append(impacts, levelImpacts...)
+		queue = nextQueue
 	}
 	sort.Slice(impacts, func(i, j int) bool {
 		if impacts[i].Distance != impacts[j].Distance {
@@ -213,5 +366,5 @@ func traverseImpact(nodes map[string]Node, edges map[string]Edge, seeds []string
 		}
 		return impacts[i].Node.ID < impacts[j].Node.ID
 	})
-	return impacts
+	return impacts, exhausted, nil
 }

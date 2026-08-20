@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/autonomous-bits/spool/internal/repository"
 	"github.com/autonomous-bits/spool/internal/repository/branch"
@@ -22,8 +23,11 @@ func TestDiffCLIAndMCPReturnEquivalentPayloads(t *testing.T) {
 	}
 
 	if _, err := repo.StageMutationBatch(repository.StageMutationRequest{
-		Branch:     "main",
-		Operations: []repository.MutationOperation{{Action: "add", Entity: "node", ID: "node-2", Title: "Second node"}},
+		Branch: "main",
+		Operations: []repository.MutationOperation{
+			{Action: "add", Entity: "node", ID: "node-2", Title: "Second node"},
+			{Action: "add", Entity: "node", ID: "node-3", Title: "Third node"},
+		},
 	}); err != nil {
 		t.Fatalf("stage: %v", err)
 	}
@@ -39,7 +43,7 @@ func TestDiffCLIAndMCPReturnEquivalentPayloads(t *testing.T) {
 	command.SetArgs([]string{
 		"--base-branch", "main", "--base-commit", string(base),
 		"--target-branch", "main", "--target-commit", string(target.Commit),
-		"--node-id", "node-2", "--max-rows", "10",
+		"--max-rows", "1", "--max-response-bytes", "5000", "--timeout", "1s",
 	})
 	if err := command.Execute(); err != nil {
 		t.Fatalf("execute CLI: %v", err)
@@ -48,18 +52,57 @@ func TestDiffCLIAndMCPReturnEquivalentPayloads(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &cliResult); err != nil {
 		t.Fatalf("decode CLI result: %v", err)
 	}
-	rows := 10
+	if cliResult.Completion.ResponseBytes != output.Len() {
+		t.Fatalf("CLI diff bytes = %d, want responseBytes %d", output.Len(), cliResult.Completion.ResponseBytes)
+	}
+	rows, responseBytes := 1, 5000
+	timeout := time.Second
 	mcpResult, err := tool.EDGDiff(context.Background(), resolve.DiffRequest{
 		Base: snapshotSelector("main", string(base)), Target: snapshotSelector("main", string(target.Commit)),
-		Filter: repository.DiffFilter{NodeIDs: []string{"node-2"}},
-		Budget: resolve.QueryBudgetRequest{MaxRows: &rows},
+		Budget: resolve.QueryBudgetRequest{MaxRows: &rows, MaxResponseBytes: &responseBytes, Timeout: &timeout},
 	})
 	if err != nil {
 		t.Fatalf("EDGDiff: %v", err)
 	}
-	if !reflect.DeepEqual(cliResult, mcpResult) {
+	if !reflect.DeepEqual(comparableDiffResult(cliResult), comparableDiffResult(mcpResult)) {
 		t.Fatalf("CLI result %#v does not match MCP result %#v", cliResult, mcpResult)
 	}
+	if cliResult.ContinuationToken == "" {
+		t.Fatal("CLI diff did not return a continuation token")
+	}
+
+	output.Reset()
+	command = NewDiffCommand(func() (*resolve.ResolveTool, error) { return tool, nil })
+	command.SetOut(&output)
+	command.SetArgs([]string{
+		"--base-branch", "main", "--base-commit", string(base),
+		"--target-branch", "main", "--target-commit", string(target.Commit),
+		"--max-rows", "1", "--max-response-bytes", "5000", "--timeout", "1s",
+		"--continuation", cliResult.ContinuationToken,
+	})
+	if err := command.Execute(); err != nil {
+		t.Fatalf("execute continued CLI diff: %v", err)
+	}
+	var continuedCLIResult resolve.DiffResult
+	if err := json.Unmarshal(output.Bytes(), &continuedCLIResult); err != nil {
+		t.Fatalf("decode continued CLI result: %v", err)
+	}
+	mcpResult, err = tool.EDGDiff(context.Background(), resolve.DiffRequest{
+		Base: snapshotSelector("main", string(base)), Target: snapshotSelector("main", string(target.Commit)),
+		ContinuationToken: cliResult.ContinuationToken,
+		Budget:            resolve.QueryBudgetRequest{MaxRows: &rows, MaxResponseBytes: &responseBytes, Timeout: &timeout},
+	})
+	if err != nil {
+		t.Fatalf("continued EDGDiff: %v", err)
+	}
+	if !reflect.DeepEqual(comparableDiffResult(continuedCLIResult), comparableDiffResult(mcpResult)) {
+		t.Fatalf("continued CLI result %#v does not match MCP result %#v", continuedCLIResult, mcpResult)
+	}
+}
+
+func comparableDiffResult(result resolve.DiffResult) resolve.DiffResult {
+	result.Completion = resolve.QueryCompletionMetadata{}
+	return result
 }
 
 func TestDiffCLIAndMCPReturnEquivalentErrors(t *testing.T) {

@@ -332,7 +332,9 @@ func TestEDGDiffBoundsPublicEnvelope(t *testing.T) {
 		t.Fatalf("Marshal baseline: %v", err)
 	}
 
-	rows, maxBytes := 3, len(encoded)
+	// Reserve room for the conservative elapsed-time metadata used while
+	// calculating the public payload budget.
+	rows, maxBytes := 3, len(encoded)+16
 	got, err := tool.EDGDiff(context.Background(), DiffRequest{
 		Base:   SnapshotSelector{Branch: "main", Commit: &baseCommit},
 		Target: SnapshotSelector{Branch: "main", Commit: &targetCommit},
@@ -350,6 +352,10 @@ func TestEDGDiffBoundsPublicEnvelope(t *testing.T) {
 	}
 	if len(got.Changes) != 1 || got.ContinuationToken == "" {
 		t.Fatalf("bounded result = %#v, want one change and continuation", got)
+	}
+	if !got.Completion.Truncated || got.Completion.Complete || got.Completion.TimedOut ||
+		got.Completion.Visited != len(got.Changes)+len(got.Context) || got.Completion.ResponseBytes != len(encoded) {
+		t.Fatalf("bounded completion = %#v", got.Completion)
 	}
 	next, err := tool.EDGDiff(context.Background(), DiffRequest{
 		Base:              SnapshotSelector{Branch: "main", Commit: &baseCommit},
@@ -442,6 +448,230 @@ func TestEDGHistoryReturnsSnapshotAndProjectionMetadata(t *testing.T) {
 		result.Snapshot.Root == "" || result.Projection.State != "unavailable" ||
 		result.Projection.NodeRoot != "" {
 		t.Fatalf("history envelope = %#v", result)
+	}
+}
+
+func TestQueryEnvelopesReportCompletionAndFullResponseBytes(t *testing.T) {
+	repo := repository.NewSeedRepository()
+	base, err := repo.PinBranch("main")
+	if err != nil {
+		t.Fatalf("PinBranch base: %v", err)
+	}
+	if _, err := repo.StageMutationBatch(repository.StageMutationRequest{
+		Branch: "main",
+		Operations: []repository.MutationOperation{
+			{Action: "add", Entity: "node", ID: "node-2", Title: "Second"},
+			{Action: "add", Entity: "edge", ID: "edge-1", Source: repository.SeedNodeID, Target: "node-2"},
+		},
+	}); err != nil {
+		t.Fatalf("StageMutationBatch: %v", err)
+	}
+	target, err := repo.CommitStagedMutations("main")
+	if err != nil {
+		t.Fatalf("CommitStagedMutations: %v", err)
+	}
+	if _, err := repo.CreateBranch("feature", branch.Source{Branch: "main"}); err != nil {
+		t.Fatalf("CreateBranch: %v", err)
+	}
+	tool := NewResolveTool(repo)
+	baseCommit, targetCommit := string(base), string(target.Commit)
+
+	resolved, err := tool.EDGResolve(context.Background(), ResolveRequest{
+		Selector: SnapshotSelector{Branch: "main"}, NodeID: repository.SeedNodeID,
+	})
+	if err != nil {
+		t.Fatalf("EDGResolve: %v", err)
+	}
+	diff, err := tool.EDGDiff(context.Background(), DiffRequest{
+		Base:   SnapshotSelector{Branch: "main", Commit: &baseCommit},
+		Target: SnapshotSelector{Branch: "main", Commit: &targetCommit},
+	})
+	if err != nil {
+		t.Fatalf("EDGDiff: %v", err)
+	}
+	history, err := tool.EDGHistory(context.Background(), HistoryRequest{
+		Selector: SnapshotSelector{Branch: "main"}, EntityID: repository.SeedNodeID,
+	})
+	if err != nil {
+		t.Fatalf("EDGHistory: %v", err)
+	}
+	branches, err := tool.EDGBranchesContaining(context.Background(), ContainmentSelector{EntityID: repository.SeedNodeID})
+	if err != nil {
+		t.Fatalf("EDGBranchesContaining: %v", err)
+	}
+	impact, err := tool.EDGImpact(context.Background(), ImpactRequest{
+		Selector: SnapshotSelector{Branch: "main"},
+		Request: repository.ImpactRequest{Delta: []repository.MutationOperation{
+			{Action: "update", Entity: "node", ID: repository.SeedNodeID, Title: "Changed"},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("EDGImpact: %v", err)
+	}
+
+	for _, query := range []struct {
+		name       string
+		envelope   any
+		budget     QueryBudget
+		completion QueryCompletionMetadata
+		visited    int
+	}{
+		{"resolve", resolved, resolved.Budget, resolved.Completion, 1},
+		{"diff", diff, diff.Budget, diff.Completion, len(diff.Changes) + len(diff.Context)},
+		{"history", history, history.Budget, history.Completion, len(history.Entries)},
+		{"branches", branches, branches.Budget, branches.Completion, len(branches.Branches)},
+		{"impact", impact, impact.Budget, impact.Completion, len(impact.Impacts)},
+	} {
+		t.Run(query.name, func(t *testing.T) {
+			encoded, err := json.Marshal(query.envelope)
+			if err != nil {
+				t.Fatalf("Marshal: %v", err)
+			}
+			if query.completion.ResponseBytes != len(encoded) {
+				t.Fatalf("response bytes = %d, want %d", query.completion.ResponseBytes, len(encoded))
+			}
+			if query.completion.Visited != query.visited || query.completion.Truncated ||
+				query.completion.TimedOut || !query.completion.Complete {
+				t.Fatalf("completion = %#v, visited = %d", query.completion, query.visited)
+			}
+			if query.budget != DefaultQueryBudget() {
+				t.Fatalf("budget = %#v, want %#v", query.budget, DefaultQueryBudget())
+			}
+			var object map[string]json.RawMessage
+			if err := json.Unmarshal(encoded, &object); err != nil {
+				t.Fatalf("Unmarshal: %v", err)
+			}
+			for _, field := range []string{"budget", "completion"} {
+				if _, ok := object[field]; !ok {
+					t.Errorf("JSON omitted %q: %s", field, encoded)
+				}
+			}
+		})
+	}
+}
+
+func TestPagedQueryCompletionReportsRowAndVisitedTruncation(t *testing.T) {
+	repo := repository.NewSeedRepository()
+	base, err := repo.PinBranch("main")
+	if err != nil {
+		t.Fatalf("PinBranch base: %v", err)
+	}
+	if _, err := repo.StageMutationBatch(repository.StageMutationRequest{
+		Branch: "main",
+		Operations: []repository.MutationOperation{
+			{Action: "add", Entity: "node", ID: "node-2", Title: "Second"},
+			{Action: "add", Entity: "node", ID: "node-3", Title: "Third"},
+			{Action: "add", Entity: "edge", ID: "edge-1", Source: repository.SeedNodeID, Target: "node-2"},
+			{Action: "add", Entity: "edge", ID: "edge-2", Source: "node-2", Target: "node-3"},
+		},
+	}); err != nil {
+		t.Fatalf("StageMutationBatch: %v", err)
+	}
+	target, err := repo.CommitStagedMutations("main")
+	if err != nil {
+		t.Fatalf("CommitStagedMutations: %v", err)
+	}
+	if _, err := repo.CreateBranch("feature", branch.Source{Branch: "main"}); err != nil {
+		t.Fatalf("CreateBranch: %v", err)
+	}
+	one, generous := 1, 1<<20
+	tool := NewResolveTool(repo)
+	baseCommit, targetCommit := string(base), string(target.Commit)
+
+	diff, err := tool.EDGDiff(context.Background(), DiffRequest{
+		Base:   SnapshotSelector{Branch: "main", Commit: &baseCommit},
+		Target: SnapshotSelector{Branch: "main", Commit: &targetCommit},
+		Budget: QueryBudgetRequest{MaxRows: &one, MaxResponseBytes: &generous},
+	})
+	if err != nil {
+		t.Fatalf("EDGDiff: %v", err)
+	}
+	if !diff.Completion.Truncated || diff.Completion.Complete || diff.ContinuationToken == "" || diff.Completion.Visited != 1 {
+		t.Fatalf("diff completion = %#v, result = %#v", diff.Completion, diff.DiffResult)
+	}
+
+	contextRepo := repository.NewSeedRepository()
+	if _, err := contextRepo.StageMutationBatch(repository.StageMutationRequest{
+		Branch: "main",
+		Operations: []repository.MutationOperation{
+			{Action: "add", Entity: "node", ID: "node-2", Title: "Second"},
+			{Action: "add", Entity: "edge", ID: "edge-1", Source: repository.SeedNodeID, Target: "node-2"},
+		},
+	}); err != nil {
+		t.Fatalf("stage context graph: %v", err)
+	}
+	if _, err := contextRepo.CommitStagedMutations("main"); err != nil {
+		t.Fatalf("commit context graph: %v", err)
+	}
+	contextBase, err := contextRepo.PinBranch("main")
+	if err != nil {
+		t.Fatalf("pin context base: %v", err)
+	}
+	if _, err := contextRepo.StageMutationBatch(repository.StageMutationRequest{
+		Branch: "main",
+		Operations: []repository.MutationOperation{
+			{Action: "update", Entity: "node", ID: repository.SeedNodeID, Title: "Updated"},
+		},
+	}); err != nil {
+		t.Fatalf("stage context change: %v", err)
+	}
+	contextTarget, err := contextRepo.CommitStagedMutations("main")
+	if err != nil {
+		t.Fatalf("commit context change: %v", err)
+	}
+	contextBaseCommit, contextTargetCommit := string(contextBase), string(contextTarget.Commit)
+	contextPage, err := NewResolveTool(contextRepo).EDGDiff(context.Background(), DiffRequest{
+		Base:          SnapshotSelector{Branch: "main", Commit: &contextBaseCommit},
+		Target:        SnapshotSelector{Branch: "main", Commit: &contextTargetCommit},
+		Filter:        repository.DiffFilter{NodeIDs: []string{repository.SeedNodeID}},
+		IncludeOneHop: true,
+		Budget:        QueryBudgetRequest{MaxRows: &one, MaxResponseBytes: &generous},
+	})
+	if err != nil {
+		t.Fatalf("EDGDiff one-hop context: %v", err)
+	}
+	if !contextPage.ContextTruncated || contextPage.ContinuationToken != "" ||
+		!contextPage.Completion.Truncated || contextPage.Completion.Complete {
+		t.Fatalf("context page = %#v", contextPage)
+	}
+
+	branches, err := tool.EDGBranchesContainingPage(context.Background(), BranchesContainingRequest{
+		Selector: ContainmentSelector{EntityID: repository.SeedNodeID},
+		Budget:   QueryBudgetRequest{MaxRows: &one, MaxResponseBytes: &generous},
+	})
+	if err != nil {
+		t.Fatalf("EDGBranchesContainingPage: %v", err)
+	}
+	if !branches.Completion.Truncated || branches.Completion.Complete ||
+		branches.ContinuationToken == "" || branches.Completion.Visited != 1 {
+		t.Fatalf("branch completion = %#v, result = %#v", branches.Completion, branches.BranchContainmentResult)
+	}
+
+	impact, err := tool.EDGImpact(context.Background(), ImpactRequest{
+		Selector: SnapshotSelector{Branch: "main"},
+		Request: repository.ImpactRequest{Delta: []repository.MutationOperation{
+			{Action: "update", Entity: "node", ID: repository.SeedNodeID, Title: "Changed"},
+		}},
+		Budget: QueryBudgetRequest{MaxRows: &generous, MaxVisited: &one, MaxResponseBytes: &generous},
+	})
+	if err != nil {
+		t.Fatalf("EDGImpact: %v", err)
+	}
+	if !impact.CapacityExhausted || !impact.Completion.Truncated || impact.Completion.Complete ||
+		impact.Completion.Visited != 1 {
+		t.Fatalf("impact completion = %#v, result = %#v", impact.Completion, impact.ImpactResult)
+	}
+}
+
+func TestQueryDeadlineWithoutListPrefixReturnsError(t *testing.T) {
+	zero := time.Duration(0)
+	_, err := NewResolveTool(repository.NewSeedRepository()).EDGResolve(context.Background(), ResolveRequest{
+		Selector: SnapshotSelector{Branch: "main"},
+		NodeID:   repository.SeedNodeID,
+		Budget:   QueryBudgetRequest{Timeout: &zero},
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("EDGResolve deadline error = %v, want context.DeadlineExceeded", err)
 	}
 }
 
