@@ -16,8 +16,9 @@ It does **not** yet implement the v2 product architecture. It now has a typed pr
 foundation with authored schema policy and validation, a real immutable loose-and-pack object
 store with chunked graph roots, explicit maintenance, and `fsck`, deterministic three-way graph
 merge previews, clean applies, a durable public conflict-resolution lifecycle, and a rebuildable
-SQLite/FTS5 branch-head projection. It still lacks the typed agent/MCP retrieval plane. The project should therefore be described as a
-local graph-VCS foundation, not as an agent retrieval system.
+SQLite/FTS5 branch-head projection. It still lacks the typed agent/MCP retrieval plane. The
+project should therefore be described as a local graph-VCS foundation, not as an agent retrieval
+system.
 
 ## Evidence-based coverage
 
@@ -37,10 +38,9 @@ local graph-VCS foundation, not as an agent retrieval system.
 
 | Priority | Gap | Research baseline | Current shortfall and consequence | Recommended next increment |
 | --- | --- | --- | --- | --- |
-| P1 | Versioned SQLite projection | v2 §§5-7 and Milestone 1 | A private versioned SQLite/FTS5 branch-head projection, schema-driven scalar indexes, build states, canonical rebuild, and corruption recovery exist. In-memory maps named `projections` remain canonical-state mirrors rather than the SQLite contract. Historical caches, incremental GraphDiff updates, and a public query consumer are absent. | Add the strict snapshot selector and typed retrieval consumers, then decide whether historical cache construction needs an LRU rather than explicit branch-head-only rejection. Do not expose raw physical tables as an API. |
 | P1 | Strict snapshot request semantics | v2 §7 | `resolve` requires a branch and validates explicit commit reachability, but diff/history/impact accept a branch **or** unrestricted commit. Responses are inconsistent: only resolve returns snapshot/projection metadata. | Use one mandatory `(repository, branch, commit?)` selector and response envelope for every read tool. Pin once, require reachability unless detached access is explicit, and expose projection watermark/state. |
 | P1 | Query execution safety and observability | v2 §§7, 8.4, and 13 | No SQL sandbox is needed yet because SQL is absent, but timeout/cancellation is not propagated into repository scans, and most read operations lack response caps, truncation states, elapsed/visited metrics, or deterministic pagination. | Establish a common query executor with context deadline enforcement, row/byte/visited limits, partial-result metadata, and deterministic pagination before adding expensive retrieval. |
-| P1 | Search and agent context assembly | v2 §9; agent-query research | There is no FTS5 lexical search, semantic/vector projection, ranking, snippets, provenance assembly, or one-call evidence context. | Add FTS5 plus metadata filters and bounded graph expansion as the default local retrieval path. Defer embeddings until lexical quality and packaging benchmarks justify them. |
+| P1 | Search and agent context assembly | v2 §9; agent-query research | The private projection now supplies FTS5 candidates and schema-driven scalar indexes, but no public typed search/filter API, ranking response, snippets, provenance assembly, graph expansion, or one-call evidence context exists. | Add typed lexical search and metadata filters over the projection, then add bounded graph expansion and context assembly. Defer embeddings until lexical quality and packaging benchmarks justify them. |
 | P2 | Traversal and path capability | v2 §§8-10 | Impact provides an outgoing, all-edge BFS over a hypothetical delta. It has no direction/edge-type filters, arbitrary start nodes, stop labels, induced subgraph, shortest path, or explicit truncation. | Generalize traversal into typed `traverse` and `path` tools, retaining the existing deterministic BFS as a building block. |
 | P2 | Version-control reasoning completeness | v2 §10 | Diff and history now retain labels, edge types, and properties; history reports title/label/property changes. Diff still has only ID/title filters, and natural-key containment is declared but returns no matches. | Complete schema-aware diff/history/containment after schema policy lands. |
 | P2 | Benchmarks and acceptance evidence | v2 §14; agent-query research | Unit tests pass, but there are no benchmarks, scale fixtures, latency percentiles, projection-lag measurements, or retrieval-quality evaluation. | Add benchmark fixtures and measurements for the v2 matrix before selecting vector or graph-native dependencies. |
@@ -57,10 +57,10 @@ they should not be selected before the SQLite/FTS retrieval baseline and benchma
 
 ## Suggested delivery sequence
 
-1. **Retrieval baseline:** build versioned SQLite/FTS projections with strict watermarks,
-   snapshot selectors, query limits, and rebuild tests.
-2. **Agent surface:** expose typed MCP retrieval and merge preview/conflicts; add task-level
-   context assembly.
+1. **Snapshot-safe retrieval:** add the shared selector/envelope and query executor to expose
+   the branch-head projection without serving a stale or mismatched snapshot.
+2. **Agent surface:** expose typed lexical search/filter, merge preview/conflicts, and task-level
+   context assembly; add historical projection caching only after the selector contract is stable.
 3. **Storage maintenance evidence:** measure loose-object growth, pack size, compaction cost,
    and GC reclaim behavior before introducing delta compression, automatic maintenance, or
    remote pack transfer.
@@ -69,7 +69,7 @@ they should not be selected before the SQLite/FTS retrieval baseline and benchma
 
 ## Validation performed
 
-`go test ./...` and `go vet ./...` pass for the current repository, including schema parsing
-and validation, schema migration/staging/persistence, resolver, merge, pack/GC, `fsck`, and CLI
-packages. This establishes that the remaining gaps are missing scope relative to the research,
-not failing behavior in the implemented local-core tests.
+`make check` and `make fuzz` pass for the current repository, including schema parsing and
+validation, schema migration/staging/persistence, projection build/rebuild/recovery, resolver,
+merge, pack/GC, `fsck`, and CLI packages. This establishes that the remaining gaps are missing
+scope relative to the research, not failing behavior in the implemented local-core tests.
