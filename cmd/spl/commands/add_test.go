@@ -173,7 +173,8 @@ func TestCLIEnrichedMutationBatchReturnsTypedNodeAndEdgeFields(t *testing.T) {
 	diff := NewDiffCommand(func() (*resolve.ResolveTool, error) { return tool, nil })
 	diff.SetOut(&diffOutput)
 	diff.SetArgs([]string{
-		"--base-commit", string(base), "--target-commit", string(committed.Commit),
+		"--base-branch", "main", "--base-commit", string(base),
+		"--target-branch", "main", "--target-commit", string(committed.Commit),
 		"--edge-id", "edge-1", "--max-rows", "10",
 	})
 	if err := diff.Execute(); err != nil {

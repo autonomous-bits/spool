@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -39,26 +40,14 @@ func TestResolveCLIAndMCPReturnEquivalentPayloads(t *testing.T) {
 	}
 }
 
-func TestResolveCLIAndMCPRejectMissingBranchWithSameCategory(t *testing.T) {
+func TestResolveCLIRequiresBranch(t *testing.T) {
 	repo := repository.NewSeedRepository()
 	tool := resolve.NewResolveTool(repo)
 
 	var output bytes.Buffer
 	cliErr := runResolveCommand([]string{"--node", repository.SeedNodeID}, &output, tool)
-	mcpErr := func() error {
-		_, err := tool.EDGResolve(context.Background(), resolve.ResolveRequest{
-			Selector: resolve.SnapshotSelector{},
-			NodeID:   repository.SeedNodeID,
-		})
-		return err
-	}()
-
-	if !errors.Is(cliErr, resolve.ErrMissingBranch) {
-		t.Fatalf("CLI error = %v, want ErrMissingBranch", cliErr)
-	}
-
-	if !errors.Is(mcpErr, resolve.ErrMissingBranch) {
-		t.Fatalf("MCP error = %v, want ErrMissingBranch", mcpErr)
+	if cliErr == nil || !strings.Contains(cliErr.Error(), `required flag(s) "branch" not set`) {
+		t.Fatalf("CLI error = %v, want required branch error", cliErr)
 	}
 	if output.Len() != 0 {
 		t.Fatalf("CLI wrote success output for missing branch: %q", output.String())

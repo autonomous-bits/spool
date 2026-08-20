@@ -15,8 +15,8 @@ var (
 // ImpactRequest describes a hypothetical, non-persistent graph change and the
 // snapshot against which it is analyzed.
 type ImpactRequest struct {
-	// Selector identifies the snapshot to analyze.
-	Selector DiffSelector `json:"selector"`
+	// Commit identifies the already pinned snapshot to analyze.
+	Commit ObjectID `json:"commit"`
 	// Delta contains validated hypothetical mutations that are never persisted.
 	Delta []MutationOperation `json:"delta"`
 	// MaxDepth limits outgoing dependency traversal distance.
@@ -61,7 +61,7 @@ func (r *Repository) Impact(request ImpactRequest) (ImpactResult, error) {
 	if request.MaxDepth < 0 || request.MaxVisited <= 0 {
 		return ImpactResult{}, ErrInvalidImpactBudget
 	}
-	commitID, err := r.resolveDiffSelectorLocked(request.Selector)
+	commitID, err := r.requirePinnedCommitLocked(request.Commit)
 	if err != nil {
 		return ImpactResult{}, err
 	}

@@ -22,7 +22,7 @@ func TestDiffReturnsCanonicalDirectionalChangesFiltersAndContext(t *testing.T) {
 	}
 
 	result, err := repo.Diff(DiffRequest{
-		Base: DiffSelector{Commit: string(base)}, Target: DiffSelector{Commit: string(target.Commit)},
+		Base: base, Target: target.Commit,
 		MaxRows: 10, MaxResponseBytes: 1 << 20, IncludeOneHop: true,
 	})
 	if err != nil {
@@ -41,7 +41,7 @@ func TestDiffReturnsCanonicalDirectionalChangesFiltersAndContext(t *testing.T) {
 	}
 
 	filtered, err := repo.Diff(DiffRequest{
-		Base: DiffSelector{Commit: string(base)}, Target: DiffSelector{Commit: string(target.Commit)},
+		Base: base, Target: target.Commit,
 		Filter:  DiffFilter{NodeIDs: []string{"node-2"}, NodeTitleSubstr: "Second"},
 		MaxRows: 10, MaxResponseBytes: 1 << 20,
 	})
@@ -52,7 +52,7 @@ func TestDiffReturnsCanonicalDirectionalChangesFiltersAndContext(t *testing.T) {
 		t.Fatalf("filtered changes = %#v", filtered.Changes)
 	}
 	titleOnly, err := repo.Diff(DiffRequest{
-		Base: DiffSelector{Commit: string(base)}, Target: DiffSelector{Commit: string(target.Commit)},
+		Base: base, Target: target.Commit,
 		Filter: DiffFilter{NodeTitleSubstr: "Second"}, MaxRows: 10, MaxResponseBytes: 1 << 20,
 	})
 	if err != nil {
@@ -63,7 +63,7 @@ func TestDiffReturnsCanonicalDirectionalChangesFiltersAndContext(t *testing.T) {
 	}
 }
 
-func TestDiffPinsBranchResolvesGlobalCommitsAndValidatesSelectors(t *testing.T) {
+func TestDiffRequiresExistingPinnedCommits(t *testing.T) {
 	repo := NewSeedRepository()
 	if _, err := repo.CreateBranch("feature", branchSource("main")); err != nil {
 		t.Fatalf("create branch: %v", err)
@@ -73,7 +73,7 @@ func TestDiffPinsBranchResolvesGlobalCommitsAndValidatesSelectors(t *testing.T) 
 		t.Fatalf("advance feature: %v", err)
 	}
 	result, err := repo.Diff(DiffRequest{
-		Base: DiffSelector{Branch: "main"}, Target: DiffSelector{Commit: string(feature)},
+		Base: repo.branches["main"], Target: feature,
 		MaxRows: 10, MaxResponseBytes: 1 << 20,
 	})
 	if err != nil {
@@ -82,11 +82,10 @@ func TestDiffPinsBranchResolvesGlobalCommitsAndValidatesSelectors(t *testing.T) 
 	if result.TargetCommit != feature {
 		t.Fatalf("target = %q, want %q", result.TargetCommit, feature)
 	}
-	for _, selector := range []DiffSelector{{}, {Branch: "main", Commit: string(feature)}} {
-		_, err := repo.Diff(DiffRequest{Base: selector, Target: DiffSelector{Branch: "main"}, MaxRows: 1, MaxResponseBytes: 1024})
-		if !errors.Is(err, ErrInvalidDiffSelector) {
-			t.Fatalf("selector %#v error = %v", selector, err)
-		}
+	if _, err := repo.Diff(DiffRequest{
+		Base: "missing", Target: repo.branches["main"], MaxRows: 1, MaxResponseBytes: 1024,
+	}); !errors.Is(err, ErrCommitNotFound) {
+		t.Fatalf("missing pinned commit error = %v", err)
 	}
 }
 
@@ -102,7 +101,7 @@ func TestDiffPaginatesWithinRowsAndBudgetAndBindsContinuation(t *testing.T) {
 		t.Fatalf("commit: %v", err)
 	}
 	request := DiffRequest{
-		Base: DiffSelector{Commit: string(base)}, Target: DiffSelector{Commit: string(target.Commit)},
+		Base: base, Target: target.Commit,
 		MaxRows: 1, MaxResponseBytes: 1 << 20,
 	}
 	first, err := repo.Diff(request)
@@ -125,13 +124,13 @@ func TestDiffPaginatesWithinRowsAndBudgetAndBindsContinuation(t *testing.T) {
 		t.Fatalf("mismatched continuation error = %v", err)
 	}
 	if _, err := repo.Diff(DiffRequest{
-		Base: DiffSelector{Commit: string(base)}, Target: DiffSelector{Commit: string(target.Commit)},
+		Base: base, Target: target.Commit,
 		MaxRows: 1, MaxResponseBytes: 1,
 	}); !errors.Is(err, ErrResponseBudgetTooSmall) {
 		t.Fatalf("small budget error = %v", err)
 	}
 	if _, err := repo.Diff(DiffRequest{
-		Base: DiffSelector{Commit: string(base)}, Target: DiffSelector{Commit: string(target.Commit)},
+		Base: base, Target: target.Commit,
 		MaxRows: 0, MaxResponseBytes: 1 << 20,
 	}); !errors.Is(err, ErrInvalidDiffBudget) {
 		t.Fatalf("zero row budget error = %v", err)
@@ -166,7 +165,7 @@ func TestDiffContextStopsAtOneHop(t *testing.T) {
 		t.Fatalf("commit: %v", err)
 	}
 	result, err := repo.Diff(DiffRequest{
-		Base: DiffSelector{Commit: string(base)}, Target: DiffSelector{Commit: string(target.Commit)},
+		Base: base, Target: target.Commit,
 		Filter: DiffFilter{NodeIDs: []string{SeedNodeID}}, IncludeOneHop: true,
 		MaxRows: 10, MaxResponseBytes: 1 << 20,
 	})
@@ -193,7 +192,7 @@ func TestDiffTitleFilterIncludesMatchingRemovedNodes(t *testing.T) {
 		t.Fatalf("commit delete: %v", err)
 	}
 	result, err := repo.Diff(DiffRequest{
-		Base: DiffSelector{Commit: string(base)}, Target: DiffSelector{Commit: string(target.Commit)},
+		Base: base, Target: target.Commit,
 		Filter: DiffFilter{NodeTitleSubstr: "walking skeleton"}, MaxRows: 10, MaxResponseBytes: 1 << 20,
 	})
 	if err != nil {

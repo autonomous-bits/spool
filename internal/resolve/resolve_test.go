@@ -2,6 +2,7 @@ package resolve
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"testing"
@@ -93,11 +94,284 @@ func TestEDGResolveReturnsSnapshotAndProjectionMetadata(t *testing.T) {
 	if got.Node.ID != repository.SeedNodeID {
 		t.Fatalf("node ID = %q, want %q", got.Node.ID, repository.SeedNodeID)
 	}
-	if got.Snapshot.Commit == "" || got.Snapshot.Root == "" || got.Projection.NodeRoot == "" || got.Budget != DefaultQueryBudget() {
+	if got.Snapshot.Repository == "" || got.Snapshot.Branch != "main" || got.Snapshot.Commit == "" || got.Snapshot.Root == "" || got.Budget != DefaultQueryBudget() {
 		t.Fatalf("missing resolution metadata: %#v", got)
 	}
-	if got.Projection.SchemaVersion != "v1" {
-		t.Fatalf("schema version = %q, want v1", got.Projection.SchemaVersion)
+	if got.Projection.State != "unavailable" || got.Projection.NodeRoot != "" || got.Projection.SchemaVersion != "" {
+		t.Fatalf("in-memory projection metadata = %#v, want unavailable without watermark", got.Projection)
+	}
+}
+
+func TestEDGResolveReportsMatchingBranchHeadProjection(t *testing.T) {
+	repo, err := repository.InitializeRepository(t.TempDir())
+	if err != nil {
+		t.Fatalf("InitializeRepository: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := repo.Close(); err != nil {
+			t.Errorf("Close: %v", err)
+		}
+	})
+	head, err := repo.PinBranch("main")
+	if err != nil {
+		t.Fatalf("PinBranch: %v", err)
+	}
+	status, err := repo.ProjectionStatus()
+	if err != nil {
+		t.Fatalf("ProjectionStatus: %v", err)
+	}
+
+	got, err := NewResolveTool(repo).EDGResolve(context.Background(), ResolveRequest{
+		Selector: SnapshotSelector{Branch: "main"},
+		NodeID:   repository.SeedNodeID,
+	})
+	if err != nil {
+		t.Fatalf("EDGResolve: %v", err)
+	}
+
+	if got.Snapshot.Repository != repo.RepositoryID() || got.Snapshot.Branch != "main" ||
+		got.Snapshot.Commit != string(head) || got.Snapshot.Root == "" {
+		t.Fatalf("snapshot metadata = %#v", got.Snapshot)
+	}
+	if got.Projection.State != status.State || got.Projection.NodeRoot != string(status.NodeRoot) ||
+		got.Projection.SchemaVersion != "v1" {
+		t.Fatalf("projection metadata = %#v, status = %#v", got.Projection, status)
+	}
+	validation, err := NewResolveTool(repo).EDGValidateSchema(context.Background(), SchemaValidationRequest{
+		Selector: SnapshotSelector{Branch: "main"},
+	})
+	if err != nil {
+		t.Fatalf("EDGValidateSchema: %v", err)
+	}
+	if validation.Snapshot != got.Snapshot {
+		t.Fatalf("validation snapshot metadata = %#v, want %#v", validation.Snapshot, got.Snapshot)
+	}
+	if validation.Projection != got.Projection {
+		t.Fatalf("validation projection metadata = %#v, want %#v", validation.Projection, got.Projection)
+	}
+}
+
+func TestEDGResolveReportsHistoricalProjectionAsUnavailable(t *testing.T) {
+	repo, err := repository.InitializeRepository(t.TempDir())
+	if err != nil {
+		t.Fatalf("InitializeRepository: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := repo.Close(); err != nil {
+			t.Errorf("Close: %v", err)
+		}
+	})
+	historical, err := repo.PinBranch("main")
+	if err != nil {
+		t.Fatalf("PinBranch: %v", err)
+	}
+	head, err := repo.AdvanceBranch("main")
+	if err != nil {
+		t.Fatalf("AdvanceBranch: %v", err)
+	}
+	status, err := repo.ProjectionStatus()
+	if err != nil {
+		t.Fatalf("ProjectionStatus: %v", err)
+	}
+	if status.Commit != head {
+		t.Fatalf("projection commit = %q, want current head %q", status.Commit, head)
+	}
+	commit := string(historical)
+
+	got, err := NewResolveTool(repo).EDGResolve(context.Background(), ResolveRequest{
+		Selector: SnapshotSelector{Branch: "main", Commit: &commit},
+		NodeID:   repository.SeedNodeID,
+	})
+	if err != nil {
+		t.Fatalf("EDGResolve: %v", err)
+	}
+
+	if got.Snapshot.Commit != commit || got.Node.ID != repository.SeedNodeID {
+		t.Fatalf("historical canonical resolution = %#v", got)
+	}
+	if got.Projection.State != "unavailable" || got.Projection.NodeRoot != "" || got.Projection.SchemaVersion != "" {
+		t.Fatalf("historical projection metadata = %#v, want unavailable without watermark", got.Projection)
+	}
+}
+
+func TestReadEnvelopesReportTargetProjectionProvenance(t *testing.T) {
+	repo, err := repository.InitializeRepository(t.TempDir())
+	if err != nil {
+		t.Fatalf("InitializeRepository: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := repo.Close(); err != nil {
+			t.Errorf("Close: %v", err)
+		}
+	})
+	base, err := repo.PinBranch("main")
+	if err != nil {
+		t.Fatalf("PinBranch base: %v", err)
+	}
+	target, err := repo.AdvanceBranch("main")
+	if err != nil {
+		t.Fatalf("AdvanceBranch: %v", err)
+	}
+	status, err := repo.ProjectionStatus()
+	if err != nil {
+		t.Fatalf("ProjectionStatus: %v", err)
+	}
+	record, err := repo.PinnedSnapshotRecord(target)
+	if err != nil {
+		t.Fatalf("PinnedSnapshotRecord: %v", err)
+	}
+	wantSnapshot := SnapshotMetadata{
+		Repository: repo.RepositoryID(), Branch: "main", Commit: string(target), Root: string(record.Snapshot),
+	}
+	wantProjection := ProjectionMetadata{
+		NodeRoot: string(status.NodeRoot), State: status.State, SchemaVersion: "v1",
+	}
+	tool := NewResolveTool(repo)
+	baseCommit := string(base)
+	diff, err := tool.EDGDiff(context.Background(), DiffRequest{
+		Base:   SnapshotSelector{Branch: "main", Commit: &baseCommit},
+		Target: SnapshotSelector{Branch: "main"},
+	})
+	if err != nil {
+		t.Fatalf("EDGDiff: %v", err)
+	}
+	if diff.Base.Commit != baseCommit || diff.Target != wantSnapshot || diff.Projection != wantProjection {
+		t.Fatalf("diff provenance = %#v, want base %q and target %#v / %#v", diff, base, wantSnapshot, wantProjection)
+	}
+	history, err := tool.EDGHistory(context.Background(), HistoryRequest{
+		Selector: SnapshotSelector{Branch: "main"}, EntityID: repository.SeedNodeID,
+	})
+	if err != nil {
+		t.Fatalf("EDGHistory: %v", err)
+	}
+	impact, err := tool.EDGImpact(context.Background(), ImpactRequest{
+		Selector: SnapshotSelector{Branch: "main"},
+		Request: repository.ImpactRequest{
+			Delta: []repository.MutationOperation{
+				{Action: "update", Entity: "node", ID: repository.SeedNodeID, Title: "Changed"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("EDGImpact: %v", err)
+	}
+	validation, err := tool.EDGValidateSchema(context.Background(), SchemaValidationRequest{
+		Selector: SnapshotSelector{Branch: "main"},
+	})
+	if err != nil {
+		t.Fatalf("EDGValidateSchema: %v", err)
+	}
+	for _, result := range []struct {
+		name   string
+		value  any
+		fields []string
+	}{
+		{name: "diff", value: diff, fields: []string{"base", "target", "projection", "baseCommit", "targetCommit"}},
+		{name: "history", value: history, fields: []string{"snapshot", "projection", "entries"}},
+		{name: "impact", value: impact, fields: []string{"snapshot", "projection", "commit", "impacts"}},
+		{name: "validation", value: validation, fields: []string{"snapshot", "projection", "schema", "valid", "violations"}},
+	} {
+		t.Run(result.name, func(t *testing.T) {
+			encoded, err := json.Marshal(result.value)
+			if err != nil {
+				t.Fatalf("Marshal: %v", err)
+			}
+			var object map[string]json.RawMessage
+			if err := json.Unmarshal(encoded, &object); err != nil {
+				t.Fatalf("Unmarshal: %v", err)
+			}
+			for _, field := range result.fields {
+				if _, ok := object[field]; !ok {
+					t.Errorf("JSON omitted %q: %s", field, encoded)
+				}
+			}
+		})
+	}
+	if history.Snapshot != wantSnapshot || history.Projection != wantProjection ||
+		impact.Snapshot != wantSnapshot || impact.Projection != wantProjection ||
+		validation.Snapshot != wantSnapshot || validation.Projection != wantProjection {
+		t.Fatalf("read envelope provenance = history %#v impact %#v validation %#v, want %#v / %#v",
+			history, impact, validation, wantSnapshot, wantProjection)
+	}
+}
+
+func TestEDGDiffBoundsPublicEnvelope(t *testing.T) {
+	repo := repository.NewSeedRepository()
+	base, err := repo.PinBranch("main")
+	if err != nil {
+		t.Fatalf("PinBranch base: %v", err)
+	}
+	if _, err := repo.StageMutationBatch(repository.StageMutationRequest{
+		Branch: "main",
+		Operations: []repository.MutationOperation{
+			{Action: "add", Entity: "node", ID: "node-2", Title: "Second"},
+			{Action: "add", Entity: "node", ID: "node-3", Title: "Third"},
+			{Action: "add", Entity: "node", ID: "node-4", Title: "Fourth"},
+		},
+	}); err != nil {
+		t.Fatalf("StageMutationBatch: %v", err)
+	}
+	target, err := repo.CommitStagedMutations("main")
+	if err != nil {
+		t.Fatalf("CommitStagedMutations: %v", err)
+	}
+
+	tool := NewResolveTool(repo)
+	baseCommit, targetCommit := string(base), string(target.Commit)
+	one, generous := 1, 1<<20
+	page, err := tool.EDGDiff(context.Background(), DiffRequest{
+		Base:   SnapshotSelector{Branch: "main", Commit: &baseCommit},
+		Target: SnapshotSelector{Branch: "main", Commit: &targetCommit},
+		Budget: QueryBudgetRequest{MaxRows: &one, MaxResponseBytes: &generous},
+	})
+	if err != nil {
+		t.Fatalf("EDGDiff baseline: %v", err)
+	}
+	encoded, err := json.Marshal(page)
+	if err != nil {
+		t.Fatalf("Marshal baseline: %v", err)
+	}
+
+	rows, maxBytes := 3, len(encoded)
+	got, err := tool.EDGDiff(context.Background(), DiffRequest{
+		Base:   SnapshotSelector{Branch: "main", Commit: &baseCommit},
+		Target: SnapshotSelector{Branch: "main", Commit: &targetCommit},
+		Budget: QueryBudgetRequest{MaxRows: &rows, MaxResponseBytes: &maxBytes},
+	})
+	if err != nil {
+		t.Fatalf("EDGDiff bounded: %v", err)
+	}
+	encoded, err = json.Marshal(got)
+	if err != nil {
+		t.Fatalf("Marshal bounded result: %v", err)
+	}
+	if len(encoded) > maxBytes {
+		t.Fatalf("serialized diff size = %d, want at most %d", len(encoded), maxBytes)
+	}
+	if len(got.Changes) != 1 || got.ContinuationToken == "" {
+		t.Fatalf("bounded result = %#v, want one change and continuation", got)
+	}
+	next, err := tool.EDGDiff(context.Background(), DiffRequest{
+		Base:              SnapshotSelector{Branch: "main", Commit: &baseCommit},
+		Target:            SnapshotSelector{Branch: "main", Commit: &targetCommit},
+		Budget:            QueryBudgetRequest{MaxRows: &rows, MaxResponseBytes: &maxBytes},
+		ContinuationToken: got.ContinuationToken,
+	})
+	if err != nil {
+		t.Fatalf("EDGDiff continuation: %v", err)
+	}
+	if len(next.Changes) != 1 || next.Changes[0].ID == got.Changes[0].ID {
+		t.Fatalf("continuation result = %#v, want next single change", next)
+	}
+
+	tooSmall := 1
+	_, err = tool.EDGDiff(context.Background(), DiffRequest{
+		Base:   SnapshotSelector{Branch: "main", Commit: &baseCommit},
+		Target: SnapshotSelector{Branch: "main", Commit: &targetCommit},
+		Budget: QueryBudgetRequest{MaxResponseBytes: &tooSmall},
+	})
+	if !errors.Is(err, repository.ErrResponseBudgetTooSmall) {
+		t.Fatalf("too-small response budget error = %v, want %v", err, repository.ErrResponseBudgetTooSmall)
 	}
 }
 
@@ -120,8 +394,8 @@ func TestEDGImpactNormalizesTraversalBudget(t *testing.T) {
 		t.Fatalf("PinBranch: %v", err)
 	}
 	result, err := NewResolveTool(repo).EDGImpact(context.Background(), ImpactRequest{
+		Selector: SnapshotSelector{Branch: "main"},
 		Request: repository.ImpactRequest{
-			Selector: repository.DiffSelector{Branch: "main"},
 			Delta: []repository.MutationOperation{
 				{Action: "update", Entity: "node", ID: repository.SeedNodeID, Title: "Changed"},
 			},
@@ -136,12 +410,378 @@ func TestEDGImpactNormalizesTraversalBudget(t *testing.T) {
 		result.Impacts[1].Node.ID != "node-2" {
 		t.Fatalf("normalized impact result = %#v", result)
 	}
+	if result.Snapshot.Repository == "" || result.Snapshot.Branch != "main" ||
+		result.Snapshot.Commit != string(before) || result.Snapshot.Root == "" ||
+		result.Projection.State != "unavailable" || result.Projection.NodeRoot != "" {
+		t.Fatalf("impact envelope = %#v", result)
+	}
 	after, err := repo.PinBranch("main")
 	if err != nil {
 		t.Fatalf("PinBranch after impact: %v", err)
 	}
 	if after != before {
 		t.Fatalf("impact moved branch from %q to %q", before, after)
+	}
+}
+
+func TestEDGHistoryReturnsSnapshotAndProjectionMetadata(t *testing.T) {
+	repo := repository.NewSeedRepository()
+	head, err := repo.PinBranch("main")
+	if err != nil {
+		t.Fatalf("PinBranch: %v", err)
+	}
+
+	result, err := NewResolveTool(repo).EDGHistory(context.Background(), HistoryRequest{
+		Selector: SnapshotSelector{Branch: "main"}, EntityID: repository.SeedNodeID,
+	})
+	if err != nil {
+		t.Fatalf("EDGHistory: %v", err)
+	}
+	if len(result.Entries) == 0 || result.Snapshot.Repository == "" ||
+		result.Snapshot.Branch != "main" || result.Snapshot.Commit != string(head) ||
+		result.Snapshot.Root == "" || result.Projection.State != "unavailable" ||
+		result.Projection.NodeRoot != "" {
+		t.Fatalf("history envelope = %#v", result)
+	}
+}
+
+func TestResolveToolReadAPIsRejectUnreachableExplicitCommits(t *testing.T) {
+	repo := repository.NewSeedRepository()
+	if _, err := repo.CreateBranch("feature", branch.Source{Branch: "main"}); err != nil {
+		t.Fatalf("CreateBranch: %v", err)
+	}
+	featureCommit, err := repo.AdvanceBranch("feature")
+	if err != nil {
+		t.Fatalf("AdvanceBranch feature: %v", err)
+	}
+	commit := string(featureCommit)
+	selector := SnapshotSelector{Branch: "main", Commit: &commit}
+	tool := NewResolveTool(repo)
+
+	requests := []struct {
+		name string
+		call func() error
+	}{
+		{
+			name: "resolve",
+			call: func() error {
+				_, err := tool.EDGResolve(context.Background(), ResolveRequest{
+					Selector: selector, NodeID: repository.SeedNodeID,
+				})
+				return err
+			},
+		},
+		{
+			name: "validate",
+			call: func() error {
+				_, err := tool.EDGValidateSchema(context.Background(), SchemaValidationRequest{Selector: selector})
+				return err
+			},
+		},
+		{
+			name: "diff",
+			call: func() error {
+				_, err := tool.EDGDiff(context.Background(), DiffRequest{
+					Base: SnapshotSelector{Branch: "main"}, Target: selector,
+				})
+				return err
+			},
+		},
+		{
+			name: "history",
+			call: func() error {
+				_, err := tool.EDGHistory(context.Background(), HistoryRequest{
+					Selector: selector, EntityID: repository.SeedNodeID,
+				})
+				return err
+			},
+		},
+		{
+			name: "impact",
+			call: func() error {
+				_, err := tool.EDGImpact(context.Background(), ImpactRequest{
+					Selector: selector,
+					Request: repository.ImpactRequest{
+						Delta: []repository.MutationOperation{
+							{Action: "update", Entity: "node", ID: repository.SeedNodeID, Title: "Changed"},
+						},
+					},
+				})
+				return err
+			},
+		},
+	}
+	for _, request := range requests {
+		t.Run(request.name, func(t *testing.T) {
+			if err := request.call(); !errors.Is(err, ErrUnsupportedCommit) {
+				t.Fatalf("error = %v, want ErrUnsupportedCommit", err)
+			}
+		})
+	}
+}
+
+func TestResolveToolReadAPIsAllowDetachedCommitsOnlyWhenConfigured(t *testing.T) {
+	repo := repository.NewSeedRepository()
+	if _, err := repo.CreateBranch("feature", branch.Source{Branch: "main"}); err != nil {
+		t.Fatalf("CreateBranch: %v", err)
+	}
+	featureCommit, err := repo.AdvanceBranch("feature")
+	if err != nil {
+		t.Fatalf("AdvanceBranch feature: %v", err)
+	}
+	commit := string(featureCommit)
+	selector := SnapshotSelector{Branch: "main", Commit: &commit}
+	tool := NewResolveToolWithOptions(repo, Options{AllowDetachedCommit: true})
+
+	resolved, err := tool.EDGResolve(context.Background(), ResolveRequest{
+		Selector: selector, NodeID: repository.SeedNodeID,
+	})
+	if err != nil {
+		t.Fatalf("EDGResolve with detached access: %v", err)
+	}
+	if resolved.Snapshot.Commit != commit || resolved.Snapshot.Branch != "main" {
+		t.Fatalf("detached resolve envelope = %#v", resolved)
+	}
+	validation, err := tool.EDGValidateSchema(context.Background(), SchemaValidationRequest{Selector: selector})
+	if err != nil {
+		t.Fatalf("EDGValidateSchema with detached access: %v", err)
+	}
+	if validation.Snapshot.Commit != commit || validation.Snapshot.Branch != "main" {
+		t.Fatalf("detached validation envelope = %#v", validation)
+	}
+	if _, err := tool.EDGDiff(context.Background(), DiffRequest{
+		Base: SnapshotSelector{Branch: "main"}, Target: selector,
+	}); err != nil {
+		t.Fatalf("EDGDiff with detached access: %v", err)
+	}
+	if _, err := tool.EDGHistory(context.Background(), HistoryRequest{
+		Selector: selector, EntityID: repository.SeedNodeID,
+	}); err != nil {
+		t.Fatalf("EDGHistory with detached access: %v", err)
+	}
+	if _, err := tool.EDGImpact(context.Background(), ImpactRequest{
+		Selector: selector,
+		Request: repository.ImpactRequest{
+			Delta: []repository.MutationOperation{
+				{Action: "update", Entity: "node", ID: repository.SeedNodeID, Title: "Changed"},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("EDGImpact with detached access: %v", err)
+	}
+}
+
+func TestResolveToolSnapshotReadAPIsRequireBranch(t *testing.T) {
+	tool := NewResolveTool(repository.NewSeedRepository())
+	requests := []struct {
+		name string
+		call func() error
+	}{
+		{
+			name: "resolve",
+			call: func() error {
+				_, err := tool.EDGResolve(context.Background(), ResolveRequest{NodeID: repository.SeedNodeID})
+				return err
+			},
+		},
+		{
+			name: "validate",
+			call: func() error {
+				_, err := tool.EDGValidateSchema(context.Background(), SchemaValidationRequest{})
+				return err
+			},
+		},
+		{
+			name: "diff base",
+			call: func() error {
+				_, err := tool.EDGDiff(context.Background(), DiffRequest{
+					Base: SnapshotSelector{}, Target: SnapshotSelector{Branch: "main"},
+				})
+				return err
+			},
+		},
+		{
+			name: "diff target",
+			call: func() error {
+				_, err := tool.EDGDiff(context.Background(), DiffRequest{
+					Base: SnapshotSelector{Branch: "main"}, Target: SnapshotSelector{},
+				})
+				return err
+			},
+		},
+		{
+			name: "history",
+			call: func() error {
+				_, err := tool.EDGHistory(context.Background(), HistoryRequest{EntityID: repository.SeedNodeID})
+				return err
+			},
+		},
+		{
+			name: "impact",
+			call: func() error {
+				_, err := tool.EDGImpact(context.Background(), ImpactRequest{
+					Request: repository.ImpactRequest{
+						Delta: []repository.MutationOperation{
+							{Action: "update", Entity: "node", ID: repository.SeedNodeID, Title: "Changed"},
+						},
+					},
+				})
+				return err
+			},
+		},
+	}
+	for _, request := range requests {
+		t.Run(request.name, func(t *testing.T) {
+			if err := request.call(); !errors.Is(err, ErrMissingBranch) {
+				t.Fatalf("error = %v, want ErrMissingBranch", err)
+			}
+		})
+	}
+}
+
+func TestResolveToolSingleSnapshotReadAPIsRemainPinnedAfterBranchAdvances(t *testing.T) {
+	reads := []struct {
+		name string
+		call func(*ResolveTool) (SnapshotMetadata, error)
+	}{
+		{
+			name: "resolve",
+			call: func(tool *ResolveTool) (SnapshotMetadata, error) {
+				result, err := tool.EDGResolve(context.Background(), ResolveRequest{
+					Selector: SnapshotSelector{Branch: "main"}, NodeID: repository.SeedNodeID,
+				})
+				return result.Snapshot, err
+			},
+		},
+		{
+			name: "validate",
+			call: func(tool *ResolveTool) (SnapshotMetadata, error) {
+				result, err := tool.EDGValidateSchema(context.Background(), SchemaValidationRequest{
+					Selector: SnapshotSelector{Branch: "main"},
+				})
+				return result.Snapshot, err
+			},
+		},
+		{
+			name: "history",
+			call: func(tool *ResolveTool) (SnapshotMetadata, error) {
+				result, err := tool.EDGHistory(context.Background(), HistoryRequest{
+					Selector: SnapshotSelector{Branch: "main"}, EntityID: repository.SeedNodeID,
+				})
+				return result.Snapshot, err
+			},
+		},
+		{
+			name: "impact",
+			call: func(tool *ResolveTool) (SnapshotMetadata, error) {
+				result, err := tool.EDGImpact(context.Background(), ImpactRequest{
+					Selector: SnapshotSelector{Branch: "main"},
+					Request: repository.ImpactRequest{
+						Delta: []repository.MutationOperation{
+							{Action: "update", Entity: "node", ID: repository.SeedNodeID, Title: "Changed"},
+						},
+					},
+				})
+				return result.Snapshot, err
+			},
+		},
+	}
+	for _, read := range reads {
+		t.Run(read.name, func(t *testing.T) {
+			repo := repository.NewSeedRepository()
+			pinned, err := repo.PinBranch("main")
+			if err != nil {
+				t.Fatalf("PinBranch: %v", err)
+			}
+			tool := NewResolveTool(repo)
+			var advanceErr error
+			tool.resolver.afterBranchResolved = func() {
+				_, advanceErr = repo.AdvanceBranch("main")
+			}
+
+			snapshot, err := read.call(tool)
+			if advanceErr != nil {
+				t.Fatalf("AdvanceBranch: %v", advanceErr)
+			}
+			if err != nil {
+				t.Fatalf("read: %v", err)
+			}
+			if snapshot.Commit != string(pinned) || snapshot.Branch != "main" || snapshot.Root == "" {
+				t.Fatalf("pinned snapshot = %#v, want main at %q", snapshot, pinned)
+			}
+			current, err := repo.PinBranch("main")
+			if err != nil {
+				t.Fatalf("PinBranch after read: %v", err)
+			}
+			if current == pinned {
+				t.Fatal("branch did not advance during read")
+			}
+		})
+	}
+}
+
+func TestResolveToolReadAPIsPreserveUnknownSelectorErrors(t *testing.T) {
+	tool := NewResolveTool(repository.NewSeedRepository())
+	if _, err := tool.EDGDiff(context.Background(), DiffRequest{
+		Base: SnapshotSelector{Branch: "missing"}, Target: SnapshotSelector{Branch: "main"},
+	}); !errors.Is(err, ErrBranchNotFound) {
+		t.Fatalf("EDGDiff unknown branch error = %v, want ErrBranchNotFound", err)
+	}
+
+	unknown := "unknown"
+	if _, err := tool.EDGHistory(context.Background(), HistoryRequest{
+		Selector: SnapshotSelector{Branch: "main", Commit: &unknown}, EntityID: repository.SeedNodeID,
+	}); !errors.Is(err, repository.ErrCommitNotFound) {
+		t.Fatalf("EDGHistory unknown commit error = %v, want ErrCommitNotFound", err)
+	}
+	if _, err := tool.EDGImpact(context.Background(), ImpactRequest{
+		Selector: SnapshotSelector{Branch: "missing"},
+		Request: repository.ImpactRequest{
+			Delta: []repository.MutationOperation{
+				{Action: "update", Entity: "node", ID: repository.SeedNodeID, Title: "Changed"},
+			},
+		},
+	}); !errors.Is(err, ErrBranchNotFound) {
+		t.Fatalf("EDGImpact unknown branch error = %v, want ErrBranchNotFound", err)
+	}
+}
+
+func TestEDGDiffPinsBothEndpointsIndependently(t *testing.T) {
+	repo := repository.NewSeedRepository()
+	initial, err := repo.PinBranch("main")
+	if err != nil {
+		t.Fatalf("PinBranch: %v", err)
+	}
+	tool := NewResolveTool(repo)
+	calls := 0
+	tool.resolver.afterBranchResolved = func() {
+		calls++
+		if calls == 1 {
+			if _, err := repo.AdvanceBranch("main"); err != nil {
+				t.Fatalf("AdvanceBranch: %v", err)
+			}
+		}
+	}
+
+	result, err := tool.EDGDiff(context.Background(), DiffRequest{
+		Base: SnapshotSelector{Branch: "main"}, Target: SnapshotSelector{Branch: "main"},
+	})
+	if err != nil {
+		t.Fatalf("EDGDiff: %v", err)
+	}
+	current, err := repo.PinBranch("main")
+	if err != nil {
+		t.Fatalf("PinBranch after diff: %v", err)
+	}
+	if calls != 2 || result.BaseCommit != initial || result.TargetCommit != current {
+		t.Fatalf("diff resolution = %#v after %d selections, want %q -> %q", result, calls, initial, current)
+	}
+	if result.Base.Repository == "" || result.Base.Branch != "main" ||
+		result.Base.Commit != string(initial) || result.Base.Root == "" ||
+		result.Target.Repository == "" || result.Target.Branch != "main" ||
+		result.Target.Commit != string(current) || result.Target.Root == "" ||
+		result.Projection.State != "unavailable" || result.Projection.NodeRoot != "" {
+		t.Fatalf("diff envelope = %#v", result)
 	}
 }
 

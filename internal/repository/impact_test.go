@@ -15,7 +15,7 @@ func TestImpactAppliesDeltaInMemoryAndTraversesOutgoingDependencies(t *testing.T
 	}
 
 	result, err := repo.Impact(ImpactRequest{
-		Selector: DiffSelector{Commit: string(before)},
+		Commit: before,
 		Delta: []MutationOperation{
 			{Action: "update", Entity: "node", ID: SeedNodeID, Title: "Hypothetical"},
 		},
@@ -59,7 +59,7 @@ func TestImpactUsesCanonicalPathsAndBoundsTraversal(t *testing.T) {
 	repo := impactRepository(t)
 	base, _ := repo.PinBranch("main")
 	result, err := repo.Impact(ImpactRequest{
-		Selector: DiffSelector{Commit: string(base)},
+		Commit:   base,
 		Delta:    []MutationOperation{{Action: "update", Entity: "node", ID: SeedNodeID, Title: "Changed"}},
 		MaxDepth: 1, MaxVisited: 10,
 	})
@@ -82,8 +82,8 @@ func TestImpactUsesCanonicalPathsAndBoundsTraversal(t *testing.T) {
 func TestImpactRejectsMissingDeltaAndInvalidBudget(t *testing.T) {
 	repo := NewSeedRepository()
 	for _, request := range []ImpactRequest{
-		{Selector: DiffSelector{Branch: "main"}, MaxDepth: 1, MaxVisited: 1},
-		{Selector: DiffSelector{Branch: "main"}, Delta: []MutationOperation{{Action: "update", Entity: "node", ID: SeedNodeID, Title: "Changed"}}, MaxDepth: -1, MaxVisited: 1},
+		{Commit: repo.branches["main"], MaxDepth: 1, MaxVisited: 1},
+		{Commit: repo.branches["main"], Delta: []MutationOperation{{Action: "update", Entity: "node", ID: SeedNodeID, Title: "Changed"}}, MaxDepth: -1, MaxVisited: 1},
 	} {
 		_, err := repo.Impact(request)
 		if !errors.Is(err, ErrMissingImpactDelta) && !errors.Is(err, ErrInvalidImpactBudget) {
@@ -99,7 +99,7 @@ func TestImpactRejectsInvalidTypedProperties(t *testing.T) {
 		t.Fatalf("PinBranch: %v", err)
 	}
 	if _, err := repo.Impact(ImpactRequest{
-		Selector: DiffSelector{Commit: string(head)},
+		Commit: head,
 		Delta: []MutationOperation{{
 			Action: "update", Entity: "node", ID: SeedNodeID, Title: "Changed",
 			Properties: map[string]PropertyValue{"invalid": FloatPropertyValue(math.NaN())},
@@ -114,7 +114,7 @@ func TestImpactSeedsBothEndpointsOfAnUpdatedEdge(t *testing.T) {
 	repo := impactRepository(t)
 	base, _ := repo.PinBranch("main")
 	result, err := repo.Impact(ImpactRequest{
-		Selector: DiffSelector{Commit: string(base)},
+		Commit: base,
 		Delta: []MutationOperation{
 			{Action: "update", Entity: "edge", ID: "edge-1", Source: "node-3", Target: "node-4"},
 		},

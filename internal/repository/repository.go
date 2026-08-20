@@ -82,6 +82,16 @@ type Resolution struct {
 	SchemaVersion uint16
 }
 
+// PinnedSnapshotRecord identifies the immutable roots for a pinned commit.
+type PinnedSnapshotRecord struct {
+	// Commit identifies the pinned commit.
+	Commit ObjectID
+	// Snapshot identifies the graph snapshot selected by Commit.
+	Snapshot ObjectID
+	// NodeRoot identifies the snapshot's node projection root.
+	NodeRoot ObjectID
+}
+
 // SchemaValidationResolution is an immutable schema-validation result for a
 // pinned commit.
 type SchemaValidationResolution struct {
@@ -443,6 +453,27 @@ func (r *Repository) ResolveExplicitCommit(branch string, requested ObjectID, al
 	return "", ErrCommitNotReachable
 }
 
+// PinnedSnapshotRecord returns immutable snapshot roots for a previously pinned
+// commit.
+func (r *Repository) PinnedSnapshotRecord(commitID ObjectID) (PinnedSnapshotRecord, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if err := r.ensureOpenLocked(); err != nil {
+		return PinnedSnapshotRecord{}, err
+	}
+	commit, ok := r.commits[commitID]
+	if !ok {
+		return PinnedSnapshotRecord{}, ErrCommitNotFound
+	}
+	snapshot, ok := r.snapshots[commit.Snapshot]
+	if !ok {
+		return PinnedSnapshotRecord{}, fmt.Errorf("snapshot %q: %w", commit.Snapshot, ErrCommitNotFound)
+	}
+	return PinnedSnapshotRecord{
+		Commit: commitID, Snapshot: commit.Snapshot, NodeRoot: snapshot.NodeRoot,
+	}, nil
+}
+
 // ResolvePinned reads a node from a previously pinned commit.
 func (r *Repository) ResolvePinned(commitID ObjectID, nodeID string) (Resolution, error) {
 	r.mu.RLock()
@@ -452,7 +483,7 @@ func (r *Repository) ResolvePinned(commitID ObjectID, nodeID string) (Resolution
 	}
 	commit, ok := r.commits[commitID]
 	if !ok {
-		return Resolution{}, ErrBranchNotFound
+		return Resolution{}, ErrCommitNotFound
 	}
 	snapshot := r.snapshots[commit.Snapshot]
 	node, ok := r.projections[snapshot.NodeRoot][nodeID]

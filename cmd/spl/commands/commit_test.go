@@ -56,7 +56,7 @@ func TestCommitCLIPersistsCallerMetadataForHistory(t *testing.T) {
 		t.Fatalf("commit: %v", err)
 	}
 	history, err := resolve.NewResolveTool(repo).EDGHistory(context.Background(), resolve.HistoryRequest{
-		Selector: repository.DiffSelector{Branch: "main"}, EntityID: repository.SeedNodeID,
+		Selector: snapshotSelector("main", ""), EntityID: repository.SeedNodeID,
 	})
 	if err != nil {
 		t.Fatalf("history: %v", err)

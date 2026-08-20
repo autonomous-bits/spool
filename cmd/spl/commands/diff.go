@@ -18,8 +18,8 @@ func NewDiffCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra.Co
 	command := &cobra.Command{
 		Use:          "diff",
 		Short:        "Compare two graph snapshots",
-		Long:         "Compare snapshots selected by branches or commits. Filters, pagination, one-hop context, and response budgets constrain the JSON result.",
-		Example:      "  spl diff --base-branch main --target-branch feature\n  spl diff --base-commit <base-id> --target-commit <target-id> --max-rows 100",
+		Long:         "Compare snapshots selected by branches and optional reachable commits. Filters, pagination, one-hop context, and response budgets constrain the JSON result.",
+		Example:      "  spl diff --base-branch main --target-branch feature\n  spl diff --base-branch main --base-commit <base-id> --target-branch feature --target-commit <target-id> --max-rows 100",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(command *cobra.Command, _ []string) error {
@@ -28,8 +28,8 @@ func NewDiffCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra.Co
 				return err
 			}
 			result, err := tool.EDGDiff(command.Context(), resolve.DiffRequest{
-				Base:          repository.DiffSelector{Branch: baseBranch, Commit: baseCommit},
-				Target:        repository.DiffSelector{Branch: targetBranch, Commit: targetCommit},
+				Base:          snapshotSelectorFlag(command, "base-commit", baseBranch, baseCommit),
+				Target:        snapshotSelectorFlag(command, "target-commit", targetBranch, targetCommit),
 				Filter:        repository.DiffFilter{NodeIDs: nodeIDs, EdgeIDs: edgeIDs, NodeTitleSubstr: title},
 				IncludeOneHop: oneHop, ContinuationToken: token,
 				Budget: diffBudget(command, &maxRows, &maxResponseBytes),
@@ -58,7 +58,25 @@ func NewDiffCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra.Co
 	command.Flags().StringVar(&token, "continuation", "", "continuation token")
 	command.Flags().IntVar(&maxRows, "max-rows", 0, "maximum rows to return")
 	command.Flags().IntVar(&maxResponseBytes, "max-response-bytes", 0, "maximum response size in bytes")
+	_ = command.MarkFlagRequired("base-branch")
+	_ = command.MarkFlagRequired("target-branch")
 	return command
+}
+
+func snapshotSelector(branch, commit string) resolve.SnapshotSelector {
+	selector := resolve.SnapshotSelector{Branch: branch}
+	if commit != "" {
+		selector.Commit = &commit
+	}
+	return selector
+}
+
+func snapshotSelectorFlag(command *cobra.Command, commitFlag, branch, commit string) resolve.SnapshotSelector {
+	selector := snapshotSelector(branch, commit)
+	if command.Flags().Changed(commitFlag) {
+		selector.Commit = &commit
+	}
+	return selector
 }
 
 // diffBudget returns only the diff budget limits explicitly supplied on the command line.
