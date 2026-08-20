@@ -44,6 +44,14 @@ func (r *Repository) projectionRepositoryID() string {
 	return hex.EncodeToString(sum[:])
 }
 
+// RepositoryID returns the stable identifier for this repository's projection
+// namespace without exposing its storage location or SQLite tables.
+func (r *Repository) RepositoryID() string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.projectionRepositoryID()
+}
+
 func (r *Repository) openProjectionLocked() error {
 	if r.mergeStateDir == "" || r.projectionDB != nil {
 		return nil

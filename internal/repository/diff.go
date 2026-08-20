@@ -9,8 +9,6 @@ import (
 )
 
 var (
-	// ErrInvalidDiffSelector reports a selector that names both or neither branch and commit.
-	ErrInvalidDiffSelector = errors.New("diff selector must identify exactly one branch or commit")
 	// ErrInvalidContinuation reports a continuation token from another request or with invalid encoding.
 	ErrInvalidContinuation = errors.New("diff continuation token does not match request")
 	// ErrInvalidDiffBudget reports a non-positive row budget.
@@ -18,14 +16,6 @@ var (
 	// ErrResponseBudgetTooSmall reports a byte budget unable to represent the response metadata.
 	ErrResponseBudgetTooSmall = errors.New("diff response budget cannot represent result metadata")
 )
-
-// DiffSelector identifies a snapshot by exactly one branch or commit.
-type DiffSelector struct {
-	// Branch selects the branch's current head.
-	Branch string `json:"branch,omitempty"`
-	// Commit selects an explicit existing commit.
-	Commit string `json:"commit,omitempty"`
-}
 
 // DiffFilter restricts diff changes by identifiers or node title substring.
 type DiffFilter struct {
@@ -39,10 +29,10 @@ type DiffFilter struct {
 
 // DiffRequest describes a bounded, optionally filtered comparison of two snapshots.
 type DiffRequest struct {
-	// Base identifies the older comparison snapshot.
-	Base DiffSelector `json:"base"`
-	// Target identifies the newer comparison snapshot.
-	Target DiffSelector `json:"target"`
+	// Base identifies the already pinned older comparison commit.
+	Base ObjectID `json:"base"`
+	// Target identifies the already pinned newer comparison commit.
+	Target ObjectID `json:"target"`
 	// Filter optionally limits the returned changes.
 	Filter DiffFilter `json:"filter,omitempty"`
 	// MaxRows limits changes and context entries returned in this page.
@@ -107,11 +97,11 @@ func (r *Repository) Diff(request DiffRequest) (DiffResult, error) {
 	if err := r.ensureOpenLocked(); err != nil {
 		return DiffResult{}, err
 	}
-	base, err := r.resolveDiffSelectorLocked(request.Base)
+	base, err := r.requirePinnedCommitLocked(request.Base)
 	if err != nil {
 		return DiffResult{}, err
 	}
-	target, err := r.resolveDiffSelectorLocked(request.Target)
+	target, err := r.requirePinnedCommitLocked(request.Target)
 	if err != nil {
 		return DiffResult{}, err
 	}
@@ -170,18 +160,7 @@ func (r *Repository) Diff(request DiffRequest) (DiffResult, error) {
 	return result, nil
 }
 
-func (r *Repository) resolveDiffSelectorLocked(selector DiffSelector) (ObjectID, error) {
-	if (selector.Branch == "") == (selector.Commit == "") {
-		return "", ErrInvalidDiffSelector
-	}
-	if selector.Branch != "" {
-		commit, ok := r.branches[selector.Branch]
-		if !ok {
-			return "", ErrBranchNotFound
-		}
-		return commit, nil
-	}
-	commit := ObjectID(selector.Commit)
+func (r *Repository) requirePinnedCommitLocked(commit ObjectID) (ObjectID, error) {
 	if _, ok := r.commits[commit]; !ok {
 		return "", ErrCommitNotFound
 	}

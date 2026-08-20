@@ -30,7 +30,7 @@ func TestHistoryReturnsCommitMetadataAndEntityChanges(t *testing.T) {
 	}
 
 	result, err := repo.History(HistoryRequest{
-		Selector: DiffSelector{Branch: "main"}, EntityID: SeedNodeID,
+		Commit: repo.branches["main"], EntityID: SeedNodeID,
 	})
 	if err != nil {
 		t.Fatalf("History: %v", err)
@@ -54,7 +54,7 @@ func TestHistoryReturnsCommitMetadataAndEntityChanges(t *testing.T) {
 	if _, err := repo.CommitStagedMutations("main"); err != nil {
 		t.Fatalf("commit unrelated: %v", err)
 	}
-	result, err = repo.History(HistoryRequest{Selector: DiffSelector{Branch: "main"}, EntityID: SeedNodeID})
+	result, err = repo.History(HistoryRequest{Commit: repo.branches["main"], EntityID: SeedNodeID})
 	if err != nil {
 		t.Fatalf("History after unrelated commit: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestHistoryAllParentsAndContainmentTraverseMergedHistory(t *testing.T) {
 		t.Fatalf("merge: %v", err)
 	}
 
-	firstParent, err := repo.History(HistoryRequest{Selector: DiffSelector{Branch: "main"}, EntityID: "feature-node"})
+	firstParent, err := repo.History(HistoryRequest{Commit: repo.branches["main"], EntityID: "feature-node"})
 	if err != nil {
 		t.Fatalf("first-parent history: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestHistoryAllParentsAndContainmentTraverseMergedHistory(t *testing.T) {
 		t.Fatalf("first-parent history = %#v", firstParent)
 	}
 	history, err := repo.History(HistoryRequest{
-		Selector: DiffSelector{Branch: "main"}, EntityID: "feature-node", AllParents: true,
+		Commit: repo.branches["main"], EntityID: "feature-node", AllParents: true,
 	})
 	if err != nil {
 		t.Fatalf("all-parent history: %v", err)
@@ -158,7 +158,7 @@ func TestHistoryRepresentsEdgeUpdatesAsRemovalAndAddition(t *testing.T) {
 	if _, err := repo.CommitStagedMutations("main"); err != nil {
 		t.Fatalf("commit edge update: %v", err)
 	}
-	history, err := repo.History(HistoryRequest{Selector: DiffSelector{Branch: "main"}, EntityID: SeedNodeID})
+	history, err := repo.History(HistoryRequest{Commit: repo.branches["main"], EntityID: SeedNodeID})
 	if err != nil {
 		t.Fatalf("History: %v", err)
 	}

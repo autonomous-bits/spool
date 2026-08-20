@@ -76,5 +76,6 @@ func NewResolveCommandWithToolProvider(toolProvider func() (*resolve.ResolveTool
 	command.Flags().IntVar(&maxDepth, "max-depth", 0, "maximum traversal depth")
 	command.Flags().IntVar(&maxVisited, "max-visited", 0, "maximum visited nodes")
 	command.Flags().DurationVar(&timeout, "timeout", 0, "maximum query duration")
+	_ = command.MarkFlagRequired("branch")
 	return command
 }

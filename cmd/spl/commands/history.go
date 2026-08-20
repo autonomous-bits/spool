@@ -15,8 +15,8 @@ func NewHistoryCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra
 	command := &cobra.Command{
 		Use:          "history",
 		Short:        "Return an entity's commit history",
-		Long:         "Return commits that changed an entity, starting from a branch or commit selector. Use --all-parents to traverse every merge parent.",
-		Example:      "  spl history --branch main --entity-id <node-id>\n  spl history --commit <commit-id> --entity-id <node-id> --all-parents",
+		Long:         "Return commits that changed an entity, starting from a branch and optional reachable commit. Use --all-parents to traverse every merge parent.",
+		Example:      "  spl history --branch main --entity-id <node-id>\n  spl history --branch main --commit <commit-id> --entity-id <node-id> --all-parents",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(command *cobra.Command, _ []string) error {
@@ -25,7 +25,7 @@ func NewHistoryCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra
 				return err
 			}
 			result, err := tool.EDGHistory(command.Context(), resolve.HistoryRequest{
-				Selector: repository.DiffSelector{Branch: branch, Commit: commit}, EntityID: entity, AllParents: allParents,
+				Selector: snapshotSelectorFlag(command, "commit", branch, commit), EntityID: entity, AllParents: allParents,
 			})
 			if err != nil {
 				return err
@@ -38,6 +38,7 @@ func NewHistoryCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra
 	command.Flags().StringVar(&entity, "entity-id", "", "stable entity ID")
 	command.Flags().BoolVar(&allParents, "all-parents", false, "traverse all merge parents")
 	_ = command.MarkFlagRequired("entity-id")
+	_ = command.MarkFlagRequired("branch")
 	return command
 }
 

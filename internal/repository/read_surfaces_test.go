@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"errors"
 	"reflect"
 	"testing"
 )
@@ -60,7 +61,7 @@ func TestReadSurfacesRetainTypedGraphFields(t *testing.T) {
 	target := commitReadSurfaceSnapshot(t, repo, targetNodes, targetEdges, repo.snapshots[repo.commits[base].Snapshot].SchemaRoot)
 
 	diff, err := repo.Diff(DiffRequest{
-		Base: DiffSelector{Commit: string(base)}, Target: DiffSelector{Commit: string(target)},
+		Base: base, Target: target,
 		IncludeOneHop: true, MaxRows: 10, MaxResponseBytes: 1 << 20,
 	})
 	if err != nil {
@@ -83,7 +84,7 @@ func TestReadSurfacesRetainTypedGraphFields(t *testing.T) {
 	diffContextNodeByID(diff.Context, "node-2").Labels[0] = "mutated"
 	diffContextEdgeByID(diff.Context, "edge-context").Properties["weight"] = IntegerPropertyValue(99)
 	again, err := repo.Diff(DiffRequest{
-		Base: DiffSelector{Commit: string(base)}, Target: DiffSelector{Commit: string(target)},
+		Base: base, Target: target,
 		IncludeOneHop: true, MaxRows: 10, MaxResponseBytes: 1 << 20,
 	})
 	if err != nil {
@@ -96,7 +97,7 @@ func TestReadSurfacesRetainTypedGraphFields(t *testing.T) {
 		t.Fatalf("diff context edge was mutated through result: %#v", got)
 	}
 
-	history, err := repo.History(HistoryRequest{Selector: DiffSelector{Commit: string(target)}, EntityID: SeedNodeID})
+	history, err := repo.History(HistoryRequest{Commit: target, EntityID: SeedNodeID})
 	if err != nil {
 		t.Fatalf("History: %v", err)
 	}
@@ -108,7 +109,7 @@ func TestReadSurfacesRetainTypedGraphFields(t *testing.T) {
 		t.Fatalf("typed edge history = %#v", history.Entries[0])
 	}
 	history.Entries[0].EdgeAdditions[0].Properties["weight"] = IntegerPropertyValue(99)
-	history, err = repo.History(HistoryRequest{Selector: DiffSelector{Commit: string(target)}, EntityID: SeedNodeID})
+	history, err = repo.History(HistoryRequest{Commit: target, EntityID: SeedNodeID})
 	if err != nil {
 		t.Fatalf("History again: %v", err)
 	}
@@ -117,7 +118,7 @@ func TestReadSurfacesRetainTypedGraphFields(t *testing.T) {
 	}
 
 	impact, err := repo.Impact(ImpactRequest{
-		Selector: DiffSelector{Commit: string(base)},
+		Commit:   base,
 		Delta:    []MutationOperation{{Action: "update", Entity: "node", ID: SeedNodeID, Title: "Hypothetical"}},
 		MaxDepth: 1, MaxVisited: 10,
 	})
@@ -138,6 +139,45 @@ func TestReadSurfacesRetainTypedGraphFields(t *testing.T) {
 	wantImpactEdge.Source, wantImpactEdge.Target = "node-2", SeedNodeID
 	if !clonedEdges["edge-context"].Equal(wantImpactEdge) {
 		t.Fatalf("typed impact edge clone = %#v, want %#v", clonedEdges["edge-context"], wantImpactEdge)
+	}
+}
+
+func TestPinnedReadAPIsDoNotMoveBranches(t *testing.T) {
+	repo := NewSeedRepository()
+	head, err := repo.PinBranch("main")
+	if err != nil {
+		t.Fatalf("PinBranch: %v", err)
+	}
+
+	if _, err := repo.Diff(DiffRequest{
+		Base: head, Target: head, MaxRows: 10, MaxResponseBytes: 1 << 20,
+	}); err != nil {
+		t.Fatalf("Diff: %v", err)
+	}
+	if _, err := repo.History(HistoryRequest{Commit: head, EntityID: SeedNodeID}); err != nil {
+		t.Fatalf("History: %v", err)
+	}
+	if _, err := repo.Impact(ImpactRequest{
+		Commit:   head,
+		Delta:    []MutationOperation{{Action: "update", Entity: "node", ID: SeedNodeID, Title: "Hypothetical"}},
+		MaxDepth: 1, MaxVisited: 10,
+	}); err != nil {
+		t.Fatalf("Impact: %v", err)
+	}
+
+	current, err := repo.PinBranch("main")
+	if err != nil {
+		t.Fatalf("PinBranch after reads: %v", err)
+	}
+	if current != head {
+		t.Fatalf("pinned read APIs moved main from %q to %q", head, current)
+	}
+}
+
+func TestResolvePinnedRejectsUnknownCommitWithCommitNotFound(t *testing.T) {
+	_, err := NewSeedRepository().ResolvePinned("missing", SeedNodeID)
+	if !errors.Is(err, ErrCommitNotFound) {
+		t.Fatalf("ResolvePinned error = %v, want ErrCommitNotFound", err)
 	}
 }
 

@@ -3,6 +3,7 @@ package resolve
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -34,8 +35,12 @@ type SnapshotSelector struct {
 // Node is the immutable graph node representation returned by repository resolution.
 type Node = repository.Node
 
-// SnapshotMetadata identifies the immutable snapshot used to resolve a node.
+// SnapshotMetadata identifies the bound repository snapshot used to resolve a node.
 type SnapshotMetadata struct {
+	// Repository identifies the repository that resolved the snapshot.
+	Repository string `json:"repository"`
+	// Branch identifies the requested branch.
+	Branch string `json:"branch"`
 	// Commit identifies the selected commit.
 	Commit string `json:"commit"`
 	// Root identifies the selected graph snapshot.
@@ -44,11 +49,12 @@ type SnapshotMetadata struct {
 
 // ProjectionMetadata describes the node projection returned by resolution.
 type ProjectionMetadata struct {
-	// NodeRoot identifies the durable root of the node projection.
+	// NodeRoot identifies the projection watermark when it matches Snapshot.
 	NodeRoot string `json:"nodeRoot"`
-	// State describes projection availability.
+	// State describes availability for Snapshot. A nonmatching or absent
+	// branch-head projection is unavailable.
 	State string `json:"state"`
-	// SchemaVersion identifies the graph schema version.
+	// SchemaVersion identifies the projection schema version.
 	SchemaVersion string `json:"schemaVersion"`
 }
 
@@ -87,12 +93,46 @@ type SchemaMetadata struct {
 type SchemaValidationResult struct {
 	// Snapshot identifies the commit and graph snapshot validated.
 	Snapshot SnapshotMetadata `json:"snapshot"`
+	// Projection describes the projection provenance for Snapshot.
+	Projection ProjectionMetadata `json:"projection"`
 	// Schema identifies the schema applied to Snapshot.
 	Schema SchemaMetadata `json:"schema"`
 	// Valid reports whether the snapshot conforms to Schema.
 	Valid bool `json:"valid"`
 	// Violations contains every failed schema constraint when Valid is false.
 	Violations []repository.SchemaViolation `json:"violations"`
+}
+
+// DiffResult contains a bounded diff page and provenance for both pinned snapshots.
+type DiffResult struct {
+	// Base identifies the pinned base snapshot.
+	Base SnapshotMetadata `json:"base"`
+	// Target identifies the pinned target snapshot.
+	Target SnapshotMetadata `json:"target"`
+	// Projection describes the target snapshot's projection provenance.
+	Projection ProjectionMetadata `json:"projection"`
+	// DiffResult retains the bounded diff payload and pagination fields.
+	repository.DiffResult
+}
+
+// HistoryResult contains entity history and provenance for its pinned start snapshot.
+type HistoryResult struct {
+	// Snapshot identifies the pinned snapshot from which history was traversed.
+	Snapshot SnapshotMetadata `json:"snapshot"`
+	// Projection describes the snapshot's projection provenance.
+	Projection ProjectionMetadata `json:"projection"`
+	// HistoryResult retains the entity history payload.
+	repository.HistoryResult
+}
+
+// ImpactResult contains impact analysis and provenance for its pinned snapshot.
+type ImpactResult struct {
+	// Snapshot identifies the pinned snapshot analyzed.
+	Snapshot SnapshotMetadata `json:"snapshot"`
+	// Projection describes the snapshot's projection provenance.
+	Projection ProjectionMetadata `json:"projection"`
+	// ImpactResult retains the bounded impact payload.
+	repository.ImpactResult
 }
 
 // Resolver resolves nodes against pinned repository commits.
@@ -124,16 +164,9 @@ func (r *Resolver) Resolve(ctx context.Context, selector SnapshotSelector, nodeI
 		return ResolveResult{}, err
 	}
 	return ResolveResult{
-		Node: resolution.Node,
-		Snapshot: SnapshotMetadata{
-			Commit: string(resolution.Commit),
-			Root:   string(resolution.Snapshot),
-		},
-		Projection: ProjectionMetadata{
-			NodeRoot:      string(resolution.NodeRoot),
-			State:         "ready",
-			SchemaVersion: fmt.Sprintf("v%d", resolution.SchemaVersion),
-		},
+		Node:       resolution.Node,
+		Snapshot:   r.snapshotMetadata(selector.Branch, resolution.Commit, resolution.Snapshot),
+		Projection: r.projectionMetadata(selector.Branch, resolution),
 	}, nil
 }
 
@@ -148,12 +181,58 @@ func (r *Resolver) ValidateSchema(ctx context.Context, selector SnapshotSelector
 		return SchemaValidationResult{}, err
 	}
 	return SchemaValidationResult{
-		Snapshot: SnapshotMetadata{Commit: string(resolution.Commit), Root: string(resolution.Snapshot)},
+		Snapshot:   r.snapshotMetadata(selector.Branch, resolution.Commit, resolution.Snapshot),
+		Projection: r.projectionMetadataForCommit(selector.Branch, resolution.Commit),
 		Schema: SchemaMetadata{
 			Root: string(resolution.SchemaRoot), Version: resolution.Schema.Version, Permissive: resolution.Schema.Permissive,
 		},
 		Valid: resolution.Valid, Violations: resolution.Violations,
 	}, nil
+}
+
+func (r *Resolver) snapshotMetadata(branch string, commit, root repository.ObjectID) SnapshotMetadata {
+	return SnapshotMetadata{
+		Repository: r.repo.RepositoryID(),
+		Branch:     branch,
+		Commit:     string(commit),
+		Root:       string(root),
+	}
+}
+
+func (r *Resolver) projectionMetadata(branch string, resolution repository.Resolution) ProjectionMetadata {
+	return r.projectionMetadataForRoots(branch, resolution.Commit, resolution.NodeRoot)
+}
+
+func (r *Resolver) projectionMetadataForCommit(branch string, commit repository.ObjectID) ProjectionMetadata {
+	record, err := r.repo.PinnedSnapshotRecord(commit)
+	if err != nil {
+		return ProjectionMetadata{State: "unavailable"}
+	}
+	return r.projectionMetadataForRoots(branch, record.Commit, record.NodeRoot)
+}
+
+func (r *Resolver) projectionMetadataForRoots(branch string, commit, nodeRoot repository.ObjectID) ProjectionMetadata {
+	metadata := ProjectionMetadata{State: "unavailable"}
+	status, err := r.repo.ProjectionStatus()
+	if err != nil ||
+		status.Branch != branch ||
+		status.Commit != commit ||
+		status.NodeRoot != nodeRoot {
+		return metadata
+	}
+	return ProjectionMetadata{
+		NodeRoot:      string(status.NodeRoot),
+		State:         status.State,
+		SchemaVersion: fmt.Sprintf("v%d", status.SchemaVersion),
+	}
+}
+
+func (r *Resolver) snapshotMetadataForCommit(branch string, commit repository.ObjectID) (SnapshotMetadata, error) {
+	record, err := r.repo.PinnedSnapshotRecord(commit)
+	if err != nil {
+		return SnapshotMetadata{}, err
+	}
+	return r.snapshotMetadata(branch, record.Commit, record.Snapshot), nil
 }
 
 func (r *Resolver) resolveSnapshotCommit(ctx context.Context, selector SnapshotSelector) (repository.ObjectID, error) {
@@ -208,10 +287,10 @@ type SchemaValidationRequest struct {
 
 // DiffRequest combines a repository diff request with optional tool query limits.
 type DiffRequest struct {
-	// Base identifies the base snapshot.
-	Base repository.DiffSelector `json:"base"`
-	// Target identifies the target snapshot.
-	Target repository.DiffSelector `json:"target"`
+	// Base identifies the required branch and optional reachable base commit.
+	Base SnapshotSelector `json:"base"`
+	// Target identifies the required branch and optional reachable target commit.
+	Target SnapshotSelector `json:"target"`
 	// Filter optionally restricts returned changes.
 	Filter repository.DiffFilter `json:"filter,omitempty"`
 	// IncludeOneHop requests related unchanged context.
@@ -222,14 +301,23 @@ type DiffRequest struct {
 	Budget QueryBudgetRequest `json:"budget"`
 }
 
-// HistoryRequest is the repository history request accepted by ResolveTool.
-type HistoryRequest = repository.HistoryRequest
+// HistoryRequest identifies the branch-constrained history traversal to perform.
+type HistoryRequest struct {
+	// Selector identifies the required branch and optional reachable starting commit.
+	Selector SnapshotSelector `json:"selector"`
+	// EntityID identifies the node or edge whose changes are returned.
+	EntityID string `json:"entityId"`
+	// AllParents includes all parent links rather than only each commit's first parent.
+	AllParents bool `json:"allParents,omitempty"`
+}
 
 // ContainmentSelector is the repository containment selector accepted by ResolveTool.
 type ContainmentSelector = repository.ContainmentSelector
 
 // ImpactRequest combines a repository impact request with optional tool query limits.
 type ImpactRequest struct {
+	// Selector identifies the required branch and optional reachable commit to analyze.
+	Selector SnapshotSelector `json:"selector"`
 	// Request contains the hypothetical repository impact operation.
 	Request repository.ImpactRequest `json:"request"`
 	// Budget optionally narrows configured query limits.
@@ -400,24 +488,94 @@ func (t *ResolveTool) EDGValidateSchema(ctx context.Context, request SchemaValid
 }
 
 // EDGDiff honors cancellation and returns a budgeted repository diff page.
-func (t *ResolveTool) EDGDiff(ctx context.Context, request DiffRequest) (repository.DiffResult, error) {
+func (t *ResolveTool) EDGDiff(ctx context.Context, request DiffRequest) (DiffResult, error) {
 	if err := ctx.Err(); err != nil {
-		return repository.DiffResult{}, err
+		return DiffResult{}, err
+	}
+	base, err := t.resolver.resolveSnapshotCommit(ctx, request.Base)
+	if err != nil {
+		return DiffResult{}, err
+	}
+	target, err := t.resolver.resolveSnapshotCommit(ctx, request.Target)
+	if err != nil {
+		return DiffResult{}, err
+	}
+	baseSnapshot, err := t.resolver.snapshotMetadataForCommit(request.Base.Branch, base)
+	if err != nil {
+		return DiffResult{}, err
+	}
+	targetSnapshot, err := t.resolver.snapshotMetadataForCommit(request.Target.Branch, target)
+	if err != nil {
+		return DiffResult{}, err
+	}
+	result := DiffResult{
+		Base: baseSnapshot, Target: targetSnapshot,
+		Projection: t.resolver.projectionMetadataForCommit(request.Target.Branch, target),
+		DiffResult: repository.DiffResult{
+			BaseCommit: base, TargetCommit: target, Changes: make([]repository.DiffEntry, 0),
+		},
 	}
 	budget := NormalizeQueryBudget(request.Budget, t.queryBudget)
-	return t.resolver.repo.Diff(repository.DiffRequest{
-		Base: request.Base, Target: request.Target, Filter: request.Filter,
-		MaxRows: budget.MaxRows, MaxResponseBytes: budget.MaxResponseBytes,
+	payloadBudget, err := diffPayloadBudget(result, budget.MaxResponseBytes)
+	if err != nil {
+		return DiffResult{}, err
+	}
+	payload, err := t.resolver.repo.Diff(repository.DiffRequest{
+		Base: base, Target: target, Filter: request.Filter,
+		MaxRows: budget.MaxRows, MaxResponseBytes: payloadBudget,
 		IncludeOneHop: request.IncludeOneHop, ContinuationToken: request.ContinuationToken,
 	})
+	if err != nil {
+		return DiffResult{}, err
+	}
+	result.DiffResult = payload
+	if !diffEnvelopeFits(result, budget.MaxResponseBytes) {
+		return DiffResult{}, repository.ErrResponseBudgetTooSmall
+	}
+	return result, nil
+}
+
+// diffPayloadBudget reserves the public envelope's JSON overhead for repository.Diff.
+func diffPayloadBudget(result DiffResult, maxBytes int) (int, error) {
+	envelope, err := json.Marshal(result)
+	if err != nil || len(envelope) > maxBytes {
+		return 0, repository.ErrResponseBudgetTooSmall
+	}
+	payload, err := json.Marshal(result.DiffResult)
+	if err != nil {
+		return 0, repository.ErrResponseBudgetTooSmall
+	}
+	return maxBytes - (len(envelope) - len(payload)), nil
+}
+
+func diffEnvelopeFits(result DiffResult, maxBytes int) bool {
+	data, err := json.Marshal(result)
+	return err == nil && len(data) <= maxBytes
 }
 
 // EDGHistory honors cancellation and returns repository entity history.
-func (t *ResolveTool) EDGHistory(ctx context.Context, request HistoryRequest) (repository.HistoryResult, error) {
+func (t *ResolveTool) EDGHistory(ctx context.Context, request HistoryRequest) (HistoryResult, error) {
 	if err := ctx.Err(); err != nil {
-		return repository.HistoryResult{}, err
+		return HistoryResult{}, err
 	}
-	return t.resolver.repo.History(request)
+	commit, err := t.resolver.resolveSnapshotCommit(ctx, request.Selector)
+	if err != nil {
+		return HistoryResult{}, err
+	}
+	payload, err := t.resolver.repo.History(repository.HistoryRequest{
+		Commit: commit, EntityID: request.EntityID, AllParents: request.AllParents,
+	})
+	if err != nil {
+		return HistoryResult{}, err
+	}
+	snapshot, err := t.resolver.snapshotMetadataForCommit(request.Selector.Branch, commit)
+	if err != nil {
+		return HistoryResult{}, err
+	}
+	return HistoryResult{
+		Snapshot: snapshot, Projection: t.resolver.projectionMetadataForCommit(request.Selector.Branch, commit),
+		HistoryResult: payload,
+	}, nil
 }
 
 // EDGBranchesContaining honors cancellation and returns matching repository branches.
@@ -429,14 +587,30 @@ func (t *ResolveTool) EDGBranchesContaining(ctx context.Context, selector Contai
 }
 
 // EDGImpact honors cancellation and applies effective budgets to a non-persistent impact query.
-func (t *ResolveTool) EDGImpact(ctx context.Context, request ImpactRequest) (repository.ImpactResult, error) {
+func (t *ResolveTool) EDGImpact(ctx context.Context, request ImpactRequest) (ImpactResult, error) {
 	if err := ctx.Err(); err != nil {
-		return repository.ImpactResult{}, err
+		return ImpactResult{}, err
+	}
+	commit, err := t.resolver.resolveSnapshotCommit(ctx, request.Selector)
+	if err != nil {
+		return ImpactResult{}, err
 	}
 	budget := NormalizeQueryBudget(request.Budget, t.queryBudget)
 	request.Request.MaxDepth = budget.MaxDepth
 	request.Request.MaxVisited = budget.MaxVisited
-	return t.resolver.repo.Impact(request.Request)
+	request.Request.Commit = commit
+	payload, err := t.resolver.repo.Impact(request.Request)
+	if err != nil {
+		return ImpactResult{}, err
+	}
+	snapshot, err := t.resolver.snapshotMetadataForCommit(request.Selector.Branch, commit)
+	if err != nil {
+		return ImpactResult{}, err
+	}
+	return ImpactResult{
+		Snapshot: snapshot, Projection: t.resolver.projectionMetadataForCommit(request.Selector.Branch, commit),
+		ImpactResult: payload,
+	}, nil
 }
 
 // EDGCreateBranch delegates a context-aware branch creation request.

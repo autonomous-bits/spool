@@ -8,18 +8,16 @@ import (
 )
 
 var (
-	// ErrInvalidHistorySelector reports a selector that names both or neither branch and commit.
-	ErrInvalidHistorySelector = errors.New("history selector must identify exactly one branch or commit")
 	// ErrInvalidContainmentSelector reports a containment selector with an invalid combination of keys.
 	ErrInvalidContainmentSelector = errors.New("containment selector must identify exactly one entity ID, snapshot, or natural key")
 	// ErrEntityHistoryNotFound reports an empty entity identifier or no matching history.
 	ErrEntityHistoryNotFound = errors.New("entity has no history")
 )
 
-// HistoryRequest selects an entity's commit history from a branch or commit.
+// HistoryRequest selects an entity's commit history from an already pinned commit.
 type HistoryRequest struct {
-	// Selector identifies the traversal starting commit.
-	Selector DiffSelector `json:"selector"`
+	// Commit identifies the traversal starting commit.
+	Commit ObjectID `json:"commit"`
 	// EntityID identifies the node or edge whose changes are returned.
 	EntityID string `json:"entityId"`
 	// AllParents includes all parent links rather than only each commit's first parent.
@@ -80,7 +78,7 @@ func (r *Repository) History(request HistoryRequest) (HistoryResult, error) {
 	if request.EntityID == "" {
 		return HistoryResult{}, ErrEntityHistoryNotFound
 	}
-	start, err := r.resolveHistorySelectorLocked(request.Selector)
+	start, err := r.requirePinnedCommitLocked(request.Commit)
 	if err != nil {
 		return HistoryResult{}, err
 	}
@@ -126,24 +124,6 @@ func (r *Repository) BranchesContaining(selector ContainmentSelector) (BranchCon
 	}
 	sort.Strings(branches)
 	return BranchContainmentResult{Branches: branches}, nil
-}
-
-func (r *Repository) resolveHistorySelectorLocked(selector DiffSelector) (ObjectID, error) {
-	if (selector.Branch == "") == (selector.Commit == "") {
-		return "", ErrInvalidHistorySelector
-	}
-	if selector.Branch != "" {
-		commit, ok := r.branches[selector.Branch]
-		if !ok {
-			return "", ErrBranchNotFound
-		}
-		return commit, nil
-	}
-	commit := ObjectID(selector.Commit)
-	if _, ok := r.commits[commit]; !ok {
-		return "", ErrCommitNotFound
-	}
-	return commit, nil
 }
 
 func (r *Repository) historyTraversalLocked(start ObjectID, allParents bool) []ObjectID {
