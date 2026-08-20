@@ -33,12 +33,14 @@ const objectIDHexLength = 64
 // looseObjectStore keeps canonical object bytes in memory and, when stateDir is
 // set, durably mirrors them below .spl/objects/loose.
 type looseObjectStore struct {
-	looseDir string
-	cache    *map[ObjectID][]byte
+	looseDir    string
+	cache       *map[ObjectID][]byte
+	types       map[ObjectID]string
+	packIndexes packIndexStore
 }
 
 func newLooseObjectStore(stateDir string, cache *map[ObjectID][]byte) *looseObjectStore {
-	store := &looseObjectStore{cache: cache}
+	store := &looseObjectStore{cache: cache, types: make(map[ObjectID]string), packIndexes: binaryPackIndexStore{}}
 	if stateDir != "" {
 		store.looseDir = filepath.Join(stateDir, "objects", "loose")
 	}
@@ -73,6 +75,7 @@ func (s *looseObjectStore) putEncoded(objectType string, encoded []byte) (Object
 		}
 	}
 	(*s.cache)[id] = append([]byte(nil), encoded...)
+	s.types[id] = objectType
 	return id, nil
 }
 
@@ -83,25 +86,99 @@ func (s *looseObjectStore) get(id ObjectID, objectType string) ([]byte, error) {
 	if !validLooseObjectID(id) {
 		return nil, fmt.Errorf("%w: %q", errInvalidLooseObjectID, id)
 	}
-	if cached, ok := (*s.cache)[id]; ok {
-		if objectIDForEncoded(objectType, cached) != id {
-			return nil, fmt.Errorf("%w: cached %s", errLooseObjectCorrupt, id)
+	if encoded, cached := (*s.cache)[id]; cached {
+		actualType, known := s.types[id]
+		if known {
+			if actualType == "" || objectIDForEncoded(actualType, encoded) != id {
+				return nil, fmt.Errorf("%w: cached %s", errLooseObjectCorrupt, id)
+			}
+			if actualType != objectType {
+				return nil, fmt.Errorf("%w: %s is %q, want %q", errLooseObjectType, id, actualType, objectType)
+			}
+			return append([]byte(nil), encoded...), nil
 		}
-		return append([]byte(nil), cached...), nil
+		if s.looseDir == "" {
+			return nil, fmt.Errorf("%w: cached object type for %s", errLooseObjectCorrupt, id)
+		}
+	}
+	actualType, encoded, err := s.getAnyUncached(id)
+	if err != nil {
+		return nil, err
+	}
+	if actualType != objectType {
+		return nil, fmt.Errorf("%w: %s is %q, want %q", errLooseObjectType, id, actualType, objectType)
+	}
+	(*s.cache)[id] = append([]byte(nil), encoded...)
+	s.types[id] = actualType
+	return encoded, nil
+}
+
+// getAny reads one verified object without imposing an expected repository
+// type. Callers that interpret the payload must still enforce their expected
+// type; this is shared by graph walking and future alternate object locations.
+func (s *looseObjectStore) getAny(id ObjectID) (string, []byte, error) {
+	if !validLooseObjectID(id) {
+		return "", nil, fmt.Errorf("%w: %q", errInvalidLooseObjectID, id)
+	}
+	if cached, ok := (*s.cache)[id]; ok {
+		objectType, known := s.types[id]
+		if !known {
+			if s.looseDir == "" {
+				return "", nil, fmt.Errorf("%w: cached object type for %s", errLooseObjectCorrupt, id)
+			}
+		} else if objectType == "" || objectIDForEncoded(objectType, cached) != id {
+			return "", nil, fmt.Errorf("%w: cached %s", errLooseObjectCorrupt, id)
+		} else {
+			return objectType, append([]byte(nil), cached...), nil
+		}
+	}
+	objectType, encoded, err := s.getAnyUncached(id)
+	if err != nil {
+		return "", nil, err
+	}
+	(*s.cache)[id] = append([]byte(nil), encoded...)
+	s.types[id] = objectType
+	return objectType, encoded, nil
+}
+
+// getAnyDurable bypasses the cache so maintenance can make decisions from the
+// current durable object location rather than an earlier verified read.
+func (s *looseObjectStore) getAnyDurable(id ObjectID) (string, []byte, error) {
+	if !validLooseObjectID(id) {
+		return "", nil, fmt.Errorf("%w: %q", errInvalidLooseObjectID, id)
 	}
 	if s.looseDir == "" {
-		return nil, fmt.Errorf("%w: %s", errLooseObjectNotFound, id)
+		return s.getAny(id)
+	}
+	objectType, encoded, err := s.getAnyUncached(id)
+	if err != nil {
+		return "", nil, err
+	}
+	(*s.cache)[id] = append([]byte(nil), encoded...)
+	s.types[id] = objectType
+	return objectType, encoded, nil
+}
+
+func (s *looseObjectStore) getAnyUncached(id ObjectID) (string, []byte, error) {
+	if s.looseDir == "" {
+		return "", nil, fmt.Errorf("%w: %s", errLooseObjectNotFound, id)
 	}
 	path, err := s.path(id)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
-	encoded, err := readLooseObject(path, id, objectType)
+	objectType, encoded, err := readLooseObjectAny(path, id)
+	if err == nil {
+		return objectType, encoded, nil
+	}
+	if !errors.Is(err, errLooseObjectNotFound) {
+		return "", nil, err
+	}
+	objectType, encoded, err = s.readPackedObject(id)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
-	(*s.cache)[id] = append([]byte(nil), encoded...)
-	return encoded, nil
+	return objectType, encoded, nil
 }
 
 func (s *looseObjectStore) ensureDurable(path string, id ObjectID, objectType string, encoded []byte) error {
@@ -123,7 +200,7 @@ func (s *looseObjectStore) ensureDurable(path string, id ObjectID, objectType st
 		return fmt.Errorf("inspect loose object %s: %w", id, err)
 	}
 
-	if err := ensureLooseObjectDirectory(filepath.Dir(path)); err != nil {
+	if err := ensureDurableDirectory(filepath.Dir(path)); err != nil {
 		return fmt.Errorf("create loose object directory: %w", err)
 	}
 	envelope, err := canonicalCBOR.Marshal(looseObjectEnvelope{Type: objectType, Data: encoded})
@@ -136,21 +213,24 @@ func (s *looseObjectStore) ensureDurable(path string, id ObjectID, objectType st
 	return nil
 }
 
-// ensureLooseObjectDirectory makes each newly linked directory durable before
-// an object file can be published below it.
-func ensureLooseObjectDirectory(path string) error {
+// ensureDurableDirectory makes each newly linked directory durable before a
+// file can be published below it.
+func ensureDurableDirectory(path string) error {
 	var missing []string
 	for current := path; ; current = filepath.Dir(current) {
-		_, err := os.Stat(current)
+		info, err := os.Stat(current)
 		if err == nil {
+			if !info.IsDir() {
+				return fmt.Errorf("durable directory %q is not a directory", current)
+			}
 			break
 		}
 		if !os.IsNotExist(err) {
-			return fmt.Errorf("inspect loose object directory: %w", err)
+			return fmt.Errorf("inspect durable directory: %w", err)
 		}
 		parent := filepath.Dir(current)
 		if parent == current {
-			return fmt.Errorf("find existing loose object directory parent: %w", errLooseObjectCorrupt)
+			return fmt.Errorf("find existing durable directory parent for %q", path)
 		}
 		missing = append(missing, current)
 	}
@@ -169,35 +249,50 @@ func ensureLooseObjectDirectory(path string) error {
 }
 
 func readLooseObject(path string, id ObjectID, objectType string) ([]byte, error) {
+	actualType, data, err := readLooseObjectAny(path, id)
+	if err != nil {
+		return nil, err
+	}
+	if actualType != objectType {
+		return nil, fmt.Errorf("%w: %s is %q, want %q", errLooseObjectType, id, actualType, objectType)
+	}
+	return data, nil
+}
+
+func readLooseObjectAny(path string, id ObjectID) (string, []byte, error) {
 	info, err := os.Lstat(path)
 	if os.IsNotExist(err) {
-		return nil, fmt.Errorf("%w: %s", errLooseObjectNotFound, id)
+		return "", nil, fmt.Errorf("%w: %s", errLooseObjectNotFound, id)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("inspect loose object %s: %w", id, err)
+		return "", nil, fmt.Errorf("inspect loose object %s: %w", id, err)
 	}
 	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("%w: %s is not a regular file", errLooseObjectCorrupt, id)
+		return "", nil, fmt.Errorf("%w: %s is not a regular file", errLooseObjectCorrupt, id)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("read loose object %s: %w", id, err)
+		return "", nil, fmt.Errorf("read loose object %s: %w", id, err)
 	}
+	return decodeObjectEnvelope(data, id)
+}
+
+func decodeObjectEnvelope(data []byte, id ObjectID) (string, []byte, error) {
 	var envelope looseObjectEnvelope
 	if err := cbor.Unmarshal(data, &envelope); err != nil {
-		return nil, fmt.Errorf("%w: decode %s: %v", errLooseObjectCorrupt, id, err)
+		return "", nil, fmt.Errorf("%w: decode %s: %v", errLooseObjectCorrupt, id, err)
 	}
 	canonical, err := canonicalCBOR.Marshal(envelope)
 	if err != nil || !bytes.Equal(data, canonical) {
-		return nil, fmt.Errorf("%w: non-canonical envelope %s", errLooseObjectCorrupt, id)
+		return "", nil, fmt.Errorf("%w: non-canonical envelope %s", errLooseObjectCorrupt, id)
 	}
-	if envelope.Type != objectType {
-		return nil, fmt.Errorf("%w: %s is %q, want %q", errLooseObjectType, id, envelope.Type, objectType)
+	if envelope.Type == "" {
+		return "", nil, fmt.Errorf("%w: empty type for %s", errLooseObjectCorrupt, id)
 	}
 	if objectIDForEncoded(envelope.Type, envelope.Data) != id {
-		return nil, fmt.Errorf("%w: hash mismatch for %s", errLooseObjectCorrupt, id)
+		return "", nil, fmt.Errorf("%w: hash mismatch for %s", errLooseObjectCorrupt, id)
 	}
-	return append([]byte(nil), envelope.Data...), nil
+	return envelope.Type, append([]byte(nil), envelope.Data...), nil
 }
 
 func (s *looseObjectStore) path(id ObjectID) (string, error) {

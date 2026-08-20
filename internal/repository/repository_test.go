@@ -213,6 +213,26 @@ func TestCreateBranchRejectsInvalidOrUnresolvedSource(t *testing.T) {
 	}
 }
 
+func TestCreateBranchRejectsWhitespaceAndControlCharactersInNames(t *testing.T) {
+	for _, name := range []string{
+		"feature one",
+		"feature\tone",
+		"feature\none",
+		"feature\u00a0one",
+		"feature\x1fone",
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := NewSeedRepository()
+			if _, err := repo.CreateBranch(name, branch.Source{Branch: "main"}); err == nil {
+				t.Fatalf("CreateBranch(%q) succeeded", name)
+			}
+			if _, exists := repo.branches[name]; exists {
+				t.Fatalf("invalid branch %q was created", name)
+			}
+		})
+	}
+}
+
 func TestCreateBranchRejectsMissingSourceBeforeDuplicateName(t *testing.T) {
 	repo := NewSeedRepository()
 	originalMain := repo.branches["main"]

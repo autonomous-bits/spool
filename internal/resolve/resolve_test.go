@@ -540,3 +540,13 @@ func TestEDGCommitStagedMutationsRejectsStaleBaseWithoutChangingBranchOrStaging(
 		t.Fatalf("branch/staging = %q/%#v, want unchanged %q/%#v", currentHead, currentStaging, head, staging)
 	}
 }
+
+func TestEDGGCRejectsCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := NewResolveTool(repository.NewSeedRepository()).EDGGC(ctx, repository.GCOptions{})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("EDGGC error = %v, want context.Canceled", err)
+	}
+}

@@ -19,7 +19,7 @@ import (
 // ErrFsckCorrupt reports that Fsck found one or more integrity violations.
 var ErrFsckCorrupt = errors.New("repository integrity check failed")
 
-// FsckDiagnostic describes one deterministic repository-integrity violation.
+// FsckDiagnostic describes one deterministic integrity or maintenance finding.
 type FsckDiagnostic struct {
 	Code   string   `json:"code"`
 	Path   string   `json:"path,omitempty"`
@@ -30,12 +30,13 @@ type FsckDiagnostic struct {
 
 // FsckResult is the complete report produced by an integrity check.
 type FsckResult struct {
-	Valid       bool             `json:"valid"`
-	Branches    []string         `json:"branches"`
-	Commits     int              `json:"commits"`
-	Snapshots   int              `json:"snapshots"`
-	Objects     int              `json:"objects"`
-	Diagnostics []FsckDiagnostic `json:"diagnostics"`
+	Valid         bool             `json:"valid"`
+	Branches      []string         `json:"branches"`
+	Commits       int              `json:"commits"`
+	Snapshots     int              `json:"snapshots"`
+	Objects       int              `json:"objects"`
+	Diagnostics   []FsckDiagnostic `json:"diagnostics"`
+	Informational []FsckDiagnostic `json:"informational,omitempty"`
 }
 
 // FsckError carries the structured report for a corrupt repository.
@@ -53,7 +54,9 @@ func (e *FsckError) Unwrap() error { return ErrFsckCorrupt }
 // reachable immutable objects and mutable control state without repairing it.
 func FsckRepository(stateDir string) (FsckResult, error) {
 	checker := newFsckChecker(stateDir)
+	checker.checkPacks()
 	checker.checkControlState()
+	checker.checkReflogs()
 	checker.checkStagedState()
 	checker.checkMergeTransactions()
 	checker.checkLooseObjects()
@@ -84,17 +87,34 @@ func (r *Repository) Fsck() (FsckResult, error) {
 }
 
 type fsckChecker struct {
-	stateDir      string
-	branches      map[string]ObjectID
-	commits       map[ObjectID]commit
-	snapshots     map[ObjectID]graphSnapshot
-	nodes         map[ObjectID]map[string]Node
-	edges         map[ObjectID]map[string]Edge
-	objects       map[ObjectID][]byte
-	staged        map[string]StagedMutationSet
-	snapshotValid map[ObjectID]bool
-	seen          map[ObjectID]struct{}
-	issues        []FsckDiagnostic
+	stateDir        string
+	branches        map[string]ObjectID
+	commits         map[ObjectID]commit
+	snapshots       map[ObjectID]graphSnapshot
+	nodes           map[ObjectID]map[string]Node
+	edges           map[ObjectID]map[string]Edge
+	objects         map[ObjectID][]byte
+	staged          map[string]StagedMutationSet
+	snapshotValid   map[ObjectID]bool
+	seen            map[ObjectID]struct{}
+	reachable       map[ObjectID]struct{}
+	packed          map[ObjectID]fsckStoredObject
+	loose           map[ObjectID]fsckLooseObject
+	locationChecked map[ObjectID]struct{}
+	issues          []FsckDiagnostic
+	informational   []FsckDiagnostic
+}
+
+type fsckStoredObject struct {
+	objectType string
+	data       []byte
+	path       string
+}
+
+type fsckLooseObject struct {
+	fsckStoredObject
+	present bool
+	valid   bool
 }
 
 func newFsckChecker(stateDir string) *fsckChecker {
@@ -103,13 +123,32 @@ func newFsckChecker(stateDir string) *fsckChecker {
 		snapshots: make(map[ObjectID]graphSnapshot), nodes: make(map[ObjectID]map[string]Node),
 		edges: make(map[ObjectID]map[string]Edge), objects: make(map[ObjectID][]byte),
 		staged: make(map[string]StagedMutationSet), snapshotValid: make(map[ObjectID]bool),
-		seen: make(map[ObjectID]struct{}),
+		seen: make(map[ObjectID]struct{}), reachable: make(map[ObjectID]struct{}),
+		packed: make(map[ObjectID]fsckStoredObject), loose: make(map[ObjectID]fsckLooseObject),
+		locationChecked: make(map[ObjectID]struct{}),
 	}
 }
 
 func (c *fsckChecker) result() (FsckResult, error) {
-	sort.Slice(c.issues, func(i, j int) bool {
-		left, right := c.issues[i], c.issues[j]
+	sortFsckDiagnostics(c.issues)
+	sortFsckDiagnostics(c.informational)
+	result := FsckResult{
+		Valid: len(c.issues) == 0, Branches: sortedFsckBranches(c.branches),
+		Commits: len(c.commits), Snapshots: len(c.snapshots), Objects: len(c.seen),
+		Diagnostics: c.issues, Informational: c.informational,
+	}
+	if result.Diagnostics == nil {
+		result.Diagnostics = []FsckDiagnostic{}
+	}
+	if !result.Valid {
+		return result, &FsckError{Result: result}
+	}
+	return result, nil
+}
+
+func sortFsckDiagnostics(diagnostics []FsckDiagnostic) {
+	sort.Slice(diagnostics, func(i, j int) bool {
+		left, right := diagnostics[i], diagnostics[j]
 		if left.Code != right.Code {
 			return left.Code < right.Code
 		}
@@ -124,22 +163,16 @@ func (c *fsckChecker) result() (FsckResult, error) {
 		}
 		return left.Detail < right.Detail
 	})
-	result := FsckResult{
-		Valid: len(c.issues) == 0, Branches: sortedFsckBranches(c.branches),
-		Commits: len(c.commits), Snapshots: len(c.snapshots), Objects: len(c.seen),
-		Diagnostics: c.issues,
-	}
-	if result.Diagnostics == nil {
-		result.Diagnostics = []FsckDiagnostic{}
-	}
-	if !result.Valid {
-		return result, &FsckError{Result: result}
-	}
-	return result, nil
 }
 
 func (c *fsckChecker) issue(code, path, branch string, object ObjectID, detail string) {
 	c.issues = append(c.issues, FsckDiagnostic{
+		Code: code, Path: filepath.ToSlash(path), Branch: branch, Object: object, Detail: detail,
+	})
+}
+
+func (c *fsckChecker) inform(code, path, branch string, object ObjectID, detail string) {
+	c.informational = append(c.informational, FsckDiagnostic{
 		Code: code, Path: filepath.ToSlash(path), Branch: branch, Object: object, Detail: detail,
 	})
 }
@@ -250,6 +283,126 @@ func (c *fsckChecker) readRefs() map[string]ObjectID {
 	return refs
 }
 
+// checkReflogs validates the durable retention inventory before treating a
+// reflog as a GC root. A reflog on disk alone never expands retention.
+func (c *fsckChecker) checkReflogs() {
+	if c.stateDir == "" {
+		return
+	}
+	root := filepath.Join(c.stateDir, "logs")
+	inventoryRelative := reflogRetentionInventoryFilename
+	paths, inventoryErr := readReflogRetentionInventory(filepath.Join(c.stateDir, inventoryRelative))
+	if errors.Is(inventoryErr, errReflogRetentionInventoryMissing) {
+		c.issue("missing-reflog-retention-inventory", inventoryRelative, "", "", "reflog retention inventory is missing")
+	} else if inventoryErr != nil {
+		c.issue("invalid-reflog-retention-inventory", inventoryRelative, "", "", "reflog retention inventory is malformed")
+	}
+	actual := c.discoverReflogs(root)
+	if inventoryErr != nil {
+		return
+	}
+	expected := reflogRetentionPathSet(paths)
+	actualSet := reflogRetentionPathSet(actual)
+	for _, path := range paths {
+		if _, found := actualSet[path]; !found {
+			c.issue("missing-listed-reflog", filepath.ToSlash(filepath.Join("logs", path)), "", "", "reflog listed by retention inventory is missing")
+		}
+	}
+	for _, path := range actual {
+		if _, found := expected[path]; !found {
+			c.issue("unexpected-reflog", filepath.ToSlash(filepath.Join("logs", path)), "", "", "reflog is not listed by retention inventory")
+		}
+	}
+	for _, relative := range paths {
+		if _, found := actualSet[relative]; !found {
+			continue
+		}
+		path := filepath.Join(root, filepath.FromSlash(relative))
+		displayPath := filepath.ToSlash(filepath.Join("logs", relative))
+		if relative == "HEAD" {
+			c.checkHeadReflog(path, displayPath)
+			continue
+		}
+		c.checkObjectReflog(path, displayPath, strings.TrimPrefix(relative, "refs/heads/"))
+	}
+}
+
+func (c *fsckChecker) discoverReflogs(root string) []string {
+	paths := make([]string, 0)
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			if path == root && os.IsNotExist(walkErr) {
+				return walkErr
+			}
+			c.issue("read-reflog", "logs", "", "", "cannot walk reflogs")
+			return nil
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			c.issue("invalid-reflog-path", "logs", "", "", "cannot determine reflog path")
+			return nil
+		}
+		relative = filepath.ToSlash(relative)
+		displayPath := filepath.ToSlash(filepath.Join("logs", relative))
+		if !entry.Type().IsRegular() {
+			c.issue("invalid-reflog-file", displayPath, "", "", "reflog must be a regular file")
+			return nil
+		}
+		if _, err := canonicalReflogRetentionPath(relative); err != nil {
+			c.issue("out-of-scope-reflog", displayPath, "", "", "reflog path is outside the supported retention namespace")
+			return nil
+		}
+		paths = append(paths, relative)
+		return nil
+	})
+	if os.IsNotExist(err) {
+		c.issue("missing-reflog-directory", "logs", "", "", "reflog directory is missing")
+	} else if err != nil {
+		c.issue("read-reflog", "logs", "", "", "cannot read reflogs")
+	}
+	sort.Strings(paths)
+	return paths
+}
+
+func (c *fsckChecker) checkHeadReflog(path, displayPath string) {
+	lines, err := readReflogLines(path)
+	if err != nil {
+		c.issue("invalid-reflog-entry", displayPath, "", "", "reflog entries are malformed")
+		return
+	}
+	for _, fields := range lines {
+		for _, value := range fields[:2] {
+			if value != "" && !validRefName(value) {
+				c.issue("invalid-head-reflog-reference", displayPath, "", "", "HEAD reflog contains an invalid branch reference")
+			}
+		}
+	}
+}
+
+func (c *fsckChecker) checkObjectReflog(path, displayPath, branch string) {
+	lines, err := readReflogLines(path)
+	if err != nil {
+		c.issue("invalid-reflog-entry", displayPath, branch, "", "reflog entries are malformed")
+		return
+	}
+	for _, fields := range lines {
+		for _, value := range fields[:2] {
+			if value == "" {
+				continue
+			}
+			id := ObjectID(value)
+			if !validLooseObjectID(id) {
+				c.issue("invalid-reflog-object-id", displayPath, branch, id, "reflog contains an invalid object ID")
+				continue
+			}
+			c.checkCommit(id, branch, make(map[ObjectID]bool))
+		}
+	}
+}
+
 func (c *fsckChecker) object(id ObjectID, expectedType string) ([]byte, bool) {
 	data, _, ok := c.objectAny(id, []string{expectedType})
 	return data, ok
@@ -261,6 +414,7 @@ func (c *fsckChecker) objectAny(id ObjectID, expectedTypes []string) ([]byte, st
 		return nil, "", false
 	}
 	c.seen[id] = struct{}{}
+	c.reachable[id] = struct{}{}
 	if c.stateDir == "" {
 		data, ok := c.objects[id]
 		if !ok {
@@ -279,56 +433,37 @@ func (c *fsckChecker) objectAny(id ObjectID, expectedTypes []string) ([]byte, st
 		c.issue("object-type-mismatch", "", "", id, fmt.Sprintf("object type is not one of %q", expectedTypes))
 		return nil, "", false
 	}
-	path := filepath.Join(c.stateDir, "objects", "loose", string(id[:2]), string(id[2:]))
-	relative := filepath.ToSlash(filepath.Join("objects", "loose", string(id[:2]), string(id[2:])))
-	info, err := os.Lstat(path)
-	if os.IsNotExist(err) {
-		c.issue("missing-object", relative, "", id, "object file is missing")
-		return nil, "", false
-	}
-	if err != nil {
-		c.issue("read-object", relative, "", id, "cannot inspect object file")
-		return nil, "", false
-	}
-	if !info.Mode().IsRegular() {
-		c.issue("invalid-object-file", relative, "", id, "object file is not regular")
-		return nil, "", false
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		c.issue("read-object", relative, "", id, "cannot read object file")
-		return nil, "", false
-	}
-	var envelope looseObjectEnvelope
-	if err := cbor.Unmarshal(raw, &envelope); err != nil {
-		c.issue("invalid-object-envelope", relative, "", id, "object envelope cannot be decoded")
-		return nil, "", false
-	}
-	canonical, err := canonicalCBOR.Marshal(envelope)
-	if err != nil || !bytes.Equal(raw, canonical) {
-		c.issue("noncanonical-object-envelope", relative, "", id, "object envelope is not canonical CBOR")
-		return nil, "", false
-	}
-	if objectIDForEncoded(envelope.Type, envelope.Data) != id {
-		c.issue("object-hash-mismatch", relative, "", id, "object payload hash does not match its ID")
+	loose := c.readLooseObject(id)
+	packed, packedOK := c.packed[id]
+	c.checkDuplicateLocation(id, loose, packed, packedOK)
+	var object fsckStoredObject
+	switch {
+	case loose.valid:
+		object = loose.fsckStoredObject
+	case packedOK:
+		object = packed
+	default:
+		if !loose.present {
+			c.issue("missing-object", loose.path, "", id, "object has no loose or active packed location")
+		}
 		return nil, "", false
 	}
 	if len(expectedTypes) == 0 {
-		if !knownLooseObjectType(envelope.Type) {
-			c.issue("invalid-object-type", relative, "", id, "object envelope has an unsupported type")
+		if !knownLooseObjectType(object.objectType) {
+			c.issue("invalid-object-type", object.path, "", id, "object envelope has an unsupported type")
 			return nil, "", false
 		}
-		c.objects[id] = append([]byte(nil), envelope.Data...)
-		return envelope.Data, envelope.Type, true
+		c.objects[id] = append([]byte(nil), object.data...)
+		return object.data, object.objectType, true
 	}
 	for _, expectedType := range expectedTypes {
-		if envelope.Type == expectedType {
-			c.objects[id] = append([]byte(nil), envelope.Data...)
-			return envelope.Data, envelope.Type, true
+		if object.objectType == expectedType {
+			c.objects[id] = append([]byte(nil), object.data...)
+			return object.data, object.objectType, true
 		}
 
 	}
-	c.issue("object-type-mismatch", relative, "", id, fmt.Sprintf("object type is %q, want one of %q", envelope.Type, expectedTypes))
+	c.issue("object-type-mismatch", object.path, "", id, fmt.Sprintf("object type is %q, want one of %q", object.objectType, expectedTypes))
 	return nil, "", false
 }
 
@@ -339,6 +474,78 @@ func knownLooseObjectType(objectType string) bool {
 	default:
 		return false
 	}
+}
+
+func (c *fsckChecker) checkPacks() {
+	if c.stateDir == "" {
+		return
+	}
+	store := newLooseObjectStore(c.stateDir, &c.objects)
+	manifest, err := store.readPackManifest()
+	if err != nil {
+		c.packIssue("objects/info/packs", "", err)
+		return
+	}
+	for _, metadata := range manifest.Packs {
+		packPath, err := store.packPath(metadata.ID)
+		if err != nil {
+			c.packIssue("objects/info/packs", metadata.ID, err)
+			continue
+		}
+		index, err := store.openPackIndex(metadata)
+		if err != nil {
+			c.packIssue(filepath.ToSlash(filepath.Join("objects", "pack", string(metadata.ID)+packIndexFileExtension)), metadata.ID, err)
+			continue
+		}
+		verifyErr := verifyPackFiles(store.packIndexes, metadata.ID, packPath, filepath.Join(store.packDirectory(), string(metadata.ID)+packIndexFileExtension))
+		if verifyErr != nil {
+			_ = index.Close()
+			c.packIssue(filepath.ToSlash(filepath.Join("objects", "pack", string(metadata.ID)+packFileExtension)), metadata.ID, verifyErr)
+			continue
+		}
+		err = index.ForEach(func(entry PackIndexEntry) error {
+			objectType, data, readErr := readPackedObjectFile(metadata.ID, packPath, entry, metadata.ObjectCount)
+			if readErr != nil {
+				return readErr
+			}
+			c.seen[entry.Object] = struct{}{}
+			object := fsckStoredObject{
+				objectType: objectType, data: append([]byte(nil), data...),
+				path: filepath.ToSlash(filepath.Join("objects", "pack", string(metadata.ID)+packFileExtension)),
+			}
+			if !knownLooseObjectType(objectType) {
+				c.issue("invalid-object-type", object.path, "", entry.Object, "packed object envelope has an unsupported type")
+			}
+			if existing, duplicate := c.packed[entry.Object]; duplicate {
+				if existing.objectType != object.objectType || !bytes.Equal(existing.data, object.data) {
+					c.issue("inconsistent-object-location", object.path, "", entry.Object, "active packs have different types or payloads for the same object")
+				}
+				return nil
+			}
+			c.packed[entry.Object] = object
+			c.objects[entry.Object] = append([]byte(nil), data...)
+			return nil
+		})
+		closeErr := index.Close()
+		if err != nil {
+			c.packIssue(filepath.ToSlash(filepath.Join("objects", "pack", string(metadata.ID)+packFileExtension)), metadata.ID, err)
+		}
+		if closeErr != nil {
+			c.packIssue(filepath.ToSlash(filepath.Join("objects", "pack", string(metadata.ID)+packIndexFileExtension)), metadata.ID, closeErr)
+		}
+	}
+}
+
+func (c *fsckChecker) packIssue(path string, pack PackID, err error) {
+	code := "invalid-pack"
+	if errors.Is(err, ErrUnsupportedPackVersion) {
+		code = "unsupported-pack-version"
+	}
+	detail := err.Error()
+	if pack != "" {
+		detail = fmt.Sprintf("pack %q: %s", pack, detail)
+	}
+	c.issue(code, path, "", "", detail)
 }
 
 func (c *fsckChecker) checkLooseObjects() {
@@ -366,15 +573,95 @@ func (c *fsckChecker) checkLooseObjects() {
 			c.issue("invalid-object-path", displayPath, "", "", "loose object path does not match an object ID")
 			return nil
 		}
-		if _, checked := c.seen[id]; !checked {
-			c.objectAny(id, nil)
+		c.seen[id] = struct{}{}
+		loose := c.readLooseObject(id)
+		packed, packedOK := c.packed[id]
+		c.checkDuplicateLocation(id, loose, packed, packedOK)
+		if !loose.valid {
+			return nil
+		}
+		if !knownLooseObjectType(loose.objectType) {
+			c.issue("invalid-object-type", loose.path, "", id, "object envelope has an unsupported type")
+			return nil
+		}
+		c.objects[id] = append([]byte(nil), loose.data...)
+		if _, reachable := c.reachable[id]; !reachable {
+			c.inform("unreachable-loose-object", loose.path, "", id, "unreachable loose object is a GC candidate subject to the retention grace period")
 		}
 		return nil
 	})
 	if os.IsNotExist(err) {
-		c.issue("missing-loose-objects", "objects/loose", "", "", "loose object directory is missing")
+		if len(c.packed) == 0 {
+			c.issue("missing-loose-objects", "objects/loose", "", "", "loose object directory is missing")
+		}
 	} else if err != nil {
 		c.issue("read-object", "objects/loose", "", "", "cannot read loose objects")
+	}
+}
+
+func (c *fsckChecker) readLooseObject(id ObjectID) fsckLooseObject {
+	if object, checked := c.loose[id]; checked {
+		return object
+	}
+	relative := filepath.ToSlash(filepath.Join("objects", "loose", string(id[:2]), string(id[2:])))
+	path := filepath.Join(c.stateDir, filepath.FromSlash(relative))
+	result := fsckLooseObject{fsckStoredObject: fsckStoredObject{path: relative}}
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		c.loose[id] = result
+		return result
+	}
+	result.present = true
+	if err != nil {
+		c.issue("read-object", relative, "", id, "cannot inspect object file")
+		c.loose[id] = result
+		return result
+	}
+	if !info.Mode().IsRegular() {
+		c.issue("invalid-object-file", relative, "", id, "object file is not regular")
+		c.loose[id] = result
+		return result
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		c.issue("read-object", relative, "", id, "cannot read object file")
+		c.loose[id] = result
+		return result
+	}
+	var envelope looseObjectEnvelope
+	if err := cbor.Unmarshal(raw, &envelope); err != nil {
+		c.issue("invalid-object-envelope", relative, "", id, "object envelope cannot be decoded")
+		c.loose[id] = result
+		return result
+	}
+	canonical, err := canonicalCBOR.Marshal(envelope)
+	if err != nil || !bytes.Equal(raw, canonical) {
+		c.issue("noncanonical-object-envelope", relative, "", id, "object envelope is not canonical CBOR")
+		c.loose[id] = result
+		return result
+	}
+	if objectIDForEncoded(envelope.Type, envelope.Data) != id {
+		c.issue("object-hash-mismatch", relative, "", id, "object payload hash does not match its ID")
+		c.loose[id] = result
+		return result
+	}
+	result.fsckStoredObject.objectType = envelope.Type
+	result.fsckStoredObject.data = append([]byte(nil), envelope.Data...)
+	result.valid = true
+	c.loose[id] = result
+	return result
+}
+
+func (c *fsckChecker) checkDuplicateLocation(id ObjectID, loose fsckLooseObject, packed fsckStoredObject, packedOK bool) {
+	if !loose.valid || !packedOK {
+		return
+	}
+	if _, checked := c.locationChecked[id]; checked {
+		return
+	}
+	c.locationChecked[id] = struct{}{}
+	if loose.objectType != packed.objectType || !bytes.Equal(loose.data, packed.data) {
+		c.issue("inconsistent-object-location", loose.path, "", id, "loose and packed copies have different types or payloads")
 	}
 }
 

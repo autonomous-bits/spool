@@ -54,5 +54,6 @@ func newRootCommandWithLifecycle(
 	root.AddCommand(commands.NewBranchesContainingCommand(toolProvider))
 	root.AddCommand(commands.NewMergeCommand(toolProvider))
 	root.AddCommand(commands.NewFsckCommand(fsckProvider))
+	root.AddCommand(commands.NewGCCommand(toolProvider))
 	return root
 }
