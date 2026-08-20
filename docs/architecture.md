@@ -33,6 +33,7 @@ process exit.
 | --- | --- |
 | `cmd/spl` | Cobra command definitions, flag and argument validation, repository discovery, JSON output, and error logging. |
 | `internal/resolve` | Context-aware, policy-constrained adapter for graph queries and command-facing operations. It applies query budgets and pins a branch before resolution. |
+| `internal/contextual` | Go use cases that combine branch-head lexical/filter evidence with bounded, deterministic expansion of a pinned graph snapshot. |
 | `internal/repository` | Authoritative graph storage, commits, branches, staging, query implementations, durable state, locking, and recovery. |
 | `internal/repository/branch` | Branch request validation and lifecycle service boundary. |
 | `internal/repository/initialization` | Repository initialization service boundary. |
