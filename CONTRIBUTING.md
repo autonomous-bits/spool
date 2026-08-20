@@ -20,7 +20,7 @@ The workspace has two modules:
 Run these commands from the repository root:
 
 ```sh
-make check   # format, vet, static analysis, tests, race tests, and vulnerability scan
+make check   # module tidiness, format, vet, static analysis, tests, race tests, and vulnerability scan
 make build   # run the quality gate and build dist/spl
 make fuzz    # run the bounded persisted-state fuzz target
 make bench   # run benchmarks

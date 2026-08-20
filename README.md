@@ -45,6 +45,11 @@ Object IDs are BLAKE3 hashes of the typed canonical bytes. Mutable control
 state is separate: `.spl/config.toml`, `HEAD`, branch refs, staging files,
 reflogs, and merge transactions.
 
+`spl gc` retains reachable and reflog-referenced objects, packs retained objects
+into verified zstd pack/index generations, and removes unreachable loose objects
+only after a 14-day grace period. Pack publication is atomic, so packing does
+not change object IDs or make a committed object unavailable.
+
 Commit and merge transitions write immutable objects before atomically replacing
 the affected ref. If a process stops during a transition, an unreachable object
 or stale staging file may remain, but a ref never intentionally points to a
@@ -55,6 +60,7 @@ corruption:
 
 ```sh
 spl fsck
+spl gc
 ```
 
 It writes a JSON integrity report on standard output even when corruption is
@@ -104,14 +110,30 @@ spl switch feature
 spl branch list
 ```
 
-Query and compare graph snapshots:
+Query, retrieve, and compare graph snapshots:
 
 ```sh
 spl resolve --branch main --node 11111111-1111-4111-8111-111111111111
 spl diff --base-branch main --target-branch feature
 spl history --branch main --entity-id 11111111-1111-4111-8111-111111111111
 spl branches-containing --entity-id 11111111-1111-4111-8111-111111111111
+
+# Lexical retrieval and schema-indexed metadata filters use the current
+# branch-head SQLite projection.
+spl search --branch main --query incident
+spl filter --branch main --label Task --property-text status=open
+
+# Build a bounded evidence context from lexical results or typed filters.
+spl context --branch main --query incident --direction both --edge-type RELATES_TO
+spl search-expand --branch main --label Task --property-min priority=3 --direction out
 ```
+
+`search`, `filter`, `search-expand`, and `context` return the selected snapshot and projection
+provenance with budget and completion metadata. Filtered properties must be scalar properties
+enabled with `indexed = true` in the selected schema. Retrieval is currently limited to the
+branch-head projection; selecting a historical commit is rejected. Use `--max-rows`,
+`--max-response-bytes`, `--timeout`, `--max-visited`, and `--max-depth` to narrow the configured
+query limits.
 
 Run `spl <command> --help` for all commands, flags, response-budget controls, and examples.
 

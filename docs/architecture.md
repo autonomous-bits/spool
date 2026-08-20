@@ -32,8 +32,8 @@ process exit.
 | Component | Responsibility |
 | --- | --- |
 | `cmd/spl` | Cobra command definitions, flag and argument validation, repository discovery, JSON output, and error logging. |
-| `internal/resolve` | Context-aware, policy-constrained adapter for graph queries and command-facing operations. It applies query budgets and pins a branch before resolution. |
-| `internal/contextual` | Go use cases that combine branch-head lexical/filter evidence with bounded, deterministic expansion of a pinned graph snapshot. |
+| `internal/resolve` | Context-aware, policy-constrained adapter for graph queries and command-facing operations. It applies query budgets, pins a branch, and exposes public retrieval results with provenance and completion metadata. |
+| `internal/contextual` | Go use cases that combine branch-head lexical or typed-filter evidence with bounded, deterministic expansion of a pinned graph snapshot. |
 | `internal/repository` | Authoritative graph storage, commits, branches, staging, query implementations, durable state, locking, and recovery. |
 | `internal/repository/branch` | Branch request validation and lifecycle service boundary. |
 | `internal/repository/initialization` | Repository initialization service boundary. |
@@ -154,18 +154,30 @@ built-in schema accepts these fields without user-authored constraints.
 
 ### Read flow
 
-`resolve` and `validate` pin the selected branch to an immutable commit before
-reading. This makes their returned metadata and data or validation report
-internally consistent if the branch moves concurrently. `diff`, `history`,
-branch-containment, and impact queries read immutable snapshots through the
-same repository layer. Diff and impact requests have row, response-size, depth,
-or visited-node budgets; diff pagination tokens bind the continuation to the
-exact comparison request.
+`resolve`, `validate`, and every retrieval operation pin the selected branch to
+an immutable commit before reading. This makes their returned metadata and data
+or validation report internally consistent if the branch moves concurrently.
+`diff`, `history`, branch-containment, and impact queries read immutable
+snapshots through the same repository layer. Diff and impact requests have row,
+response-size, depth, or visited-node budgets; diff pagination tokens bind the
+continuation to the exact comparison request.
 
-The current SQLite projection is branch-head-only. It is rebuilt against the
-selected active head after commits, active-branch switches, and completed merges.
-Historical or divergent snapshots are deliberately not served from it yet;
-future snapshot-selector work will add an explicit historical projection cache.
+`search` reads deterministic lexical pages from the projection's FTS5 index and
+returns ranking, matched fields, and snippets. `filter` combines labels with
+schema-enabled scalar text equality or numeric equality/range predicates.
+`search-expand` and `context` use either lexical or typed-filter evidence as
+seeds, then follow selected incoming, outgoing, or both directions with optional
+edge-type filters. They return deterministic supporting paths, nodes, and edges;
+`context` prioritizes evidence in its response. All retrieval responses include
+the pinned snapshot, projection metadata, effective budgets, and explicit
+completion/truncation metadata. Continuation tokens bind projection pages to
+their exact request.
+
+The SQLite projection is branch-head-only. It is rebuilt against the selected
+active head after commits, active-branch switches, and completed merges.
+Historical or divergent snapshots are deliberately rejected for projection-backed
+retrieval; future snapshot-selector work will add an explicit historical
+projection cache.
 
 ### Merge flow
 
@@ -254,5 +266,7 @@ or deletes data.
 The repository package is the storage authority. New lifecycle behavior belongs
 there or in a focused service package with an explicit repository contract.
 `resolve` is deliberately a query/tool adapter rather than another storage
-layer. Spool currently operates locally: there is no network transport,
-authentication service, remote synchronization, or server-side component.
+layer, and `contextual` owns bounded evidence-and-expansion use cases rather
+than projection persistence. Spool currently operates locally: there is no
+network transport, authentication service, remote synchronization, or
+server-side component.
