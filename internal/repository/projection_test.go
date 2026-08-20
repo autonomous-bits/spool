@@ -13,7 +13,7 @@ func TestSQLiteProjectionBuildsFromCanonicalBranchHead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InitializeRepository: %v", err)
 	}
-	defer repo.Close()
+	closeTestRepository(t, repo)
 
 	status, err := repo.ProjectionStatus()
 	if err != nil {
@@ -116,7 +116,7 @@ func TestSQLiteProjectionRecoversFromCorruptDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenRepository recovery: %v", err)
 	}
-	defer reopened.Close()
+	closeTestRepository(t, reopened)
 	status, err := reopened.ProjectionStatus()
 	if err != nil {
 		t.Fatalf("ProjectionStatus: %v", err)

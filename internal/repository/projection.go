@@ -53,11 +53,11 @@ func (r *Repository) openProjectionLocked() error {
 		return fmt.Errorf("open SQLite projection: %w", err)
 	}
 	if _, err := db.Exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL;`); err != nil {
-		db.Close()
+		_ = db.Close()
 		return fmt.Errorf("configure SQLite projection: %w", err)
 	}
 	if err := createProjectionSchema(db); err != nil {
-		db.Close()
+		_ = db.Close()
 		return err
 	}
 	r.projectionDB = db
