@@ -1,6 +1,6 @@
 # Spool Implementation Gap Report
 
-**Date:** 2026-08-19  
+**Date:** 2026-08-20
 **Scope:** Current `cmd/` and `internal/` implementation compared with the research in
 this directory. `idea-graph-vcs-research-v2.md` is treated as the authoritative target
 because it explicitly supersedes `idea-graph-vcs-research.md`.
@@ -13,9 +13,9 @@ diff, entity history, containment lookup, bounded impact analysis, durable repla
 and process locking are implemented.
 
 It does **not** yet implement the v2 product architecture. It now has a typed property-graph
-foundation with authored schema policy and validation, a real immutable loose-object store with
-chunked graph roots and `fsck`, and deterministic three-way graph merge previews, clean applies,
-and a durable public conflict-resolution lifecycle. It still lacks the derived projection
+foundation with authored schema policy and validation, a real immutable loose-and-pack object
+store with chunked graph roots, explicit maintenance, and `fsck`, and deterministic three-way
+graph merge previews, clean applies, and a durable public conflict-resolution lifecycle. It still lacks the derived projection
 lifecycle and typed agent/MCP retrieval plane. The project should therefore be described as a
 local graph-VCS foundation, not as an agent retrieval system.
 
@@ -23,20 +23,19 @@ local graph-VCS foundation, not as an agent retrieval system.
 
 | Area | Status | Implementation evidence | Assessment |
 | --- | --- | --- | --- |
-| Content addressing | Partial | Typed canonical CBOR objects use type-and-length-prefixed BLAKE3 IDs and are stored as independently verified loose-object envelopes below `.spl/objects/loose/`. | The immutable-object boundary is real and crash-safe; packfiles, object compaction, and reachability GC remain absent. |
-| Snapshots and branches | Partial | `graphSnapshot` has counted node, edge, inbound, outbound, and schema roots; deterministic bounded Prolly leaf/internal trees back every graph index. Commits, per-branch refs, `HEAD`, staging, reflogs, and explicit resolution exist. | Core canonical VCS semantics now exist locally, but pack-backed storage and maintenance lifecycle are deferred. |
+| Content addressing | Partial | Typed canonical CBOR objects use type-and-length-prefixed BLAKE3 IDs. New objects are loose envelopes; verified zstd pack/index generations are published through an atomic manifest and preserve the same identities. | The immutable-object boundary, compaction, and pack-aware reads are real and crash-safe. Delta compression, automatic maintenance thresholds, and remote pack transfer remain absent. |
+| Snapshots and branches | Partial | `graphSnapshot` has counted node, edge, inbound, outbound, and schema roots; deterministic bounded Prolly leaf/internal trees back every graph index. Commits, per-branch refs, `HEAD`, staging, reflogs, and explicit resolution exist. | Core canonical VCS semantics and explicit pack-backed maintenance now exist locally; remotes and ref compaction remain deferred. |
 | Schema policy and validation | Partial | Canonical TOML schemas define node-label and edge-type rules, required typed properties, natural-key uniqueness, cardinality, and acyclic/self-loop invariants. `spl schema migrate` stages a schema and graph mutations atomically; `spl validate` reports immutable-snapshot violations; `spl fsck` validates reachable object, tree, graph, schema, staging, and merge state. | Staging, commit, durable-open, and merge previews validate schemas. Historical snapshots retain their schema roots and remain readable. Schema-aware query filtering is still absent. |
-| Durable local updates | Partial | `config.toml`, `HEAD`, independent refs/staging/reflogs, loose objects, lock file, synced temp-file replacement, rollback, and merge transaction recovery are implemented. | Object creation precedes mutable ref updates and startup reconstructs canonical state. Packfiles and garbage collection are still needed for long-lived repository maintenance. |
+| Durable local updates | Partial | `config.toml`, `HEAD`, independent refs/staging/reflogs, loose objects, pack manifests, lock file, synced replacement, rollback, and merge transaction recovery are implemented. `spl gc` retains refs, permanent reflogs, and resolved merge snapshots; it packs reachable objects and grace-prunes unreachable loose objects. | Object creation precedes mutable ref updates. Pack publication is verified before loose or superseded-pack cleanup, and reflog retention inventory makes GC fail closed on missing historical roots. |
 | Diff, history, containment, impact | Partial | `Diff`, `History`, `BranchesContaining`, and `Impact` have CLI/tool-adapter exposure and preserve labels, typed properties, and edge types. | Useful initial operations, but they lack schema-aware filtering, natural-key containment, and consistent snapshot-scoped v2 request semantics. |
 | Merge lifecycle | Partial | `spl merge preview` returns ordered structural, schema, and schema-derived semantic conflicts with stable IDs and affected paths. A conflicted exact `spl merge apply` persists an owner-gated target lease and preview; `merge conflicts`, `resolve`, `finalize`, and `abort` expose the durable lifecycle. Resolution requires complete source/target selections and supports validated mutation overrides; finalization rechecks the exact binding and schema before creating a two-parent commit. | The local lifecycle is complete for current graph semantics. Simultaneous schema-root edits still conflict deliberately, and conflict meaning is limited to structural overlap and declared-schema validation rather than inferred domain semantics. |
 | Query budgets | Partial | `QueryBudget` normalizes row, byte, depth, visited, and timeout limits; diff enforces row/byte limits and impact enforces depth/visited. | Timeout is only a normalized value, not an execution deadline. History, containment, and resolve do not enforce equivalent result/response budgets or partial-result metadata. |
-| CLI contract | Partial | `spl init`, add, status, commit, branch, switch, schema migrate, validate, resolve, diff, history, branches-containing, `fsck`, and `merge preview`, `apply`, `conflicts`, `resolve`, `finalize`, and `abort` emit JSON. | No `log`, query, search, filter, traversal, path, context, GC, or remote commands. |
+| CLI contract | Partial | `spl init`, add, status, commit, branch, switch, schema migrate, validate, resolve, diff, history, branches-containing, `fsck`, `gc`, and `merge preview`, `apply`, `conflicts`, `resolve`, `finalize`, and `abort` emit JSON. | No `log`, query, search, filter, traversal, path, context, or remote commands. |
 
 ## Prioritized gaps
 
 | Priority | Gap | Research baseline | Current shortfall and consequence | Recommended next increment |
 | --- | --- | --- | --- | --- |
-| P1 | Object-store maintenance lifecycle | v2 §§4, 11, and Milestone 0 | Canonical objects, chunked roots, refs/reflogs, staging, crash-safe ref transitions, recovery, and `fsck` are implemented. There are still no packfiles, reachability GC, compaction, or explicit object-retention policy. | Design reachability traversal and retention rules, then add loose-object GC and packfiles only when measured repository growth justifies them. |
 | P1 | Versioned SQLite projection | v2 §§5-7 and Milestone 1 | There is no SQLite dependency, `graph.db`, schema version, projection watermark, FTS5, typed property index, historical snapshot cache, or rebuild/catch-up process. In-memory maps named `projections` are canonical-state mirrors, not rebuildable query projections. | Specify and implement the v2 SQLite projection contract, watermark, build states, and rebuild-from-canonical-object test path. Do not expose raw physical tables as an API. |
 | P1 | Strict snapshot request semantics | v2 §7 | `resolve` requires a branch and validates explicit commit reachability, but diff/history/impact accept a branch **or** unrestricted commit. Responses are inconsistent: only resolve returns snapshot/projection metadata. | Use one mandatory `(repository, branch, commit?)` selector and response envelope for every read tool. Pin once, require reachability unless detached access is explicit, and expose projection watermark/state. |
 | P1 | Query execution safety and observability | v2 §§7, 8.4, and 13 | No SQL sandbox is needed yet because SQL is absent, but timeout/cancellation is not propagated into repository scans, and most read operations lack response caps, truncation states, elapsed/visited metrics, or deterministic pagination. | Establish a common query executor with context deadline enforcement, row/byte/visited limits, partial-result metadata, and deterministic pagination before adding expensive retrieval. |
@@ -61,14 +60,15 @@ they should not be selected before the SQLite/FTS retrieval baseline and benchma
    snapshot selectors, query limits, and rebuild tests.
 2. **Agent surface:** expose typed MCP retrieval and merge preview/conflicts; add task-level
    context assembly.
-3. **Storage maintenance:** define object retention and measure loose-object growth before
-   introducing reachability GC, compaction, or packfiles.
+3. **Storage maintenance evidence:** measure loose-object growth, pack size, compaction cost,
+   and GC reclaim behavior before introducing delta compression, automatic maintenance, or
+   remote pack transfer.
 4. **Evidence-led extensions:** benchmark the baseline, then decide whether vector retrieval,
    graph-native projections, or remotes are warranted.
 
 ## Validation performed
 
-`go test ./...` passes for the current repository, including schema parsing and validation,
-schema migration/staging/persistence, resolver, merge, and CLI packages. This establishes that
-the remaining gaps are missing scope relative to the research, not failing behavior in the
-implemented local-core tests.
+`go test ./...` and `go vet ./...` pass for the current repository, including schema parsing
+and validation, schema migration/staging/persistence, resolver, merge, pack/GC, `fsck`, and CLI
+packages. This establishes that the remaining gaps are missing scope relative to the research,
+not failing behavior in the implemented local-core tests.
