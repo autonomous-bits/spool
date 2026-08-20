@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"github.com/autonomous-bits/spool/internal/repository/branch"
 )
 
 func TestFsckRepositoryAcceptsValidDurableFixture(t *testing.T) {
@@ -158,9 +160,221 @@ func TestFsckRepositoryReportsCorruptResolvedMergeSnapshotBinding(t *testing.T) 
 	}
 }
 
+func TestFsckRepositoryRetainsReflogOnlyObjects(t *testing.T) {
+	stateDir := t.TempDir()
+	repo, err := InitializeRepository(stateDir)
+	if err != nil {
+		t.Fatalf("InitializeRepository: %v", err)
+	}
+	if _, err := repo.CreateBranch("feature", branch.Source{Branch: "main"}); err != nil {
+		t.Fatalf("CreateBranch: %v", err)
+	}
+	historical, err := repo.AdvanceBranch("feature")
+	if err != nil {
+		t.Fatalf("AdvanceBranch: %v", err)
+	}
+	if _, err := repo.DeleteBranch("feature"); err != nil {
+		t.Fatalf("DeleteBranch: %v", err)
+	}
+	if err := repo.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	result, err := FsckRepository(stateDir)
+	if err != nil {
+		t.Fatalf("FsckRepository: %v, result = %#v", err, result)
+	}
+	if !result.Valid || result.Commits != 2 || hasFsckInformation(result, "unreachable-loose-object", historical) {
+		t.Fatalf("result = %#v, want reflog-only commit reachable", result)
+	}
+}
+
+func TestFsckRepositoryReportsReflogCorruption(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		mutate func(t *testing.T, stateDir string)
+		code   string
+		path   string
+	}{
+		{
+			name: "missing directory",
+			mutate: func(t *testing.T, stateDir string) {
+				t.Helper()
+				if err := os.RemoveAll(filepath.Join(stateDir, "logs")); err != nil {
+					t.Fatalf("remove reflog directory: %v", err)
+				}
+			},
+			code: "missing-reflog-directory",
+			path: "logs",
+		},
+		{
+			name: "malformed entry",
+			mutate: func(t *testing.T, stateDir string) {
+				t.Helper()
+				if err := os.WriteFile(filepath.Join(stateDir, "logs", "refs", "heads", "main"), []byte("not a\n"), 0o600); err != nil {
+					t.Fatalf("write reflog: %v", err)
+				}
+			},
+			code: "invalid-reflog-entry",
+			path: "logs/refs/heads/main",
+		},
+		{
+			name: "invalid object",
+			mutate: func(t *testing.T, stateDir string) {
+				t.Helper()
+				if err := os.WriteFile(filepath.Join(stateDir, "logs", "refs", "heads", "main"), []byte("invalid  update\n"), 0o600); err != nil {
+					t.Fatalf("write reflog: %v", err)
+				}
+			},
+			code: "invalid-reflog-object-id",
+			path: "logs/refs/heads/main",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			stateDir := t.TempDir()
+			repo, err := InitializeRepository(stateDir)
+			if err != nil {
+				t.Fatalf("InitializeRepository: %v", err)
+			}
+			if err := repo.Close(); err != nil {
+				t.Fatalf("Close: %v", err)
+			}
+			test.mutate(t, stateDir)
+
+			result, err := FsckRepository(stateDir)
+			if !errors.Is(err, ErrFsckCorrupt) {
+				t.Fatalf("FsckRepository error = %v, want ErrFsckCorrupt", err)
+			}
+			if !hasFsckDiagnosticAtPath(result, test.code, test.path) {
+				t.Fatalf("result = %#v, want %s at %s", result, test.code, test.path)
+			}
+			again, againErr := FsckRepository(stateDir)
+			if !errors.Is(againErr, ErrFsckCorrupt) || !reflect.DeepEqual(result, again) {
+				t.Fatalf("second FsckRepository result = %#v, %v; want deterministic %#v", again, againErr, result)
+			}
+		})
+	}
+}
+
+func TestFsckRepositoryAcceptsPackedObjectsAndReportsLooseGCCandidates(t *testing.T) {
+	stateDir := t.TempDir()
+	repo, err := InitializeRepository(stateDir)
+	if err != nil {
+		t.Fatalf("InitializeRepository: %v", err)
+	}
+	orphan, err := repo.objectStore.put("node", Node{ID: "orphan", Title: "orphan"})
+	if err != nil {
+		t.Fatalf("store unreachable object: %v", err)
+	}
+	head, err := repo.PinBranch("main")
+	if err != nil {
+		t.Fatalf("PinBranch: %v", err)
+	}
+	if _, err := repo.GC(GCOptions{}); err != nil {
+		t.Fatalf("GC: %v", err)
+	}
+	headPath, err := repo.objectStore.path(head)
+	if err != nil {
+		t.Fatalf("head path: %v", err)
+	}
+	if _, err := os.Stat(headPath); !os.IsNotExist(err) {
+		t.Fatalf("reachable loose object remains after GC: %v", err)
+	}
+	if err := repo.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	result, err := FsckRepository(stateDir)
+	if err != nil {
+		t.Fatalf("FsckRepository: %v, result = %#v", err, result)
+	}
+	if !result.Valid || len(result.Diagnostics) != 0 || !hasFsckInformation(result, "unreachable-loose-object", orphan) {
+		t.Fatalf("result = %#v, want valid packed report with orphan candidate", result)
+	}
+}
+
+func TestFsckRepositoryReportsMissingLooseDirectoryWithActivePack(t *testing.T) {
+	stateDir := t.TempDir()
+	repo, err := InitializeRepository(stateDir)
+	if err != nil {
+		t.Fatalf("InitializeRepository: %v", err)
+	}
+	if _, err := repo.GC(GCOptions{}); err != nil {
+		t.Fatalf("GC: %v", err)
+	}
+	if err := repo.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if err := os.RemoveAll(filepath.Join(stateDir, "objects", "loose")); err != nil {
+		t.Fatalf("remove loose object directory: %v", err)
+	}
+
+	result, err := FsckRepository(stateDir)
+	if !errors.Is(err, ErrFsckCorrupt) {
+		t.Fatalf("FsckRepository error = %v, want ErrFsckCorrupt", err)
+	}
+	if !hasFsckDiagnostic(result, "missing-loose-objects") {
+		t.Fatalf("result = %#v, want missing loose objects diagnostic", result)
+	}
+}
+
+func TestFsckRepositoryReportsCorruptActivePack(t *testing.T) {
+	stateDir := t.TempDir()
+	repo, err := InitializeRepository(stateDir)
+	if err != nil {
+		t.Fatalf("InitializeRepository: %v", err)
+	}
+	if _, err := repo.GC(GCOptions{}); err != nil {
+		t.Fatalf("GC: %v", err)
+	}
+	manifest, err := repo.objectStore.readPackManifest()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	if len(manifest.Packs) != 1 {
+		t.Fatalf("active packs = %d, want 1", len(manifest.Packs))
+	}
+	packPath, err := repo.objectStore.packPath(manifest.Packs[0].ID)
+	if err != nil {
+		t.Fatalf("pack path: %v", err)
+	}
+	if err := repo.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if err := os.WriteFile(packPath, []byte("corrupt"), 0o600); err != nil {
+		t.Fatalf("corrupt active pack: %v", err)
+	}
+
+	result, err := FsckRepository(stateDir)
+	if !errors.Is(err, ErrFsckCorrupt) {
+		t.Fatalf("FsckRepository error = %v, want ErrFsckCorrupt", err)
+	}
+	if result.Valid || !hasFsckDiagnostic(result, "invalid-pack") {
+		t.Fatalf("result = %#v, want invalid active pack diagnostic", result)
+	}
+}
+
 func hasFsckDiagnostic(result FsckResult, code string) bool {
 	for _, diagnostic := range result.Diagnostics {
 		if diagnostic.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+func hasFsckDiagnosticAtPath(result FsckResult, code, path string) bool {
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == code && diagnostic.Path == path {
+			return true
+		}
+	}
+	return false
+}
+
+func hasFsckInformation(result FsckResult, code string, object ObjectID) bool {
+	for _, diagnostic := range result.Informational {
+		if diagnostic.Code == code && diagnostic.Object == object {
 			return true
 		}
 	}

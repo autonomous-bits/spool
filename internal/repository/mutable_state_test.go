@@ -39,7 +39,7 @@ func TestMutableControlFilesSurviveRestart(t *testing.T) {
 	}
 
 	for _, path := range []string{
-		"config.toml", "HEAD", filepath.Join("refs", "heads", "main"),
+		"config.toml", reflogRetentionInventoryFilename, "HEAD", filepath.Join("refs", "heads", "main"),
 		filepath.Join("refs", "heads", "feature"), filepath.Join("staged", "feature.json"),
 		filepath.Join("logs", "HEAD"), filepath.Join("logs", "refs", "heads", "feature"),
 	} {
@@ -50,7 +50,7 @@ func TestMutableControlFilesSurviveRestart(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(stateDir, "repository.json")); !os.IsNotExist(err) {
 		t.Fatalf("repository.json exists: %v", err)
 	}
-	if data, err := os.ReadFile(filepath.Join(stateDir, "config.toml")); err != nil || !strings.Contains(string(data), "format_version = 1") || !strings.Contains(string(data), `default_branch = 'main'`) {
+	if data, err := os.ReadFile(filepath.Join(stateDir, "config.toml")); err != nil || !strings.Contains(string(data), "format_version = 1") || !strings.Contains(string(data), `default_branch = 'main'`) || !strings.Contains(string(data), "reflog_retention_inventory = true") {
 		t.Fatalf("config.toml = %q, %v", data, err)
 	}
 	if data, err := os.ReadFile(filepath.Join(stateDir, "HEAD")); err != nil || string(data) != "feature\n" {

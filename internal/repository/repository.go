@@ -122,26 +122,28 @@ type commit struct {
 
 // Repository provides concurrency-safe access to durable graph, branch, and merge state.
 type Repository struct {
-	mu                  sync.RWMutex
-	defaultBranch       string
-	activeBranch        string
-	branches            map[string]ObjectID
-	commits             map[ObjectID]commit
-	snapshots           map[ObjectID]graphSnapshot
-	projections         map[ObjectID]map[string]Node
-	edgeProjections     map[ObjectID]map[string]Edge
-	objects             map[ObjectID][]byte
-	objectStore         *looseObjectStore
-	stagedMutations     map[string]StagedMutationSet
-	mergeLeases         map[string]string
-	mergeTransactions   map[string]mergeTransaction
-	mergeStateDir       string
-	persistStateFn      func(string, string, *mergeTransaction) error
-	persistRepositoryFn func() error
-	appendReflogFn      func(string, ObjectID, ObjectID, string) error
-	stateLock           *flock.Flock
-	closed              bool
-	now                 func() time.Time
+	mu                              sync.RWMutex
+	defaultBranch                   string
+	activeBranch                    string
+	branches                        map[string]ObjectID
+	commits                         map[ObjectID]commit
+	snapshots                       map[ObjectID]graphSnapshot
+	projections                     map[ObjectID]map[string]Node
+	edgeProjections                 map[ObjectID]map[string]Edge
+	objects                         map[ObjectID][]byte
+	objectStore                     *looseObjectStore
+	stagedMutations                 map[string]StagedMutationSet
+	mergeLeases                     map[string]string
+	mergeTransactions               map[string]mergeTransaction
+	mergeStateDir                   string
+	persistStateFn                  func(string, string, *mergeTransaction) error
+	persistRepositoryFn             func() error
+	appendReflogFn                  func(string, ObjectID, ObjectID, string) error
+	writeReflogFn                   func(string, []byte) error
+	writeReflogRetentionInventoryFn func([]string) error
+	stateLock                       *flock.Flock
+	closed                          bool
+	now                             func() time.Time
 }
 
 // Initialization identifies the repository's default and currently active branches.

@@ -15,8 +15,8 @@ flowchart LR
     Tool --> Repository[repository.Repository]
     Services --> Repository
     Repository --> Memory[In-memory graph and ref indexes]
-    Repository --> Objects[".spl/objects/loose/<id>"]
-    Repository --> State[".spl/config.toml, HEAD, refs, staged, logs"]
+    Repository --> Objects[".spl/objects/{loose,pack,info}"]
+    Repository --> State[".spl/config.toml, reflog-retention, HEAD, refs, staged, logs"]
     Repository --> Merge[".spl/merge/<hashed-branch>.json"]
     Repository --> Lock[".spl/repository.lock"]
 ```
@@ -66,7 +66,12 @@ Every immutable object is encoded with canonical CBOR. Its ID is the BLAKE3
 hash of a type-and-length header plus those bytes, and it is stored as a
 canonical CBOR envelope at `.spl/objects/loose/<first-two-hex>/<rest>`.
 Equivalent objects therefore have the same ID; a type, hash, envelope, or
-payload mismatch is corruption.
+payload mismatch is corruption. Loose objects are the write location and the
+first durable lookup location. If absent there, reads consult the atomically
+published `objects/info/packs` manifest, then the manifest-listed immutable
+`objects/pack/<generation>.pack` files and their indexes. Pack entries contain
+the same canonical envelope, compressed with zstd and checked by their CRC,
+envelope, type, and object ID; packing never changes an object's identity.
 
 Nodes, edges, and the node, edge, outgoing-adjacency, and incoming-adjacency
 indexes are immutable objects. Indexes are fixed-fanout (32) sorted Prolly
@@ -170,26 +175,59 @@ restart only when their persisted binding and preview remain valid.
 file to prevent concurrent processes from mutating the same local repository.
 Each immutable object is made durable before a mutable ref can point to it.
 Control-file writes use a synced temporary file, atomic replacement, and
-directory sync. A ref transition is recorded in its reflog only after its
-replacement has succeeded. Staging cleanup follows a successful commit-ref
-replacement, so an interruption can retain safe, stale staging but cannot make
-a ref name a missing object. Unreachable immutable objects left by an
-interrupted transition are safe and may be collected by a future maintenance
-operation.
+directory sync. Before a ref transition can succeed, its canonical reflog path
+is atomically recorded in the durable `reflog-retention` inventory; a ref
+transition is then recorded in that reflog only after replacement has
+succeeded. The inventory is an append-only set of `HEAD` and
+`refs/heads/<name>` paths, so a deleted branch's historical reflog remains a
+root. Staging cleanup follows a successful commit-ref replacement, so an
+interruption can retain safe, stale staging but cannot make a ref name a
+missing object. Unreachable immutable objects left by an interrupted
+transition are safe and may be collected by a future maintenance operation.
 
 Operations roll back in-memory changes when persistence fails before
 replacement. When replacement succeeds but the final directory sync or reflog
 append fails, they return a result with a durability warning: callers must not
 retry as though the transition did not happen.
 
+### Object maintenance
+
+`spl gc` runs while the opened repository holds its normal process lock and
+in-process mutation lock. Its retention roots are every branch ref, both the
+old and new object IDs in every reflog entry, and a resolved durable merge
+transaction's staged snapshot. It reads only reflogs listed by the retention
+inventory and fails closed if the inventory, a listed file, or the exact set of
+on-disk reflog paths is invalid. Existing repositories bootstrap this inventory
+from their currently present legitimate logs on first open; deleted or
+truncated logs from before that migration cannot be reconstructed. Reflogs are
+retained indefinitely because their current format has no timestamps. Objects
+not reachable from those roots remain loose for a 14-day grace period before
+pruning.
+
+GC writes and syncs a new pack and index, fully reopens and verifies them, then
+atomically replaces the active-pack manifest and syncs its directory. Only
+after that publication can matching loose copies be removed. Repacking first
+publishes one replacement generation and then retires superseded pack files.
+Thus a crash before manifest publication leaves only ignored, collectible pack
+artifacts; a crash after publication leaves the new complete generation
+readable even if loose or old-pack cleanup has not completed. Cleanup failures
+after publication are reported as committed-with-warning results rather than
+safe-to-retry failures.
+
 ### Integrity checking
 
 `spl fsck` is read-only and emits a complete JSON report. It verifies control
-files, refs, staged state, merge bindings, every reachable commit and snapshot,
-all Prolly-tree ordering and boundaries, graph/schema invariants, and every
-loose-object envelope (including unreachable objects). It returns a non-zero
-status for corruption while still writing the report, so automation can retain
-the diagnostics. `fsck` does not repair or delete data.
+files, refs, the reflog-retention inventory and its exact listed log set,
+staged state, merge bindings, every reachable commit and snapshot, all
+Prolly-tree ordering and boundaries, graph/schema invariants, and every
+loose-object envelope (including unreachable objects). It also validates the
+active pack manifest, every listed pack and index, entry offsets, compression
+CRC, and packed envelope/type/hash before resolving reachable objects from
+either storage location. Matching loose and packed copies must agree. Unreachable
+valid loose objects are reported as informational GC candidates and do not make
+the report invalid. `fsck` returns a non-zero status for corruption while still
+writing the report, so automation can retain the diagnostics; it never repairs
+or deletes data.
 
 ## Extension points and current scope
 

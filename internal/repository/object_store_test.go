@@ -69,6 +69,28 @@ func TestLooseObjectStoreWritesCanonicalEnvelopeAndLoadsCache(t *testing.T) {
 	}
 }
 
+func TestLooseObjectStoreReadsVerifiedObjectWithoutExpectedType(t *testing.T) {
+	stateDir := filepath.Join(t.TempDir(), ".spl")
+	cache := make(map[ObjectID][]byte)
+	store := newLooseObjectStore(stateDir, &cache)
+	id, err := store.put("future-object", map[string]string{"key": "value"})
+	if err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	delete(cache, id)
+
+	objectType, data, err := store.getAny(id)
+	if err != nil {
+		t.Fatalf("getAny: %v", err)
+	}
+	if objectType != "future-object" || len(data) == 0 {
+		t.Fatalf("getAny = (%q, %d bytes), want future-object payload", objectType, len(data))
+	}
+	if _, err := store.get(id, "other-object"); !errors.Is(err, errLooseObjectType) {
+		t.Fatalf("typed get error = %v, want type mismatch", err)
+	}
+}
+
 func TestLooseObjectStoreRejectsInvalidOrTamperedObjects(t *testing.T) {
 	stateDir := filepath.Join(t.TempDir(), ".spl")
 	cache := make(map[ObjectID][]byte)

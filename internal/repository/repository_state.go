@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"unicode"
 
 	"github.com/fxamacker/cbor/v2"
 	"github.com/gofrs/flock"
@@ -40,8 +41,9 @@ type persistedRepository struct {
 const repositoryFormatVersion = 1
 
 type repositoryConfig struct {
-	FormatVersion int    `toml:"format_version"`
-	DefaultBranch string `toml:"default_branch"`
+	FormatVersion            int    `toml:"format_version"`
+	DefaultBranch            string `toml:"default_branch"`
+	ReflogRetentionInventory bool   `toml:"reflog_retention_inventory"`
 }
 
 type legacyNode struct {
@@ -68,7 +70,7 @@ func NewSeedRepositoryWithMergeState(stateDir string) (*Repository, error) {
 	if err := rejectLegacyRepositoryState(stateDir); err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+	if err := ensureDurableDirectory(stateDir); err != nil {
 		return nil, fmt.Errorf("create repository state directory: %w", err)
 	}
 	repo := newRepository()
@@ -328,6 +330,9 @@ func (r *Repository) initializeControlStateLocked() error {
 	if err := r.ensureControlDirectories(); err != nil {
 		return err
 	}
+	if err := r.writeReflogRetentionInventoryLocked(nil); err != nil {
+		return err
+	}
 	if err := r.writeConfigLocked(); err != nil {
 		return err
 	}
@@ -361,6 +366,9 @@ func (r *Repository) loadControlState() (bool, error) {
 	}
 	if len(branches) == 0 || branches[config.DefaultBranch] == "" || branches[head] == "" {
 		return false, fmt.Errorf("decode repository control state: invalid durable repository")
+	}
+	if err := r.initializeReflogRetentionInventoryLocked(config.ReflogRetentionInventory); err != nil {
+		return false, fmt.Errorf("load reflog retention inventory: %w", err)
 	}
 	r.defaultBranch, r.activeBranch, r.branches = config.DefaultBranch, head, branches
 	r.commits, r.snapshots = make(map[ObjectID]commit), make(map[ObjectID]graphSnapshot)
@@ -560,7 +568,9 @@ func (r *Repository) writeConfigLocked() error {
 	if r.mergeStateDir == "" {
 		return nil
 	}
-	data, err := toml.Marshal(repositoryConfig{FormatVersion: repositoryFormatVersion, DefaultBranch: r.defaultBranch})
+	data, err := toml.Marshal(repositoryConfig{
+		FormatVersion: repositoryFormatVersion, DefaultBranch: r.defaultBranch, ReflogRetentionInventory: true,
+	})
 	if err != nil {
 		return fmt.Errorf("encode repository configuration: %w", err)
 	}
@@ -601,7 +611,7 @@ func (r *Repository) writeRefValueLocked(branch string, next ObjectID) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	if err := ensureDurableDirectory(filepath.Dir(path)); err != nil {
 		return fmt.Errorf("create branch ref directory: %w", err)
 	}
 	return writeDurableStateFile(path, []byte(next+"\n"))
@@ -653,7 +663,7 @@ func (r *Repository) writeStagedLocked(branch string, staged *StagedMutationSet)
 	if err != nil {
 		return fmt.Errorf("encode staged mutations: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	if err := ensureDurableDirectory(filepath.Dir(path)); err != nil {
 		return fmt.Errorf("create staged mutations directory: %w", err)
 	}
 	return writeDurableStateFile(path, data)
@@ -664,15 +674,106 @@ func (r *Repository) writeStagedLocked(branch string, staged *StagedMutationSet)
 // is a committed-with-warning error: rolling back memory would otherwise lie
 // about the durable ref.
 func (r *Repository) replaceThenReflogLocked(replace func() error, ref string, previous, next ObjectID, action string) error {
+	reflogCreated, reflogErr := r.prepareReflogLocked(ref)
+	if reflogErr != nil && !durableWriteCommitted(reflogErr) {
+		cleanupErr := r.removePreparedReflogLocked(ref, reflogCreated)
+		if cleanupErr != nil {
+			return fmt.Errorf("prepare reflog: %w (cleanup failed: %v)", reflogErr, cleanupErr)
+		}
+		return fmt.Errorf("prepare reflog: %w", reflogErr)
+	}
+	inventoryErr := r.recordReflogRetentionPathLocked(ref, reflogCreated)
+	if inventoryErr != nil && !durableWriteCommitted(inventoryErr) {
+		cleanupErr := r.removePreparedReflogLocked(ref, reflogCreated)
+		if reflogErr != nil {
+			if cleanupErr != nil {
+				return fmt.Errorf("record reflog retention inventory after reflog preparation warning (%v; cleanup failed: %v): %w", reflogErr, cleanupErr, inventoryErr)
+			}
+			return fmt.Errorf("record reflog retention inventory after reflog preparation warning (%v): %w", reflogErr, inventoryErr)
+		}
+		if cleanupErr != nil {
+			return fmt.Errorf("record reflog retention inventory: %w (cleanup failed: %v)", inventoryErr, cleanupErr)
+		}
+		return fmt.Errorf("record reflog retention inventory: %w", inventoryErr)
+	}
 	replaceErr := replace()
 	if replaceErr != nil && !durableWriteCommitted(replaceErr) {
+		if reflogErr != nil || inventoryErr != nil {
+			// The reflog and inventory may have reached disk even though this
+			// ref replacement did not. Do not classify this as a committed ref.
+			return fmt.Errorf("replace ref after reflog preparation or retention inventory warning (%v): %w", errors.Join(reflogErr, inventoryErr), replaceErr)
+		}
 		return replaceErr
 	}
-	reflogErr := r.appendReflogLocked(ref, previous, next, action)
-	if replaceErr == nil && reflogErr == nil {
+	appendErr := r.appendReflogLocked(ref, previous, next, action)
+	if reflogErr == nil && inventoryErr == nil && replaceErr == nil && appendErr == nil {
 		return nil
 	}
-	return durableWriteCommittedError{err: errors.Join(replaceErr, reflogErr)}
+	return durableWriteCommittedError{err: errors.Join(reflogErr, inventoryErr, replaceErr, appendErr)}
+}
+
+// prepareReflogLocked creates and syncs an empty, valid reflog before it is
+// listed by the retention inventory. Thus a ref replacement failure can leave
+// a harmless tracked empty log, rather than an inventory entry with no log.
+func (r *Repository) prepareReflogLocked(ref string) (bool, error) {
+	if r.mergeStateDir == "" {
+		return false, nil
+	}
+	path, err := r.reflogPath(ref)
+	if err != nil {
+		return false, err
+	}
+	if err := ensureDurableDirectory(filepath.Dir(path)); err != nil {
+		return false, fmt.Errorf("create reflog directory: %w", err)
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND|os.O_CREATE|os.O_EXCL, 0o600)
+	if os.IsExist(err) {
+		info, statErr := os.Lstat(path)
+		if statErr != nil {
+			return false, fmt.Errorf("inspect existing reflog: %w", statErr)
+		}
+		if !info.Mode().IsRegular() {
+			return false, errors.New("existing reflog is not a regular file")
+		}
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("create reflog: %w", err)
+	}
+	if err := file.Sync(); err != nil {
+		return true, closeAfterWriteFailure(file, fmt.Errorf("sync empty reflog: %w", err))
+	}
+	if err := file.Close(); err != nil {
+		return true, fmt.Errorf("close empty reflog: %w", err)
+	}
+	if err := syncMergeStateDirectory(filepath.Dir(path)); err != nil {
+		return true, durableWriteCommittedError{err: fmt.Errorf("sync empty reflog directory: %w", err)}
+	}
+	return true, nil
+}
+
+func (r *Repository) removePreparedReflogLocked(ref string, created bool) error {
+	if !created {
+		return nil
+	}
+	path, err := r.reflogPath(ref)
+	if err != nil {
+		return err
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("inspect prepared reflog: %w", err)
+	}
+	if !info.Mode().IsRegular() || info.Size() != 0 {
+		return errors.New("prepared reflog changed before cleanup")
+	}
+	if err := os.Remove(path); err != nil {
+		return fmt.Errorf("remove prepared reflog: %w", err)
+	}
+	if err := syncMergeStateDirectory(filepath.Dir(path)); err != nil {
+		return fmt.Errorf("sync prepared reflog directory: %w", err)
+	}
+	return nil
 }
 
 func (r *Repository) appendReflogLocked(ref string, previous, next ObjectID, action string) error {
@@ -686,27 +787,15 @@ func (r *Repository) appendReflogLocked(ref string, previous, next ObjectID, act
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return fmt.Errorf("create reflog directory: %w", err)
-	}
-	file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	data, err := readValidatedReflogContent(path, ref)
 	if err != nil {
-		return fmt.Errorf("open reflog: %w", err)
+		return fmt.Errorf("read reflog: %w", err)
 	}
-	line := fmt.Sprintf("%s %s %s\n", previous, next, action)
-	if _, err := file.WriteString(line); err != nil {
-		return closeAfterWriteFailure(file, fmt.Errorf("write reflog: %w", err))
+	data = append(data, fmt.Sprintf("%s %s %s\n", previous, next, action)...)
+	if r.writeReflogFn != nil {
+		return r.writeReflogFn(path, data)
 	}
-	if err := file.Sync(); err != nil {
-		return closeAfterWriteFailure(file, fmt.Errorf("sync reflog: %w", err))
-	}
-	if err := file.Close(); err != nil {
-		return fmt.Errorf("close reflog: %w", err)
-	}
-	if err := syncMergeStateDirectory(filepath.Dir(path)); err != nil {
-		return durableWriteCommittedError{err: err}
-	}
-	return nil
+	return writeDurableStateFile(path, data)
 }
 
 func (r *Repository) ensureControlDirectories() error {
@@ -714,7 +803,7 @@ func (r *Repository) ensureControlDirectories() error {
 		return nil
 	}
 	for _, path := range []string{r.refsDirectory(), r.reflogDirectory(), r.stagedDirectory(), r.mergeDirectory()} {
-		if err := os.MkdirAll(path, 0o700); err != nil {
+		if err := ensureDurableDirectory(path); err != nil {
 			return fmt.Errorf("create repository control directory: %w", err)
 		}
 	}
@@ -747,6 +836,11 @@ func (r *Repository) reflogPath(ref string) (string, error) {
 
 func validRefName(name string) bool {
 	if name == "" || strings.HasPrefix(name, "/") || strings.Contains(name, "\\") {
+		return false
+	}
+	if strings.IndexFunc(name, func(r rune) bool {
+		return unicode.IsSpace(r) || unicode.IsControl(r)
+	}) >= 0 {
 		return false
 	}
 	for _, part := range strings.Split(name, "/") {

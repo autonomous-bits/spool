@@ -317,6 +317,16 @@ func NewResolveToolWithOptions(repo *repository.Repository, options Options) *Re
 	}
 }
 
+// EDGGC honors cancellation before beginning the atomic maintenance operation.
+// Once GC starts, it must run to a durable result so cancellation cannot leave
+// a caller uncertain whether publication or cleanup occurred.
+func (t *ResolveTool) EDGGC(ctx context.Context, options repository.GCOptions) (repository.GCResult, error) {
+	if err := ctx.Err(); err != nil {
+		return repository.GCResult{}, err
+	}
+	return t.repository.GC(options)
+}
+
 // EDGMergePreview computes a deterministic, non-mutating three-way merge preview.
 func (t *ResolveTool) EDGMergePreview(ctx context.Context, sourceBranch, targetBranch string) (repository.MergePreview, error) {
 	if err := ctx.Err(); err != nil {
