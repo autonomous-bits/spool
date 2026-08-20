@@ -4,7 +4,6 @@ package commands
 import (
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/autonomous-bits/spool/internal/resolve"
 	"github.com/spf13/cobra"
@@ -20,8 +19,7 @@ func NewResolveCommand(tool *resolve.ResolveTool) *cobra.Command {
 // NewResolveCommandWithToolProvider creates the resolve command with a lazy repository tool.
 func NewResolveCommandWithToolProvider(toolProvider func() (*resolve.ResolveTool, error)) *cobra.Command {
 	var branch, commit, nodeID string
-	var maxRows, maxResponseBytes, maxDepth, maxVisited int
-	var timeout time.Duration
+	var budgetFlags queryBudgetFlags
 	command := &cobra.Command{
 		Use:          "resolve",
 		Short:        "Resolve a node from a branch snapshot",
@@ -41,41 +39,29 @@ func NewResolveCommandWithToolProvider(toolProvider func() (*resolve.ResolveTool
 			if command.Flags().Changed("commit") {
 				selector.Commit = &commit
 			}
-			budget := resolve.QueryBudgetRequest{}
-			if command.Flags().Changed("max-rows") {
-				budget.MaxRows = &maxRows
-			}
-			if command.Flags().Changed("max-response-bytes") {
-				budget.MaxResponseBytes = &maxResponseBytes
-			}
-			if command.Flags().Changed("max-depth") {
-				budget.MaxDepth = &maxDepth
-			}
-			if command.Flags().Changed("max-visited") {
-				budget.MaxVisited = &maxVisited
-			}
-			if command.Flags().Changed("timeout") {
-				budget.Timeout = &timeout
-			}
 			result, err := tool.EDGResolve(command.Context(), resolve.ResolveRequest{
 				Selector: selector,
 				NodeID:   nodeID,
-				Budget:   budget,
+				Budget:   budgetFlags.request(command),
 			})
 			if err != nil {
 				return err
 			}
-			return json.NewEncoder(command.OutOrStdout()).Encode(result)
+			data, err := json.Marshal(result)
+			if err != nil {
+				return err
+			}
+			if _, err := command.OutOrStdout().Write(data); err != nil {
+				return fmt.Errorf("write resolve result: %w", err)
+			}
+			return nil
 		},
 	}
 	command.Flags().StringVar(&branch, "branch", "", "branch to resolve")
 	command.Flags().StringVar(&commit, "commit", "", "commit to resolve")
 	command.Flags().StringVar(&nodeID, "node", "", "stable node entity ID")
-	command.Flags().IntVar(&maxRows, "max-rows", 0, "maximum rows to return")
-	command.Flags().IntVar(&maxResponseBytes, "max-response-bytes", 0, "maximum response size in bytes")
-	command.Flags().IntVar(&maxDepth, "max-depth", 0, "maximum traversal depth")
-	command.Flags().IntVar(&maxVisited, "max-visited", 0, "maximum visited nodes")
-	command.Flags().DurationVar(&timeout, "timeout", 0, "maximum query duration")
+	budgetFlags.addReadBudgetFlags(command)
+	budgetFlags.addTraversalBudgetFlags(command)
 	_ = command.MarkFlagRequired("branch")
 	return command
 }

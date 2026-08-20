@@ -1,9 +1,7 @@
 package repository
 
 import (
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/json"
+	"context"
 	"errors"
 	"sort"
 )
@@ -13,8 +11,6 @@ var (
 	ErrInvalidContinuation = errors.New("diff continuation token does not match request")
 	// ErrInvalidDiffBudget reports a non-positive row budget.
 	ErrInvalidDiffBudget = errors.New("diff max rows must be positive")
-	// ErrResponseBudgetTooSmall reports a byte budget unable to represent the response metadata.
-	ErrResponseBudgetTooSmall = errors.New("diff response budget cannot represent result metadata")
 )
 
 // DiffFilter restricts diff changes by identifiers or node title substring.
@@ -83,15 +79,21 @@ type DiffResult struct {
 	Context []DiffContext `json:"context,omitempty"`
 	// ContinuationToken resumes remaining changes with the same request.
 	ContinuationToken string `json:"continuationToken,omitempty"`
-}
-
-type diffToken struct {
-	Fingerprint string `json:"fingerprint"`
-	Offset      int    `json:"offset"`
+	// ContextTruncated reports that requested one-hop context exceeded a page budget.
+	ContextTruncated bool `json:"contextTruncated,omitempty"`
 }
 
 // Diff returns a deterministic, budgeted page comparing two repository snapshots.
 func (r *Repository) Diff(request DiffRequest) (DiffResult, error) {
+	return r.DiffContext(context.Background(), request)
+}
+
+// DiffContext returns a deterministic, budgeted page and stops scanning when ctx
+// is canceled. MaxResponseBytes applies to DiffResult, not an adapter envelope.
+func (r *Repository) DiffContext(ctx context.Context, request DiffRequest) (DiffResult, error) {
+	if err := ctx.Err(); err != nil {
+		return DiffResult{}, err
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if err := r.ensureOpenLocked(); err != nil {
@@ -106,31 +108,56 @@ func (r *Repository) Diff(request DiffRequest) (DiffResult, error) {
 		return DiffResult{}, err
 	}
 	fingerprint := diffFingerprint(base, target, request)
-	offset, err := decodeDiffToken(request.ContinuationToken, fingerprint)
+	offset, err := decodeContinuation(request.ContinuationToken, fingerprint)
 	if err != nil {
 		return DiffResult{}, err
 	}
-	changes := r.diffChangesLocked(base, target, request.Filter)
 	if request.MaxRows <= 0 {
 		return DiffResult{}, ErrInvalidDiffBudget
 	}
+	if request.MaxResponseBytes <= 0 {
+		return DiffResult{}, ErrResponseBudgetTooSmall
+	}
+	changes, scanErr := r.diffChangesContextLocked(ctx, base, target, request.Filter)
+	if scanErr != nil && !errors.Is(scanErr, context.DeadlineExceeded) {
+		return DiffResult{}, scanErr
+	}
 	if offset > len(changes) {
+		if scanErr != nil {
+			return DiffResult{}, scanErr
+		}
 		return DiffResult{}, ErrInvalidContinuation
 	}
+	timedOut := errors.Is(scanErr, context.DeadlineExceeded) && len(changes) > offset
+	if scanErr != nil && !timedOut {
+		return DiffResult{}, scanErr
+	}
 	result := DiffResult{BaseCommit: base, TargetCommit: target, Changes: make([]DiffEntry, 0)}
-	if !diffResultFits(result, request.MaxResponseBytes) {
+	if !resultFits(result, request.MaxResponseBytes) {
 		return DiffResult{}, ErrResponseBudgetTooSmall
 	}
 	limit := request.MaxRows
 	next := offset
+	pageCtx := ctx
+	if timedOut {
+		pageCtx = context.Background()
+	}
 	for next < len(changes) && len(result.Changes) < limit {
+		if err := pageCtx.Err(); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) && next > offset {
+				result.ContinuationToken = encodeContinuation(fingerprint, next)
+				return result, err
+			}
+			return DiffResult{}, err
+		}
 		candidate := result
 		candidate.Changes = append(append([]DiffEntry(nil), result.Changes...), changes[next])
-		if next+1 < len(changes) {
-			candidate.ContinuationToken = encodeDiffToken(fingerprint, next+1)
-		}
-		if !diffResultFits(candidate, request.MaxResponseBytes) {
+		candidate.ContinuationToken = encodeContinuation(fingerprint, next+1)
+		if !resultFits(candidate, request.MaxResponseBytes) {
 			break
+		}
+		if next+1 == len(changes) {
+			candidate.ContinuationToken = ""
 		}
 		result = candidate
 		next++
@@ -139,22 +166,52 @@ func (r *Repository) Diff(request DiffRequest) (DiffResult, error) {
 		if next == offset {
 			return DiffResult{}, ErrResponseBudgetTooSmall
 		}
-		result.ContinuationToken = encodeDiffToken(fingerprint, next)
-		if !diffResultFits(result, request.MaxResponseBytes) {
+		result.ContinuationToken = encodeContinuation(fingerprint, next)
+		if !resultFits(result, request.MaxResponseBytes) {
 			return DiffResult{}, ErrResponseBudgetTooSmall
 		}
 	}
+	if timedOut {
+		result.ContinuationToken = encodeContinuation(fingerprint, next)
+		if !resultFits(result, request.MaxResponseBytes) {
+			return DiffResult{}, ErrResponseBudgetTooSmall
+		}
+		return result, scanErr
+	}
 	if request.IncludeOneHop {
-		for _, context := range r.diffContextLocked(base, target, result.Changes) {
+		contextEntries, err := r.diffContextContextLocked(ctx, base, target, result.Changes)
+		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) && len(result.Changes) > 0 {
+				return result, err
+			}
+			return DiffResult{}, err
+		}
+		for _, contextEntry := range contextEntries {
+			if err := ctx.Err(); err != nil {
+				if errors.Is(err, context.DeadlineExceeded) && (len(result.Changes) > 0 || len(result.Context) > 0) {
+					return result, err
+				}
+				return DiffResult{}, err
+			}
 			if len(result.Changes)+len(result.Context) >= limit {
+				result.ContextTruncated = true
 				break
 			}
 			candidate := result
-			candidate.Context = append(append([]DiffContext(nil), result.Context...), context)
-			if !diffResultFits(candidate, request.MaxResponseBytes) {
+			candidate.Context = append(append([]DiffContext(nil), result.Context...), contextEntry)
+			if !resultFits(candidate, request.MaxResponseBytes) {
+				result.ContextTruncated = true
 				break
 			}
 			result = candidate
+		}
+		if result.ContextTruncated {
+			for !resultFits(result, request.MaxResponseBytes) && len(result.Context) > 0 {
+				result.Context = result.Context[:len(result.Context)-1]
+			}
+			if !resultFits(result, request.MaxResponseBytes) {
+				return DiffResult{}, ErrResponseBudgetTooSmall
+			}
 		}
 	}
 	return result, nil
@@ -168,17 +225,32 @@ func (r *Repository) requirePinnedCommitLocked(commit ObjectID) (ObjectID, error
 }
 
 func (r *Repository) diffChangesLocked(base, target ObjectID, filter DiffFilter) []DiffEntry {
-	baseSnapshot, targetSnapshot := r.commits[base].Snapshot, r.commits[target].Snapshot
-	baseNodes, targetNodes := r.projections[r.snapshots[baseSnapshot].NodeRoot], r.projections[r.snapshots[targetSnapshot].NodeRoot]
-	baseEdges, targetEdges := r.edgeProjections[baseSnapshot], r.edgeProjections[targetSnapshot]
-	changes := make([]DiffEntry, 0)
-	changes = append(changes, diffNodeChanges(baseNodes, targetNodes, filter)...)
-	changes = append(changes, diffEdgeChanges(baseEdges, targetEdges, filter)...)
+	changes, _ := r.diffChangesContextLocked(context.Background(), base, target, filter)
 	return changes
 }
 
+func (r *Repository) diffChangesContextLocked(ctx context.Context, base, target ObjectID, filter DiffFilter) ([]DiffEntry, error) {
+	baseSnapshot, targetSnapshot := r.commits[base].Snapshot, r.commits[target].Snapshot
+	baseNodes, targetNodes := r.projections[r.snapshots[baseSnapshot].NodeRoot], r.projections[r.snapshots[targetSnapshot].NodeRoot]
+	baseEdges, targetEdges := r.edgeProjections[baseSnapshot], r.edgeProjections[targetSnapshot]
+	nodes, err := diffNodeChangesContext(ctx, baseNodes, targetNodes, filter)
+	if err != nil {
+		return nodes, err
+	}
+	edges, err := diffEdgeChangesContext(ctx, baseEdges, targetEdges, filter)
+	if err != nil {
+		return append(nodes, edges...), err
+	}
+	return append(nodes, edges...), nil
+}
+
 func diffNodeChanges(base, target map[string]Node, filter DiffFilter) []DiffEntry {
-	return diffEntries(base, target, filter.NodeIDs, filter.NodeTitleSubstr,
+	entries, _ := diffNodeChangesContext(context.Background(), base, target, filter)
+	return entries
+}
+
+func diffNodeChangesContext(ctx context.Context, base, target map[string]Node, filter DiffFilter) ([]DiffEntry, error) {
+	return diffEntriesContext(ctx, base, target, filter.NodeIDs, filter.NodeTitleSubstr,
 		func(node Node) DiffEntry {
 			node = node.clone()
 			return DiffEntry{Entity: "node", ID: node.ID, Node: &node}
@@ -188,10 +260,15 @@ func diffNodeChanges(base, target map[string]Node, filter DiffFilter) []DiffEntr
 }
 
 func diffEdgeChanges(base, target map[string]Edge, filter DiffFilter) []DiffEntry {
+	entries, _ := diffEdgeChangesContext(context.Background(), base, target, filter)
+	return entries
+}
+
+func diffEdgeChangesContext(ctx context.Context, base, target map[string]Edge, filter DiffFilter) ([]DiffEntry, error) {
 	if filter.NodeTitleSubstr != "" {
-		return nil
+		return nil, nil
 	}
-	return diffEntries(base, target, filter.EdgeIDs, "",
+	return diffEntriesContext(ctx, base, target, filter.EdgeIDs, "",
 		func(edge Edge) DiffEntry {
 			edge = edge.clone()
 			return DiffEntry{Entity: "edge", ID: edge.ID, Edge: &edge}
@@ -201,82 +278,120 @@ func diffEdgeChanges(base, target map[string]Edge, filter DiffFilter) []DiffEntr
 }
 
 func diffEntries[T any](base, target map[string]T, ids []string, title string, entry func(T) DiffEntry, equal func(T, T) bool) []DiffEntry {
+	result, _ := diffEntriesContext(context.Background(), base, target, ids, title, entry, equal)
+	return result
+}
+
+func diffEntriesContext[T any](ctx context.Context, base, target map[string]T, ids []string, title string, entry func(T) DiffEntry, equal func(T, T) bool) ([]DiffEntry, error) {
 	allowed := make(map[string]struct{}, len(ids))
 	for _, id := range ids {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		allowed[id] = struct{}{}
 	}
-	byChange := map[string][]DiffEntry{"added": {}, "removed": {}, "modified": {}}
-	consider := func(id string) bool {
+	targetIDs := make([]string, 0, len(target))
+	for id := range target {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		targetIDs = append(targetIDs, id)
+	}
+	baseIDs := make([]string, 0, len(base))
+	for id := range base {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		baseIDs = append(baseIDs, id)
+	}
+	sort.Strings(targetIDs)
+	sort.Strings(baseIDs)
+
+	consider := func(id string, value T) bool {
 		if len(allowed) > 0 {
 			if _, ok := allowed[id]; !ok {
 				return false
 			}
 		}
 		if title != "" {
-			node, ok := any(target[id]).(Node)
+			node, ok := any(value).(Node)
 			return ok && contains(node.Title, title)
 		}
 		return true
 	}
-	for id, targetValue := range target {
-		if !consider(id) {
+	result := make([]DiffEntry, 0)
+	for _, id := range targetIDs {
+		if err := ctx.Err(); err != nil {
+			return result, err
+		}
+		targetValue := target[id]
+		if _, exists := base[id]; exists || !consider(id, targetValue) {
 			continue
 		}
-		baseValue, exists := base[id]
-		change := "added"
-		if exists {
-			if equal(baseValue, targetValue) {
-				continue
-			}
-			change = "modified"
-		}
-		value := targetValue
-		item := entry(value)
-		item.Change = change
-		byChange[change] = append(byChange[change], item)
+		item := entry(targetValue)
+		item.Change = "added"
+		result = append(result, item)
 	}
-	for id, baseValue := range base {
+	for _, id := range baseIDs {
+		if err := ctx.Err(); err != nil {
+			return result, err
+		}
 		if _, exists := target[id]; exists {
 			continue
 		}
-		if len(allowed) > 0 {
-			if _, ok := allowed[id]; !ok {
-				continue
-			}
-		}
-		if title != "" {
-			node, ok := any(baseValue).(Node)
-			if !ok || !contains(node.Title, title) {
-				continue
-			}
+		baseValue := base[id]
+		if !consider(id, baseValue) {
+			continue
 		}
 		item := entry(baseValue)
 		item.Change = "removed"
-		byChange["removed"] = append(byChange["removed"], item)
+		result = append(result, item)
 	}
-	result := make([]DiffEntry, 0)
-	for _, change := range []string{"added", "removed", "modified"} {
-		sort.Slice(byChange[change], func(i, j int) bool { return byChange[change][i].ID < byChange[change][j].ID })
-		result = append(result, byChange[change]...)
+	for _, id := range targetIDs {
+		if err := ctx.Err(); err != nil {
+			return result, err
+		}
+		targetValue := target[id]
+		baseValue, exists := base[id]
+		if !exists || equal(baseValue, targetValue) || !consider(id, targetValue) {
+			continue
+		}
+		item := entry(targetValue)
+		item.Change = "modified"
+		result = append(result, item)
 	}
-	return result
+	return result, nil
 }
 
 func (r *Repository) diffContextLocked(base, target ObjectID, changes []DiffEntry) []DiffContext {
+	result, _ := r.diffContextContextLocked(context.Background(), base, target, changes)
+	return result
+}
+
+func (r *Repository) diffContextContextLocked(ctx context.Context, base, target ObjectID, changes []DiffEntry) ([]DiffContext, error) {
 	baseSnapshot, targetSnapshot := r.commits[base].Snapshot, r.commits[target].Snapshot
 	nodes := make(map[string]Node)
 	edges := make(map[string]Edge)
 	for _, snapshot := range []ObjectID{baseSnapshot, targetSnapshot} {
 		for id, node := range r.projections[r.snapshots[snapshot].NodeRoot] {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			nodes[id] = node
 		}
 		for id, edge := range r.edgeProjections[snapshot] {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			edges[id] = edge
 		}
 	}
 	changed := make(map[string]struct{}, len(changes))
 	anchors := make(map[string]struct{})
 	for _, change := range changes {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		changed[change.Entity+":"+change.ID] = struct{}{}
 		if change.Entity == "node" {
 			anchors[change.ID] = struct{}{}
@@ -291,6 +406,9 @@ func (r *Repository) diffContextLocked(base, target ObjectID, changes []DiffEntr
 	related := make(map[string]struct{})
 	contextEdges := make(map[string]struct{})
 	for _, edge := range edges {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		_, source := anchors[edge.Source]
 		_, target := anchors[edge.Target]
 		if source || target {
@@ -300,6 +418,9 @@ func (r *Repository) diffContextLocked(base, target ObjectID, changes []DiffEntr
 	}
 	context := make([]DiffContext, 0)
 	for id, node := range nodes {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if _, isChanged := changed["node:"+id]; !isChanged {
 			if _, related := related[id]; related {
 				value := node.clone()
@@ -308,6 +429,9 @@ func (r *Repository) diffContextLocked(base, target ObjectID, changes []DiffEntr
 		}
 	}
 	for id, edge := range edges {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if _, isChanged := changed["edge:"+id]; !isChanged {
 			if _, isContext := contextEdges[id]; isContext {
 				value := edge.clone()
@@ -321,12 +445,7 @@ func (r *Repository) diffContextLocked(base, target ObjectID, changes []DiffEntr
 		}
 		return context[i].ID < context[j].ID
 	})
-	return context
-}
-
-func diffResultFits(result DiffResult, maxBytes int) bool {
-	data, err := json.Marshal(result)
-	return err == nil && len(data) <= maxBytes
+	return context, nil
 }
 
 func diffFingerprint(base, target ObjectID, request DiffRequest) string {
@@ -335,35 +454,14 @@ func diffFingerprint(base, target ObjectID, request DiffRequest) string {
 	filter.EdgeIDs = append([]string(nil), filter.EdgeIDs...)
 	sort.Strings(filter.NodeIDs)
 	sort.Strings(filter.EdgeIDs)
-	data, _ := json.Marshal(struct {
+	return queryFingerprint(struct {
 		Base             ObjectID
 		Target           ObjectID
 		Filter           DiffFilter
 		MaxRows          int
 		MaxResponseBytes int
-	}{base, target, filter, request.MaxRows, request.MaxResponseBytes})
-	sum := sha256.Sum256(data)
-	return base64.RawURLEncoding.EncodeToString(sum[:])
-}
-
-func encodeDiffToken(fingerprint string, offset int) string {
-	data, _ := json.Marshal(diffToken{Fingerprint: fingerprint, Offset: offset})
-	return base64.RawURLEncoding.EncodeToString(data)
-}
-
-func decodeDiffToken(token, fingerprint string) (int, error) {
-	if token == "" {
-		return 0, nil
-	}
-	data, err := base64.RawURLEncoding.DecodeString(token)
-	if err != nil {
-		return 0, ErrInvalidContinuation
-	}
-	var decoded diffToken
-	if json.Unmarshal(data, &decoded) != nil || decoded.Fingerprint != fingerprint || decoded.Offset < 0 {
-		return 0, ErrInvalidContinuation
-	}
-	return decoded.Offset, nil
+		IncludeOneHop    bool
+	}{base, target, filter, request.MaxRows, request.MaxResponseBytes, request.IncludeOneHop})
 }
 
 func contains(value, substring string) bool {

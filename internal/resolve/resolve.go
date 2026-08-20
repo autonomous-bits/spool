@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/autonomous-bits/spool/internal/repository"
 	"github.com/autonomous-bits/spool/internal/repository/branch"
@@ -76,6 +77,8 @@ type ResolveResult struct {
 	Projection ProjectionMetadata `json:"projection"`
 	// Budget is the effective query budget used by the tool adapter.
 	Budget QueryBudget `json:"budget"`
+	// Completion reports query completion and full-envelope byte accounting.
+	Completion QueryCompletionMetadata `json:"completion"`
 }
 
 // SchemaMetadata identifies the schema used to validate a snapshot.
@@ -111,6 +114,10 @@ type DiffResult struct {
 	Target SnapshotMetadata `json:"target"`
 	// Projection describes the target snapshot's projection provenance.
 	Projection ProjectionMetadata `json:"projection"`
+	// Budget is the effective query budget used by the tool adapter.
+	Budget QueryBudget `json:"budget"`
+	// Completion reports query completion and full-envelope byte accounting.
+	Completion QueryCompletionMetadata `json:"completion"`
 	// DiffResult retains the bounded diff payload and pagination fields.
 	repository.DiffResult
 }
@@ -121,6 +128,10 @@ type HistoryResult struct {
 	Snapshot SnapshotMetadata `json:"snapshot"`
 	// Projection describes the snapshot's projection provenance.
 	Projection ProjectionMetadata `json:"projection"`
+	// Budget is the effective query budget used by the tool adapter.
+	Budget QueryBudget `json:"budget"`
+	// Completion reports query completion and full-envelope byte accounting.
+	Completion QueryCompletionMetadata `json:"completion"`
 	// HistoryResult retains the entity history payload.
 	repository.HistoryResult
 }
@@ -131,8 +142,22 @@ type ImpactResult struct {
 	Snapshot SnapshotMetadata `json:"snapshot"`
 	// Projection describes the snapshot's projection provenance.
 	Projection ProjectionMetadata `json:"projection"`
+	// Budget is the effective query budget used by the tool adapter.
+	Budget QueryBudget `json:"budget"`
+	// Completion reports query completion and full-envelope byte accounting.
+	Completion QueryCompletionMetadata `json:"completion"`
 	// ImpactResult retains the bounded impact payload.
 	repository.ImpactResult
+}
+
+// BranchesContainingResult contains a bounded containment page and query metadata.
+type BranchesContainingResult struct {
+	// Budget is the effective query budget used by the tool adapter.
+	Budget QueryBudget `json:"budget"`
+	// Completion reports query completion and full-envelope byte accounting.
+	Completion QueryCompletionMetadata `json:"completion"`
+	// BranchContainmentResult retains the containment page and continuation token.
+	repository.BranchContainmentResult
 }
 
 // Resolver resolves nodes against pinned repository commits.
@@ -159,14 +184,14 @@ func (r *Resolver) Resolve(ctx context.Context, selector SnapshotSelector, nodeI
 		return ResolveResult{}, err
 	}
 
-	resolution, err := r.repo.ResolvePinned(commitID, nodeID)
+	resolution, err := r.repo.ResolvePinnedContext(ctx, commitID, nodeID)
 	if err != nil {
 		return ResolveResult{}, err
 	}
 	return ResolveResult{
 		Node:       resolution.Node,
 		Snapshot:   r.snapshotMetadata(selector.Branch, resolution.Commit, resolution.Snapshot),
-		Projection: r.projectionMetadata(selector.Branch, resolution),
+		Projection: r.projectionMetadataContext(ctx, selector.Branch, resolution),
 	}, nil
 }
 
@@ -200,20 +225,35 @@ func (r *Resolver) snapshotMetadata(branch string, commit, root repository.Objec
 }
 
 func (r *Resolver) projectionMetadata(branch string, resolution repository.Resolution) ProjectionMetadata {
-	return r.projectionMetadataForRoots(branch, resolution.Commit, resolution.NodeRoot)
+	return r.projectionMetadataContext(context.Background(), branch, resolution)
+}
+
+func (r *Resolver) projectionMetadataContext(ctx context.Context, branch string, resolution repository.Resolution) ProjectionMetadata {
+	return r.projectionMetadataForRootsContext(ctx, branch, resolution.Commit, resolution.NodeRoot)
 }
 
 func (r *Resolver) projectionMetadataForCommit(branch string, commit repository.ObjectID) ProjectionMetadata {
-	record, err := r.repo.PinnedSnapshotRecord(commit)
+	return r.projectionMetadataForCommitContext(context.Background(), branch, commit)
+}
+
+func (r *Resolver) projectionMetadataForCommitContext(ctx context.Context, branch string, commit repository.ObjectID) ProjectionMetadata {
+	if err := ctx.Err(); err != nil {
+		return ProjectionMetadata{State: "unavailable"}
+	}
+	record, err := r.repo.PinnedSnapshotRecordContext(ctx, commit)
 	if err != nil {
 		return ProjectionMetadata{State: "unavailable"}
 	}
-	return r.projectionMetadataForRoots(branch, record.Commit, record.NodeRoot)
+	return r.projectionMetadataForRootsContext(ctx, branch, record.Commit, record.NodeRoot)
 }
 
 func (r *Resolver) projectionMetadataForRoots(branch string, commit, nodeRoot repository.ObjectID) ProjectionMetadata {
+	return r.projectionMetadataForRootsContext(context.Background(), branch, commit, nodeRoot)
+}
+
+func (r *Resolver) projectionMetadataForRootsContext(ctx context.Context, branch string, commit, nodeRoot repository.ObjectID) ProjectionMetadata {
 	metadata := ProjectionMetadata{State: "unavailable"}
-	status, err := r.repo.ProjectionStatus()
+	status, err := r.repo.ProjectionStatusContext(ctx)
 	if err != nil ||
 		status.Branch != branch ||
 		status.Commit != commit ||
@@ -228,7 +268,11 @@ func (r *Resolver) projectionMetadataForRoots(branch string, commit, nodeRoot re
 }
 
 func (r *Resolver) snapshotMetadataForCommit(branch string, commit repository.ObjectID) (SnapshotMetadata, error) {
-	record, err := r.repo.PinnedSnapshotRecord(commit)
+	return r.snapshotMetadataForCommitContext(context.Background(), branch, commit)
+}
+
+func (r *Resolver) snapshotMetadataForCommitContext(ctx context.Context, branch string, commit repository.ObjectID) (SnapshotMetadata, error) {
+	record, err := r.repo.PinnedSnapshotRecordContext(ctx, commit)
 	if err != nil {
 		return SnapshotMetadata{}, err
 	}
@@ -245,7 +289,8 @@ func (r *Resolver) resolveSnapshotCommit(ctx context.Context, selector SnapshotS
 	var commitID repository.ObjectID
 	var err error
 	if selector.Commit != nil {
-		commitID, err = r.repo.ResolveExplicitCommit(
+		commitID, err = r.repo.ResolveExplicitCommitContext(
+			ctx,
 			selector.Branch,
 			repository.ObjectID(*selector.Commit),
 			r.allowDetachedCommit,
@@ -254,7 +299,7 @@ func (r *Resolver) resolveSnapshotCommit(ctx context.Context, selector SnapshotS
 			return "", ErrUnsupportedCommit
 		}
 	} else {
-		commitID, err = r.repo.PinBranch(selector.Branch)
+		commitID, err = r.repo.PinBranchContext(ctx, selector.Branch)
 	}
 	if err != nil {
 		return "", err
@@ -309,10 +354,24 @@ type HistoryRequest struct {
 	EntityID string `json:"entityId"`
 	// AllParents includes all parent links rather than only each commit's first parent.
 	AllParents bool `json:"allParents,omitempty"`
+	// ContinuationToken resumes a compatible history request.
+	ContinuationToken string `json:"continuationToken,omitempty"`
+	// Budget optionally narrows configured query limits.
+	Budget QueryBudgetRequest `json:"budget"`
 }
 
 // ContainmentSelector is the repository containment selector accepted by ResolveTool.
 type ContainmentSelector = repository.ContainmentSelector
+
+// BranchesContainingRequest describes a bounded branch-containment page.
+type BranchesContainingRequest struct {
+	// Selector identifies the entity or snapshot to find.
+	Selector ContainmentSelector `json:"selector"`
+	// ContinuationToken resumes a compatible containment request.
+	ContinuationToken string `json:"continuationToken,omitempty"`
+	// Budget optionally narrows configured query limits.
+	Budget QueryBudgetRequest `json:"budget"`
+}
 
 // ImpactRequest combines a repository impact request with optional tool query limits.
 type ImpactRequest struct {
@@ -466,16 +525,25 @@ func (t *ResolveTool) EDGAbortMerge(ctx context.Context, request MergeTransactio
 	return t.merges.Abort(request.TargetBranch, request.TransactionID)
 }
 
-// EDGResolve honors cancellation, resolves a node, and reports the effective budget.
+// EDGResolve resolves one node within the effective query deadline.
 func (t *ResolveTool) EDGResolve(ctx context.Context, request ResolveRequest) (ResolveResult, error) {
-	if err := ctx.Err(); err != nil {
+	budget := NormalizeQueryBudget(request.Budget, t.queryBudget)
+	queryCtx, execution, cancel := BeginQuery(ctx, budget)
+	defer cancel()
+	if err := queryCtx.Err(); err != nil {
 		return ResolveResult{}, err
 	}
-	result, err := t.resolver.Resolve(ctx, request.Selector, request.NodeID)
+	result, err := t.resolver.Resolve(queryCtx, request.Selector, request.NodeID)
 	if err != nil {
 		return ResolveResult{}, err
 	}
-	result.Budget = NormalizeQueryBudget(request.Budget, t.queryBudget)
+	if err := queryCtx.Err(); err != nil {
+		return ResolveResult{}, err
+	}
+	result.Budget = budget
+	if err := finalizeToolQuery(&result, &result.Completion, execution, budget.MaxResponseBytes, false, false, 1); err != nil {
+		return ResolveResult{}, err
+	}
 	return result, nil
 }
 
@@ -487,130 +555,263 @@ func (t *ResolveTool) EDGValidateSchema(ctx context.Context, request SchemaValid
 	return t.resolver.ValidateSchema(ctx, request.Selector)
 }
 
-// EDGDiff honors cancellation and returns a budgeted repository diff page.
+// EDGDiff returns a deadline-bounded repository diff page.
 func (t *ResolveTool) EDGDiff(ctx context.Context, request DiffRequest) (DiffResult, error) {
-	if err := ctx.Err(); err != nil {
+	budget := NormalizeQueryBudget(request.Budget, t.queryBudget)
+	queryCtx, execution, cancel := BeginQuery(ctx, budget)
+	defer cancel()
+	if err := queryCtx.Err(); err != nil {
 		return DiffResult{}, err
 	}
-	base, err := t.resolver.resolveSnapshotCommit(ctx, request.Base)
+	base, err := t.resolver.resolveSnapshotCommit(queryCtx, request.Base)
 	if err != nil {
 		return DiffResult{}, err
 	}
-	target, err := t.resolver.resolveSnapshotCommit(ctx, request.Target)
+	target, err := t.resolver.resolveSnapshotCommit(queryCtx, request.Target)
 	if err != nil {
 		return DiffResult{}, err
 	}
-	baseSnapshot, err := t.resolver.snapshotMetadataForCommit(request.Base.Branch, base)
+	baseSnapshot, err := t.resolver.snapshotMetadataForCommitContext(queryCtx, request.Base.Branch, base)
 	if err != nil {
 		return DiffResult{}, err
 	}
-	targetSnapshot, err := t.resolver.snapshotMetadataForCommit(request.Target.Branch, target)
+	targetSnapshot, err := t.resolver.snapshotMetadataForCommitContext(queryCtx, request.Target.Branch, target)
 	if err != nil {
 		return DiffResult{}, err
 	}
 	result := DiffResult{
 		Base: baseSnapshot, Target: targetSnapshot,
-		Projection: t.resolver.projectionMetadataForCommit(request.Target.Branch, target),
+		Projection: t.resolver.projectionMetadataForCommitContext(queryCtx, request.Target.Branch, target),
+		Budget:     budget,
+		Completion: queryCompletionTemplate(budget),
 		DiffResult: repository.DiffResult{
 			BaseCommit: base, TargetCommit: target, Changes: make([]repository.DiffEntry, 0),
 		},
 	}
-	budget := NormalizeQueryBudget(request.Budget, t.queryBudget)
-	payloadBudget, err := diffPayloadBudget(result, budget.MaxResponseBytes)
+	payloadBudget, err := publicPayloadBudget(result, result.DiffResult, budget.MaxResponseBytes)
 	if err != nil {
 		return DiffResult{}, err
 	}
-	payload, err := t.resolver.repo.Diff(repository.DiffRequest{
+	payload, err := t.resolver.repo.DiffContext(queryCtx, repository.DiffRequest{
 		Base: base, Target: target, Filter: request.Filter,
 		MaxRows: budget.MaxRows, MaxResponseBytes: payloadBudget,
 		IncludeOneHop: request.IncludeOneHop, ContinuationToken: request.ContinuationToken,
 	})
-	if err != nil {
+	timedOut := isTimedOutPrefix(err, len(payload.Changes) > 0)
+	if err != nil && !timedOut {
 		return DiffResult{}, err
 	}
 	result.DiffResult = payload
-	if !diffEnvelopeFits(result, budget.MaxResponseBytes) {
-		return DiffResult{}, repository.ErrResponseBudgetTooSmall
+	truncated := payload.ContinuationToken != "" || payload.ContextTruncated || timedOut
+	if err := finalizeToolQuery(
+		&result, &result.Completion, execution, budget.MaxResponseBytes,
+		truncated, timedOut, len(payload.Changes)+len(payload.Context),
+	); err != nil {
+		return DiffResult{}, err
 	}
 	return result, nil
 }
 
-// diffPayloadBudget reserves the public envelope's JSON overhead for repository.Diff.
-func diffPayloadBudget(result DiffResult, maxBytes int) (int, error) {
-	envelope, err := json.Marshal(result)
-	if err != nil || len(envelope) > maxBytes {
+func queryCompletionTemplate(budget QueryBudget) QueryCompletionMetadata {
+	return QueryCompletionMetadata{
+		Complete:      false,
+		Truncated:     false,
+		TimedOut:      false,
+		Visited:       budget.MaxRows,
+		ElapsedMs:     0,
+		ResponseBytes: budget.MaxResponseBytes,
+	}
+}
+
+// publicPayloadBudget reserves public-envelope metadata before passing the
+// remaining byte capacity to a repository page API.
+func publicPayloadBudget(envelope, payload any, maxBytes int) (int, error) {
+	if maxBytes <= 0 {
 		return 0, repository.ErrResponseBudgetTooSmall
 	}
-	payload, err := json.Marshal(result.DiffResult)
+	encodedEnvelope, err := json.Marshal(envelope)
+	if err != nil || len(encodedEnvelope) > maxBytes {
+		return 0, repository.ErrResponseBudgetTooSmall
+	}
+	encodedPayload, err := json.Marshal(payload)
 	if err != nil {
 		return 0, repository.ErrResponseBudgetTooSmall
 	}
-	return maxBytes - (len(envelope) - len(payload)), nil
+	overhead := len(encodedEnvelope) - len(encodedPayload)
+	if overhead >= maxBytes {
+		return 0, repository.ErrResponseBudgetTooSmall
+	}
+	return maxBytes - overhead, nil
 }
 
-func diffEnvelopeFits(result DiffResult, maxBytes int) bool {
-	data, err := json.Marshal(result)
-	return err == nil && len(data) <= maxBytes
+func isTimedOutPrefix(err error, hasPrefix bool) bool {
+	return hasPrefix && errors.Is(err, context.DeadlineExceeded)
 }
 
-// EDGHistory honors cancellation and returns repository entity history.
+func finalizeToolQuery(
+	envelope any,
+	completion *QueryCompletionMetadata,
+	execution QueryExecutionMetadata,
+	maxResponseBytes int,
+	truncated, timedOut bool,
+	visited int,
+) error {
+	final := CompleteQuery(execution, time.Now())
+	final.Truncated = truncated
+	final.TimedOut = timedOut
+	final.Complete = !truncated && !timedOut
+	final.Visited = visited
+	*completion = final
+	if _, err := FinalizeQueryResponse(envelope, completion, maxResponseBytes); err != nil {
+		if errors.Is(err, ErrResponseBudgetExceeded) {
+			return repository.ErrResponseBudgetTooSmall
+		}
+		return err
+	}
+	return nil
+}
+
+// EDGHistory returns a deadline-bounded repository entity-history page.
 func (t *ResolveTool) EDGHistory(ctx context.Context, request HistoryRequest) (HistoryResult, error) {
-	if err := ctx.Err(); err != nil {
-		return HistoryResult{}, err
-	}
-	commit, err := t.resolver.resolveSnapshotCommit(ctx, request.Selector)
-	if err != nil {
-		return HistoryResult{}, err
-	}
-	payload, err := t.resolver.repo.History(repository.HistoryRequest{
-		Commit: commit, EntityID: request.EntityID, AllParents: request.AllParents,
-	})
-	if err != nil {
-		return HistoryResult{}, err
-	}
-	snapshot, err := t.resolver.snapshotMetadataForCommit(request.Selector.Branch, commit)
-	if err != nil {
-		return HistoryResult{}, err
-	}
-	return HistoryResult{
-		Snapshot: snapshot, Projection: t.resolver.projectionMetadataForCommit(request.Selector.Branch, commit),
-		HistoryResult: payload,
-	}, nil
-}
-
-// EDGBranchesContaining honors cancellation and returns matching repository branches.
-func (t *ResolveTool) EDGBranchesContaining(ctx context.Context, selector ContainmentSelector) (repository.BranchContainmentResult, error) {
-	if err := ctx.Err(); err != nil {
-		return repository.BranchContainmentResult{}, err
-	}
-	return t.resolver.repo.BranchesContaining(selector)
-}
-
-// EDGImpact honors cancellation and applies effective budgets to a non-persistent impact query.
-func (t *ResolveTool) EDGImpact(ctx context.Context, request ImpactRequest) (ImpactResult, error) {
-	if err := ctx.Err(); err != nil {
-		return ImpactResult{}, err
-	}
-	commit, err := t.resolver.resolveSnapshotCommit(ctx, request.Selector)
-	if err != nil {
-		return ImpactResult{}, err
-	}
 	budget := NormalizeQueryBudget(request.Budget, t.queryBudget)
+	queryCtx, execution, cancel := BeginQuery(ctx, budget)
+	defer cancel()
+	if err := queryCtx.Err(); err != nil {
+		return HistoryResult{}, err
+	}
+	commit, err := t.resolver.resolveSnapshotCommit(queryCtx, request.Selector)
+	if err != nil {
+		return HistoryResult{}, err
+	}
+	snapshot, err := t.resolver.snapshotMetadataForCommitContext(queryCtx, request.Selector.Branch, commit)
+	if err != nil {
+		return HistoryResult{}, err
+	}
+	result := HistoryResult{
+		Snapshot:   snapshot,
+		Projection: t.resolver.projectionMetadataForCommitContext(queryCtx, request.Selector.Branch, commit),
+		Budget:     budget,
+		Completion: queryCompletionTemplate(budget),
+		HistoryResult: repository.HistoryResult{
+			Entries: make([]repository.HistoryEntry, 0),
+		},
+	}
+	payloadBudget, err := publicPayloadBudget(result, result.HistoryResult, budget.MaxResponseBytes)
+	if err != nil {
+		return HistoryResult{}, err
+	}
+	payload, err := t.resolver.repo.HistoryContext(queryCtx, repository.HistoryRequest{
+		Commit: commit, EntityID: request.EntityID, AllParents: request.AllParents,
+		MaxRows: budget.MaxRows, MaxResponseBytes: payloadBudget,
+		ContinuationToken: request.ContinuationToken,
+	})
+	timedOut := isTimedOutPrefix(err, len(payload.Entries) > 0)
+	if err != nil && !timedOut {
+		return HistoryResult{}, err
+	}
+	result.HistoryResult = payload
+	truncated := payload.ContinuationToken != "" || timedOut
+	if err := finalizeToolQuery(
+		&result, &result.Completion, execution, budget.MaxResponseBytes,
+		truncated, timedOut, len(payload.Entries),
+	); err != nil {
+		return HistoryResult{}, err
+	}
+	return result, nil
+}
+
+// EDGBranchesContaining returns the first bounded containment page for selector.
+// EDGBranchesContainingPage accepts continuation and narrowed-budget controls.
+func (t *ResolveTool) EDGBranchesContaining(ctx context.Context, selector ContainmentSelector) (BranchesContainingResult, error) {
+	return t.EDGBranchesContainingPage(ctx, BranchesContainingRequest{Selector: selector})
+}
+
+// EDGBranchesContainingPage returns a deadline-bounded containment page.
+func (t *ResolveTool) EDGBranchesContainingPage(ctx context.Context, request BranchesContainingRequest) (BranchesContainingResult, error) {
+	budget := NormalizeQueryBudget(request.Budget, t.queryBudget)
+	queryCtx, execution, cancel := BeginQuery(ctx, budget)
+	defer cancel()
+	if err := queryCtx.Err(); err != nil {
+		return BranchesContainingResult{}, err
+	}
+	result := BranchesContainingResult{
+		Budget:     budget,
+		Completion: queryCompletionTemplate(budget),
+		BranchContainmentResult: repository.BranchContainmentResult{
+			Branches: make([]string, 0),
+		},
+	}
+	payloadBudget, err := publicPayloadBudget(result, result.BranchContainmentResult, budget.MaxResponseBytes)
+	if err != nil {
+		return BranchesContainingResult{}, err
+	}
+	payload, err := t.resolver.repo.BranchesContainingContext(queryCtx, repository.BranchesContainingRequest{
+		Selector: request.Selector, MaxRows: budget.MaxRows, MaxResponseBytes: payloadBudget,
+		ContinuationToken: request.ContinuationToken,
+	})
+	timedOut := isTimedOutPrefix(err, len(payload.Branches) > 0)
+	if err != nil && !timedOut {
+		return BranchesContainingResult{}, err
+	}
+	result.BranchContainmentResult = payload
+	truncated := payload.ContinuationToken != "" || timedOut
+	if err := finalizeToolQuery(
+		&result, &result.Completion, execution, budget.MaxResponseBytes,
+		truncated, timedOut, len(payload.Branches),
+	); err != nil {
+		return BranchesContainingResult{}, err
+	}
+	return result, nil
+}
+
+// EDGImpact returns a deadline-bounded non-persistent impact page.
+func (t *ResolveTool) EDGImpact(ctx context.Context, request ImpactRequest) (ImpactResult, error) {
+	budget := NormalizeQueryBudget(request.Budget, t.queryBudget)
+	queryCtx, execution, cancel := BeginQuery(ctx, budget)
+	defer cancel()
+	if err := queryCtx.Err(); err != nil {
+		return ImpactResult{}, err
+	}
+	commit, err := t.resolver.resolveSnapshotCommit(queryCtx, request.Selector)
+	if err != nil {
+		return ImpactResult{}, err
+	}
+	snapshot, err := t.resolver.snapshotMetadataForCommitContext(queryCtx, request.Selector.Branch, commit)
+	if err != nil {
+		return ImpactResult{}, err
+	}
+	result := ImpactResult{
+		Snapshot:   snapshot,
+		Projection: t.resolver.projectionMetadataForCommitContext(queryCtx, request.Selector.Branch, commit),
+		Budget:     budget,
+		Completion: queryCompletionTemplate(budget),
+		ImpactResult: repository.ImpactResult{
+			Commit: commit, Snapshot: repository.ObjectID(snapshot.Root), Impacts: make([]repository.ImpactEntry, 0),
+		},
+	}
+	payloadBudget, err := publicPayloadBudget(result, result.ImpactResult, budget.MaxResponseBytes)
+	if err != nil {
+		return ImpactResult{}, err
+	}
 	request.Request.MaxDepth = budget.MaxDepth
 	request.Request.MaxVisited = budget.MaxVisited
+	request.Request.MaxRows = budget.MaxRows
+	request.Request.MaxResponseBytes = payloadBudget
 	request.Request.Commit = commit
-	payload, err := t.resolver.repo.Impact(request.Request)
-	if err != nil {
+	payload, err := t.resolver.repo.ImpactContext(queryCtx, request.Request)
+	timedOut := isTimedOutPrefix(err, len(payload.Impacts) > 0)
+	if err != nil && !timedOut {
 		return ImpactResult{}, err
 	}
-	snapshot, err := t.resolver.snapshotMetadataForCommit(request.Selector.Branch, commit)
-	if err != nil {
+	result.ImpactResult = payload
+	truncated := payload.ContinuationToken != "" || payload.CapacityExhausted || timedOut
+	if err := finalizeToolQuery(
+		&result, &result.Completion, execution, budget.MaxResponseBytes,
+		truncated, timedOut, len(payload.Impacts),
+	); err != nil {
 		return ImpactResult{}, err
 	}
-	return ImpactResult{
-		Snapshot: snapshot, Projection: t.resolver.projectionMetadataForCommit(request.Selector.Branch, commit),
-		ImpactResult: payload,
-	}, nil
+	return result, nil
 }
 
 // EDGCreateBranch delegates a context-aware branch creation request.

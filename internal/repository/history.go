@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"sort"
@@ -22,6 +23,13 @@ type HistoryRequest struct {
 	EntityID string `json:"entityId"`
 	// AllParents includes all parent links rather than only each commit's first parent.
 	AllParents bool `json:"allParents,omitempty"`
+	// MaxRows limits entries in one page. Zero preserves the legacy unbounded read.
+	MaxRows int `json:"maxRows,omitempty"`
+	// MaxResponseBytes limits the JSON-encoded HistoryResult payload. Zero preserves
+	// the legacy unbounded read; adapters must reserve their envelope overhead.
+	MaxResponseBytes int `json:"maxResponseBytes,omitempty"`
+	// ContinuationToken resumes a matching paged history request.
+	ContinuationToken string `json:"continuationToken,omitempty"`
 }
 
 // HistoryEntry describes one commit that affected the requested entity.
@@ -50,6 +58,8 @@ type HistoryEntry struct {
 type HistoryResult struct {
 	// Entries contains the matching history entries.
 	Entries []HistoryEntry `json:"entries"`
+	// ContinuationToken resumes remaining entries with the same request.
+	ContinuationToken string `json:"continuationToken,omitempty"`
 }
 
 // ContainmentSelector identifies the entity or snapshot for branch containment lookup.
@@ -66,10 +76,35 @@ type ContainmentSelector struct {
 type BranchContainmentResult struct {
 	// Branches contains matching branch names in lexical order.
 	Branches []string `json:"branches"`
+	// ContinuationToken resumes remaining branches with the same request.
+	ContinuationToken string `json:"continuationToken,omitempty"`
+}
+
+// BranchesContainingRequest describes a bounded containment query. The response
+// byte limit applies to BranchContainmentResult, so public adapters can reserve
+// their own envelope overhead before calling BranchesContainingContext.
+type BranchesContainingRequest struct {
+	// Selector identifies the entity or snapshot to find.
+	Selector ContainmentSelector `json:"selector"`
+	// MaxRows limits branch names in one page. It must be positive.
+	MaxRows int `json:"maxRows"`
+	// MaxResponseBytes limits the JSON-encoded repository result. It must be positive.
+	MaxResponseBytes int `json:"maxResponseBytes"`
+	// ContinuationToken resumes a matching containment query.
+	ContinuationToken string `json:"continuationToken,omitempty"`
 }
 
 // History returns commits that affected the selected entity, or ErrEntityHistoryNotFound.
 func (r *Repository) History(request HistoryRequest) (HistoryResult, error) {
+	return r.HistoryContext(context.Background(), request)
+}
+
+// HistoryContext returns a context-cancelable page of entity history. A zero
+// MaxRows or MaxResponseBytes preserves legacy unbounded History behavior.
+func (r *Repository) HistoryContext(ctx context.Context, request HistoryRequest) (HistoryResult, error) {
+	if err := ctx.Err(); err != nil {
+		return HistoryResult{}, err
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if err := r.ensureOpenLocked(); err != nil {
@@ -78,25 +113,115 @@ func (r *Repository) History(request HistoryRequest) (HistoryResult, error) {
 	if request.EntityID == "" {
 		return HistoryResult{}, ErrEntityHistoryNotFound
 	}
+	if request.MaxRows < 0 || request.MaxResponseBytes < 0 {
+		return HistoryResult{}, ErrInvalidListBudget
+	}
 	start, err := r.requirePinnedCommitLocked(request.Commit)
 	if err != nil {
 		return HistoryResult{}, err
 	}
-	entries := make([]HistoryEntry, 0)
-	for _, id := range r.historyTraversalLocked(start, request.AllParents) {
-		entry, affects := r.historyEntryLocked(id, request.EntityID)
-		if affects {
-			entries = append(entries, entry)
-		}
+	fingerprint := queryFingerprint(struct {
+		Commit           ObjectID
+		EntityID         string
+		AllParents       bool
+		MaxRows          int
+		MaxResponseBytes int
+	}{start, request.EntityID, request.AllParents, request.MaxRows, request.MaxResponseBytes})
+	offset, err := decodeContinuation(request.ContinuationToken, fingerprint)
+	if err != nil {
+		return HistoryResult{}, err
+	}
+	entries, traversalErr := r.historyEntriesContextLocked(ctx, start, request.EntityID, request.AllParents)
+	if traversalErr != nil && !errors.Is(traversalErr, context.DeadlineExceeded) {
+		return HistoryResult{}, traversalErr
 	}
 	if len(entries) == 0 {
+		if traversalErr != nil {
+			return HistoryResult{}, traversalErr
+		}
 		return HistoryResult{}, ErrEntityHistoryNotFound
 	}
-	return HistoryResult{Entries: entries}, nil
+	if offset > len(entries) {
+		if traversalErr != nil {
+			return HistoryResult{}, traversalErr
+		}
+		return HistoryResult{}, ErrInvalidContinuation
+	}
+	timedOut := errors.Is(traversalErr, context.DeadlineExceeded) && len(entries) > offset
+	if traversalErr != nil && !timedOut {
+		return HistoryResult{}, traversalErr
+	}
+	result := HistoryResult{Entries: make([]HistoryEntry, 0)}
+	if !resultFits(result, request.MaxResponseBytes) {
+		return HistoryResult{}, ErrResponseBudgetTooSmall
+	}
+	limit := len(entries)
+	if request.MaxRows > 0 && request.MaxRows < limit {
+		limit = request.MaxRows
+	}
+	next := offset
+	pageCtx := ctx
+	if timedOut {
+		pageCtx = context.Background()
+	}
+	for next < len(entries) && len(result.Entries) < limit {
+		if err := pageCtx.Err(); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) && next > offset {
+				result.ContinuationToken = encodeContinuation(fingerprint, next)
+				return result, err
+			}
+			return HistoryResult{}, err
+		}
+		candidate := result
+		candidate.Entries = append(append([]HistoryEntry(nil), result.Entries...), entries[next])
+		candidate.ContinuationToken = encodeContinuation(fingerprint, next+1)
+		if !resultFits(candidate, request.MaxResponseBytes) {
+			break
+		}
+		if next+1 == len(entries) {
+			candidate.ContinuationToken = ""
+		}
+		result = candidate
+		next++
+	}
+	if next < len(entries) {
+		if next == offset {
+			return HistoryResult{}, ErrResponseBudgetTooSmall
+		}
+		result.ContinuationToken = encodeContinuation(fingerprint, next)
+		if !resultFits(result, request.MaxResponseBytes) {
+			return HistoryResult{}, ErrResponseBudgetTooSmall
+		}
+	}
+	if timedOut {
+		result.ContinuationToken = encodeContinuation(fingerprint, next)
+		if !resultFits(result, request.MaxResponseBytes) {
+			return HistoryResult{}, ErrResponseBudgetTooSmall
+		}
+		return result, traversalErr
+	}
+	return result, nil
 }
 
 // BranchesContaining returns ordered branches whose history contains the selected entity or snapshot.
 func (r *Repository) BranchesContaining(selector ContainmentSelector) (BranchContainmentResult, error) {
+	return r.branchesContainingContext(context.Background(), selector, 0, 0, "")
+}
+
+// BranchesContainingContext returns a context-cancelable bounded branch page.
+// Its limits are required so callers cannot accidentally expose an unbounded
+// public list; legacy callers may continue to use BranchesContaining.
+func (r *Repository) BranchesContainingContext(ctx context.Context, request BranchesContainingRequest) (BranchContainmentResult, error) {
+	if request.MaxRows <= 0 || request.MaxResponseBytes <= 0 {
+		return BranchContainmentResult{}, ErrInvalidListBudget
+	}
+	return r.branchesContainingContext(ctx, request.Selector, request.MaxRows, request.MaxResponseBytes, request.ContinuationToken)
+}
+
+func (r *Repository) branchesContainingContext(ctx context.Context, selector ContainmentSelector, maxRows, maxResponseBytes int, token string) (BranchContainmentResult, error) {
+	if err := ctx.Err(); err != nil {
+		return BranchContainmentResult{}, err
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if err := r.ensureOpenLocked(); err != nil {
@@ -106,29 +231,138 @@ func (r *Repository) BranchesContaining(selector ContainmentSelector) (BranchCon
 		selector.NaturalKey != "" && (selector.EntityID != "" || selector.SnapshotID != "") {
 		return BranchContainmentResult{}, ErrInvalidContainmentSelector
 	}
+	fingerprint := queryFingerprint(struct {
+		Selector         ContainmentSelector
+		MaxRows          int
+		MaxResponseBytes int
+	}{selector, maxRows, maxResponseBytes})
+	offset, err := decodeContinuation(token, fingerprint)
+	if err != nil {
+		return BranchContainmentResult{}, err
+	}
+	branchNames := make([]string, 0, len(r.branches))
+	for branchName := range r.branches {
+		if err := ctx.Err(); err != nil {
+			return BranchContainmentResult{}, err
+		}
+		branchNames = append(branchNames, branchName)
+	}
+	sort.Strings(branchNames)
+
 	branches := make([]string, 0)
-	for branchName, head := range r.branches {
-		for _, id := range r.historyTraversalLocked(head, true) {
+	var traversalErr error
+	for _, branchName := range branchNames {
+		if err := ctx.Err(); err != nil {
+			traversalErr = err
+			break
+		}
+		head := r.branches[branchName]
+		traversal, err := r.historyTraversalContextLocked(ctx, head, true)
+		if err != nil {
+			traversalErr = err
+			break
+		}
+		for _, id := range traversal {
+			if err := ctx.Err(); err != nil {
+				traversalErr = err
+				break
+			}
 			if selector.SnapshotID != "" && r.commits[id].Snapshot == selector.SnapshotID {
 				branches = append(branches, branchName)
 				break
 			}
 			if selector.EntityID != "" {
-				_, affects := r.historyEntryLocked(id, selector.EntityID)
+				_, affects, err := r.historyEntryContextLocked(ctx, id, selector.EntityID)
+				if err != nil {
+					traversalErr = err
+					break
+				}
 				if affects {
 					branches = append(branches, branchName)
 					break
 				}
 			}
 		}
+		if traversalErr != nil {
+			break
+		}
 	}
-	sort.Strings(branches)
-	return BranchContainmentResult{Branches: branches}, nil
+	if traversalErr != nil && !errors.Is(traversalErr, context.DeadlineExceeded) {
+		return BranchContainmentResult{}, traversalErr
+	}
+	if offset > len(branches) {
+		if traversalErr != nil {
+			return BranchContainmentResult{}, traversalErr
+		}
+		return BranchContainmentResult{}, ErrInvalidContinuation
+	}
+	timedOut := errors.Is(traversalErr, context.DeadlineExceeded) && len(branches) > offset
+	if traversalErr != nil && !timedOut {
+		return BranchContainmentResult{}, traversalErr
+	}
+	result := BranchContainmentResult{Branches: make([]string, 0)}
+	if !resultFits(result, maxResponseBytes) {
+		return BranchContainmentResult{}, ErrResponseBudgetTooSmall
+	}
+	limit := len(branches)
+	if maxRows > 0 && maxRows < limit {
+		limit = maxRows
+	}
+	next := offset
+	pageCtx := ctx
+	if timedOut {
+		pageCtx = context.Background()
+	}
+	for next < len(branches) && len(result.Branches) < limit {
+		if err := pageCtx.Err(); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) && next > offset {
+				result.ContinuationToken = encodeContinuation(fingerprint, next)
+				return result, err
+			}
+			return BranchContainmentResult{}, err
+		}
+		candidate := result
+		candidate.Branches = append(append([]string(nil), result.Branches...), branches[next])
+		candidate.ContinuationToken = encodeContinuation(fingerprint, next+1)
+		if !resultFits(candidate, maxResponseBytes) {
+			break
+		}
+		if next+1 == len(branches) {
+			candidate.ContinuationToken = ""
+		}
+		result = candidate
+		next++
+	}
+	if next < len(branches) {
+		if next == offset {
+			return BranchContainmentResult{}, ErrResponseBudgetTooSmall
+		}
+		result.ContinuationToken = encodeContinuation(fingerprint, next)
+		if !resultFits(result, maxResponseBytes) {
+			return BranchContainmentResult{}, ErrResponseBudgetTooSmall
+		}
+	}
+	if timedOut {
+		result.ContinuationToken = encodeContinuation(fingerprint, next)
+		if !resultFits(result, maxResponseBytes) {
+			return BranchContainmentResult{}, ErrResponseBudgetTooSmall
+		}
+		return result, traversalErr
+	}
+	return result, nil
 }
 
 func (r *Repository) historyTraversalLocked(start ObjectID, allParents bool) []ObjectID {
+	result, _ := r.historyTraversalContextLocked(context.Background(), start, allParents)
+	return result
+}
+
+func (r *Repository) historyTraversalContextLocked(ctx context.Context, start ObjectID, allParents bool) ([]ObjectID, error) {
 	result, queue, seen := make([]ObjectID, 0), []ObjectID{start}, map[ObjectID]struct{}{}
 	for len(queue) > 0 {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		current := queue[0]
 		queue = queue[1:]
 		if _, ok := seen[current]; ok {
@@ -142,10 +376,45 @@ func (r *Repository) historyTraversalLocked(start ObjectID, allParents bool) []O
 		}
 		queue = append(queue, parents...)
 	}
-	return result
+	return result, nil
+}
+
+func (r *Repository) historyEntriesContextLocked(ctx context.Context, start ObjectID, entityID string, allParents bool) ([]HistoryEntry, error) {
+	entries := make([]HistoryEntry, 0)
+	queue, seen := []ObjectID{start}, map[ObjectID]struct{}{}
+	for len(queue) > 0 {
+		if err := ctx.Err(); err != nil {
+			return entries, err
+		}
+		current := queue[0]
+		queue = queue[1:]
+		if _, ok := seen[current]; ok {
+			continue
+		}
+		seen[current] = struct{}{}
+		parents := r.commits[current].Parents
+		if !allParents && len(parents) > 1 {
+			parents = parents[:1]
+		}
+		queue = append(queue, parents...)
+
+		entry, affects, err := r.historyEntryContextLocked(ctx, current, entityID)
+		if err != nil {
+			return entries, err
+		}
+		if affects {
+			entries = append(entries, entry)
+		}
+	}
+	return entries, nil
 }
 
 func (r *Repository) historyEntryLocked(id ObjectID, entityID string) (HistoryEntry, bool) {
+	entry, affects, _ := r.historyEntryContextLocked(context.Background(), id, entityID)
+	return entry, affects
+}
+
+func (r *Repository) historyEntryContextLocked(ctx context.Context, id ObjectID, entityID string) (HistoryEntry, bool, error) {
 	current := r.commits[id]
 	after := r.snapshots[current.Snapshot]
 	entry := HistoryEntry{Commit: id, AfterSnapshot: current.Snapshot, Author: current.Author, Time: current.Time, Message: current.Message}
@@ -168,6 +437,9 @@ func (r *Repository) historyEntryLocked(id ObjectID, entityID string) (HistoryEn
 		}
 	}
 	for edgeID, edge := range afterEdges {
+		if err := ctx.Err(); err != nil {
+			return HistoryEntry{}, false, err
+		}
 		beforeEdge, exists := beforeEdges[edgeID]
 		if (!exists || !beforeEdge.Equal(edge)) && (edge.ID == entityID || edge.Source == entityID || edge.Target == entityID || (exists && (beforeEdge.Source == entityID || beforeEdge.Target == entityID))) {
 			entry.EdgeAdditions = append(entry.EdgeAdditions, edge.clone())
@@ -175,6 +447,9 @@ func (r *Repository) historyEntryLocked(id ObjectID, entityID string) (HistoryEn
 		}
 	}
 	for edgeID, edge := range beforeEdges {
+		if err := ctx.Err(); err != nil {
+			return HistoryEntry{}, false, err
+		}
 		afterEdge, exists := afterEdges[edgeID]
 		if (!exists || !afterEdge.Equal(edge)) && (edge.ID == entityID || edge.Source == entityID || edge.Target == entityID || (exists && (afterEdge.Source == entityID || afterEdge.Target == entityID))) {
 			entry.EdgeRemovals = append(entry.EdgeRemovals, edge.clone())
@@ -183,7 +458,7 @@ func (r *Repository) historyEntryLocked(id ObjectID, entityID string) (HistoryEn
 	}
 	sort.Slice(entry.EdgeAdditions, func(i, j int) bool { return entry.EdgeAdditions[i].ID < entry.EdgeAdditions[j].ID })
 	sort.Slice(entry.EdgeRemovals, func(i, j int) bool { return entry.EdgeRemovals[i].ID < entry.EdgeRemovals[j].ID })
-	return entry, affects
+	return entry, affects, nil
 }
 
 func changedNodeFields(before, after Node) []string {

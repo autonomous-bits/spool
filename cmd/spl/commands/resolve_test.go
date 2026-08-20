@@ -28,6 +28,9 @@ func TestResolveCLIAndMCPReturnEquivalentPayloads(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &cliResult); err != nil {
 		t.Fatalf("decode CLI result: %v", err)
 	}
+	if cliResult.Completion.ResponseBytes != output.Len() {
+		t.Fatalf("CLI resolve bytes = %d, want responseBytes %d", output.Len(), cliResult.Completion.ResponseBytes)
+	}
 	mcpResult, err := tool.EDGResolve(context.Background(), resolve.ResolveRequest{
 		Selector: resolve.SnapshotSelector{Branch: "main"},
 		NodeID:   repository.SeedNodeID,
@@ -35,7 +38,7 @@ func TestResolveCLIAndMCPReturnEquivalentPayloads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EDGResolve: %v", err)
 	}
-	if !reflect.DeepEqual(cliResult, mcpResult) {
+	if !reflect.DeepEqual(comparableResolveResult(cliResult), comparableResolveResult(mcpResult)) {
 		t.Fatalf("CLI result %#v does not match MCP result %#v", cliResult, mcpResult)
 	}
 }
@@ -82,7 +85,7 @@ func TestResolveCLIAndMCPUseExplicitOlderCommit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EDGResolve: %v", err)
 	}
-	if !reflect.DeepEqual(cliResult, mcpResult) || cliResult.Snapshot.Commit != selected {
+	if !reflect.DeepEqual(comparableResolveResult(cliResult), comparableResolveResult(mcpResult)) || cliResult.Snapshot.Commit != selected {
 		t.Fatalf("CLI/MCP results = %#v/%#v, want selected commit %q", cliResult, mcpResult, selected)
 	}
 }
@@ -102,7 +105,7 @@ func TestResolveCLIHONorsLowerBudgetAndCapsOverLimitRequests(t *testing.T) {
 		"--branch", "main",
 		"--node", repository.SeedNodeID,
 		"--max-rows", "25",
-		"--max-response-bytes", "200",
+		"--max-response-bytes", "800",
 		"--max-depth", "3",
 		"--max-visited", "100",
 		"--timeout", "100ms",
@@ -114,13 +117,13 @@ func TestResolveCLIHONorsLowerBudgetAndCapsOverLimitRequests(t *testing.T) {
 		t.Fatalf("decode CLI result: %v", err)
 	}
 	if got, want := cliResult.Budget, (resolve.QueryBudget{
-		MaxRows: 25, MaxResponseBytes: 200, MaxDepth: 3,
+		MaxRows: 25, MaxResponseBytes: 800, MaxDepth: 3,
 		MaxVisited: 100, Timeout: 100 * time.Millisecond,
 	}); got != want {
 		t.Fatalf("CLI budget = %#v, want %#v", got, want)
 	}
 
-	rows, responseBytes, depth, visited := 25, 200, 3, 100
+	rows, responseBytes, depth, visited := 25, 800, 3, 100
 	timeout := 100 * time.Millisecond
 	mcpResult, err := tool.EDGResolve(context.Background(), resolve.ResolveRequest{
 		Selector: resolve.SnapshotSelector{Branch: "main"},
@@ -133,7 +136,7 @@ func TestResolveCLIHONorsLowerBudgetAndCapsOverLimitRequests(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EDGResolve: %v", err)
 	}
-	if !reflect.DeepEqual(cliResult, mcpResult) {
+	if !reflect.DeepEqual(comparableResolveResult(cliResult), comparableResolveResult(mcpResult)) {
 		t.Fatalf("CLI result %#v does not match MCP result %#v", cliResult, mcpResult)
 	}
 
@@ -204,4 +207,9 @@ func runResolveCommand(args []string, output *bytes.Buffer, tool *resolve.Resolv
 	command.SetOut(output)
 	command.SetArgs(args)
 	return command.Execute()
+}
+
+func comparableResolveResult(result resolve.ResolveResult) resolve.ResolveResult {
+	result.Completion = resolve.QueryCompletionMetadata{}
+	return result
 }

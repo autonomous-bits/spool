@@ -13,7 +13,7 @@ import (
 func NewDiffCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra.Command {
 	var baseBranch, baseCommit, targetBranch, targetCommit, title, token string
 	var nodeIDs, edgeIDs []string
-	var maxRows, maxResponseBytes int
+	var budgetFlags queryBudgetFlags
 	var oneHop bool
 	command := &cobra.Command{
 		Use:          "diff",
@@ -32,7 +32,7 @@ func NewDiffCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra.Co
 				Target:        snapshotSelectorFlag(command, "target-commit", targetBranch, targetCommit),
 				Filter:        repository.DiffFilter{NodeIDs: nodeIDs, EdgeIDs: edgeIDs, NodeTitleSubstr: title},
 				IncludeOneHop: oneHop, ContinuationToken: token,
-				Budget: diffBudget(command, &maxRows, &maxResponseBytes),
+				Budget: budgetFlags.request(command),
 			})
 			if err != nil {
 				return err
@@ -55,9 +55,7 @@ func NewDiffCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra.Co
 	command.Flags().StringSliceVar(&edgeIDs, "edge-id", nil, "edge ID filter")
 	command.Flags().StringVar(&title, "node-title-contains", "", "node title substring filter")
 	command.Flags().BoolVar(&oneHop, "one-hop", false, "include one-hop context")
-	command.Flags().StringVar(&token, "continuation", "", "continuation token")
-	command.Flags().IntVar(&maxRows, "max-rows", 0, "maximum rows to return")
-	command.Flags().IntVar(&maxResponseBytes, "max-response-bytes", 0, "maximum response size in bytes")
+	budgetFlags.addPagedQueryFlags(command, &token)
 	_ = command.MarkFlagRequired("base-branch")
 	_ = command.MarkFlagRequired("target-branch")
 	return command
@@ -77,16 +75,4 @@ func snapshotSelectorFlag(command *cobra.Command, commitFlag, branch, commit str
 		selector.Commit = &commit
 	}
 	return selector
-}
-
-// diffBudget returns only the diff budget limits explicitly supplied on the command line.
-func diffBudget(command *cobra.Command, rows, bytes *int) resolve.QueryBudgetRequest {
-	budget := resolve.QueryBudgetRequest{}
-	if command.Flags().Changed("max-rows") {
-		budget.MaxRows = rows
-	}
-	if command.Flags().Changed("max-response-bytes") {
-		budget.MaxResponseBytes = bytes
-	}
-	return budget
 }
