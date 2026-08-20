@@ -555,6 +555,10 @@ func (c *fsckChecker) checkLooseObjects() {
 	root := filepath.Join(c.stateDir, "objects", "loose")
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
+			if path == root && os.IsNotExist(walkErr) {
+				c.issue("missing-loose-objects", "objects/loose", "", "", "loose object directory is missing")
+				return nil
+			}
 			c.issue("read-object", "objects/loose", "", "", "cannot walk loose objects")
 			return nil
 		}
@@ -591,9 +595,7 @@ func (c *fsckChecker) checkLooseObjects() {
 		return nil
 	})
 	if os.IsNotExist(err) {
-		if len(c.packed) == 0 {
-			c.issue("missing-loose-objects", "objects/loose", "", "", "loose object directory is missing")
-		}
+		c.issue("missing-loose-objects", "objects/loose", "", "", "loose object directory is missing")
 	} else if err != nil {
 		c.issue("read-object", "objects/loose", "", "", "cannot read loose objects")
 	}

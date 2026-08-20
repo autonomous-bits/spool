@@ -293,6 +293,31 @@ func TestFsckRepositoryAcceptsPackedObjectsAndReportsLooseGCCandidates(t *testin
 	}
 }
 
+func TestFsckRepositoryReportsMissingLooseDirectoryWithActivePack(t *testing.T) {
+	stateDir := t.TempDir()
+	repo, err := InitializeRepository(stateDir)
+	if err != nil {
+		t.Fatalf("InitializeRepository: %v", err)
+	}
+	if _, err := repo.GC(GCOptions{}); err != nil {
+		t.Fatalf("GC: %v", err)
+	}
+	if err := repo.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if err := os.RemoveAll(filepath.Join(stateDir, "objects", "loose")); err != nil {
+		t.Fatalf("remove loose object directory: %v", err)
+	}
+
+	result, err := FsckRepository(stateDir)
+	if !errors.Is(err, ErrFsckCorrupt) {
+		t.Fatalf("FsckRepository error = %v, want ErrFsckCorrupt", err)
+	}
+	if !hasFsckDiagnostic(result, "missing-loose-objects") {
+		t.Fatalf("result = %#v, want missing loose objects diagnostic", result)
+	}
+}
+
 func TestFsckRepositoryReportsCorruptActivePack(t *testing.T) {
 	stateDir := t.TempDir()
 	repo, err := InitializeRepository(stateDir)

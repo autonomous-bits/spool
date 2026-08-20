@@ -493,12 +493,16 @@ func validatePackHeader(header packHeader) error {
 	return nil
 }
 
-func verifyPackFiles(indexStore packIndexStore, packID PackID, packPath, indexPath string) error {
+func verifyPackFiles(indexStore packIndexStore, packID PackID, packPath, indexPath string) (result error) {
 	index, err := indexStore.Open(indexPath)
 	if err != nil {
 		return err
 	}
-	defer index.Close()
+	defer func() {
+		if err := index.Close(); err != nil && result == nil {
+			result = fmt.Errorf("close pack index %q: %w", packID, err)
+		}
+	}()
 	metadata := index.Metadata()
 	if metadata.Pack != packID || metadata.Version != PackIndexFormatVersion {
 		return &PackCorruptionError{Pack: packID, Detail: "index metadata does not match pack"}
