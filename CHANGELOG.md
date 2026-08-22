@@ -8,6 +8,17 @@ generated from commits since the preceding `v*` tag. Commits prefixed with `docs
 
 ## [Unreleased]
 
+## [0.0.2] - 2026-08-22
+
+### Added
+
+- Multi-repo Spool workspaces with a registry, `spl workspace` CLI commands,
+  and discovery overrides.
+- `spl workspace use` and `spl workspace unset` for persisted workspace
+  selection.
+- `spl graph` command with pinned-node support for graph retrieval.
+- An interactive 3D graph canvas extension for visualizing branch graphs.
+
 ## [0.0.1] - 2026-08-20
 
 ### Added
