@@ -34,9 +34,9 @@ func TestCommitCLIAndMCPCommitEquivalentStaging(t *testing.T) {
 	if _, err := mcpRepo.StageMutationBatch(repository.StageMutationRequest{Branch: "main", Operations: operations}); err != nil {
 		t.Fatalf("stage MCP batch: %v", err)
 	}
-	mcpResult, err := resolve.NewResolveTool(mcpRepo).EDGCommitStagedMutations(context.Background(), "main")
+	mcpResult, err := resolve.NewResolveTool(mcpRepo).SPLCommitStagedMutations(context.Background(), "main")
 	if err != nil {
-		t.Fatalf("EDGCommitStagedMutations: %v", err)
+		t.Fatalf("SPLCommitStagedMutations: %v", err)
 	}
 	if cliResult != mcpResult {
 		t.Fatalf("CLI result %#v does not match MCP result %#v", cliResult, mcpResult)
@@ -55,7 +55,7 @@ func TestCommitCLIPersistsCallerMetadataForHistory(t *testing.T) {
 	if err := command.Execute(); err != nil {
 		t.Fatalf("commit: %v", err)
 	}
-	history, err := resolve.NewResolveTool(repo).EDGHistory(context.Background(), resolve.HistoryRequest{
+	history, err := resolve.NewResolveTool(repo).SPLHistory(context.Background(), resolve.HistoryRequest{
 		Selector: snapshotSelector("main", ""), EntityID: repository.SeedNodeID,
 	})
 	if err != nil {

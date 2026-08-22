@@ -27,7 +27,7 @@ func NewDiffCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra.Co
 			if err != nil {
 				return err
 			}
-			result, err := tool.EDGDiff(command.Context(), resolve.DiffRequest{
+			result, err := tool.SPLDiff(command.Context(), resolve.DiffRequest{
 				Base:          snapshotSelectorFlag(command, "base-commit", baseBranch, baseCommit),
 				Target:        snapshotSelectorFlag(command, "target-commit", targetBranch, targetCommit),
 				Filter:        repository.DiffFilter{NodeIDs: nodeIDs, EdgeIDs: edgeIDs, NodeTitleSubstr: title},

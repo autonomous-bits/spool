@@ -25,7 +25,7 @@ func NewGCCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra.Comm
 			if err != nil {
 				return err
 			}
-			result, gcErr := tool.EDGGC(command.Context(), options)
+			result, gcErr := tool.SPLGC(command.Context(), options)
 			if gcErr != nil {
 				var warning *repository.GCCommittedWithWarningError
 				if !errors.As(gcErr, &warning) {

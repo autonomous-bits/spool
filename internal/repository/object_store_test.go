@@ -137,7 +137,7 @@ func TestDurableRepositorySeedsLooseObjectCache(t *testing.T) {
 		}
 	})
 
-	node := Node{ID: SeedNodeID, Title: "EDG walking skeleton"}
+	node := Node{ID: SeedNodeID, Title: "SPL walking skeleton"}
 	nodeID := repo.objectID("node", node)
 	delete(repo.objects, nodeID)
 	if _, err := repo.objectStore.get(nodeID, "node"); err != nil {

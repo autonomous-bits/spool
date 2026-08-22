@@ -10,7 +10,7 @@ import (
 	"github.com/autonomous-bits/spool/internal/repository"
 )
 
-func TestEDGRetrievalUsesPublicProvenanceAndNarrowedBudget(t *testing.T) {
+func TestSPLRetrievalUsesPublicProvenanceAndNarrowedBudget(t *testing.T) {
 	repo := retrievalAdapterRepository(t)
 	configured := QueryBudget{
 		MaxRows: 1, MaxResponseBytes: 100_000, MaxDepth: 2, MaxVisited: 2, Timeout: time.Second,
@@ -18,25 +18,25 @@ func TestEDGRetrievalUsesPublicProvenanceAndNarrowedBudget(t *testing.T) {
 	tool := NewResolveToolWithOptions(repo, Options{QueryBudget: &configured})
 	rows, visited := 10, 10
 
-	search, err := tool.EDGSearch(context.Background(), SearchRequest{
+	search, err := tool.SPLSearch(context.Background(), SearchRequest{
 		Selector: SnapshotSelector{Branch: "main"}, Query: "evidence",
 		Budget: QueryBudgetRequest{MaxRows: &rows, MaxVisited: &visited},
 	})
 	if err != nil {
-		t.Fatalf("EDGSearch: %v", err)
+		t.Fatalf("SPLSearch: %v", err)
 	}
 	if search.Budget != configured || len(search.Matches) != 1 || search.Snapshot.Branch != "main" ||
 		search.Snapshot.Commit == "" || search.Snapshot.Root == "" || search.Projection.State != "ready" {
 		t.Fatalf("search result = %#v", search)
 	}
 
-	expanded, err := tool.EDGSearchExpand(context.Background(), SearchExpandRequest{
+	expanded, err := tool.SPLSearchExpand(context.Background(), SearchExpandRequest{
 		Selector: SnapshotSelector{Branch: "main"}, Seeds: contextual.SeedSelector{Query: "evidence"},
 		SeedLimit: 1, Direction: contextual.DirectionOut, EdgeTypes: []string{"RELATED"},
 		Budget: QueryBudgetRequest{MaxRows: &rows, MaxVisited: &visited},
 	})
 	if err != nil {
-		t.Fatalf("EDGSearchExpand: %v", err)
+		t.Fatalf("SPLSearchExpand: %v", err)
 	}
 	if expanded.Snapshot != search.Snapshot || expanded.Projection != search.Projection ||
 		expanded.Budget != configured || len(expanded.Evidence) != 1 || expanded.Completion.ResponseBytes == 0 {
@@ -44,7 +44,7 @@ func TestEDGRetrievalUsesPublicProvenanceAndNarrowedBudget(t *testing.T) {
 	}
 }
 
-func TestEDGRetrievalRejectsHistoricalProjection(t *testing.T) {
+func TestSPLRetrievalRejectsHistoricalProjection(t *testing.T) {
 	repo := retrievalAdapterRepository(t)
 	historical, err := repo.PinBranch("main")
 	if err != nil {
@@ -54,12 +54,12 @@ func TestEDGRetrievalRejectsHistoricalProjection(t *testing.T) {
 		t.Fatalf("AdvanceBranch: %v", err)
 	}
 	commit := string(historical)
-	_, err = NewResolveTool(repo).EDGContext(context.Background(), ContextRequest{
+	_, err = NewResolveTool(repo).SPLContext(context.Background(), ContextRequest{
 		Selector: SnapshotSelector{Branch: "main", Commit: &commit},
 		Seeds:    contextual.SeedSelector{Query: "evidence"}, Direction: contextual.DirectionOut,
 	})
 	if !errors.Is(err, repository.ErrHistoricalProjectionUnsupported) {
-		t.Fatalf("EDGContext error = %v, want historical projection constraint", err)
+		t.Fatalf("SPLContext error = %v, want historical projection constraint", err)
 	}
 }
 

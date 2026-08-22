@@ -21,7 +21,7 @@ func NewFsckCommand(toolProvider func() (*resolve.FsckTool, error)) *cobra.Comma
 			if err != nil {
 				return err
 			}
-			result, fsckErr := tool.EDGFsck(command.Context())
+			result, fsckErr := tool.SPLFsck(command.Context())
 			if err := json.NewEncoder(command.OutOrStdout()).Encode(result); err != nil {
 				return err
 			}

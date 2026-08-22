@@ -39,7 +39,7 @@ func NewResolveCommandWithToolProvider(toolProvider func() (*resolve.ResolveTool
 			if command.Flags().Changed("commit") {
 				selector.Commit = &commit
 			}
-			result, err := tool.EDGResolve(command.Context(), resolve.ResolveRequest{
+			result, err := tool.SPLResolve(command.Context(), resolve.ResolveRequest{
 				Selector: selector,
 				NodeID:   nodeID,
 				Budget:   budgetFlags.request(command),

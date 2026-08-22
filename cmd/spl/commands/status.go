@@ -22,7 +22,7 @@ func NewStatusCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra.
 			if err != nil {
 				return err
 			}
-			result, err := tool.EDGBranchStagingStatus(command.Context(), branchName)
+			result, err := tool.SPLBranchStagingStatus(command.Context(), branchName)
 			if err != nil {
 				return err
 			}

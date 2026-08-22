@@ -46,11 +46,11 @@ func TestAddCLIAndMCPStageEquivalentBatch(t *testing.T) {
 	}
 
 	mcpRepo := repository.NewSeedRepository()
-	mcpResult, err := resolve.NewResolveTool(mcpRepo).EDGStageMutationBatch(context.Background(), repository.StageMutationRequest{
+	mcpResult, err := resolve.NewResolveTool(mcpRepo).SPLStageMutationBatch(context.Background(), repository.StageMutationRequest{
 		Branch: "main", Operations: operations,
 	})
 	if err != nil {
-		t.Fatalf("EDGStageMutationBatch: %v", err)
+		t.Fatalf("SPLStageMutationBatch: %v", err)
 	}
 	if !reflect.DeepEqual(cliResult, mcpResult) {
 		t.Fatalf("CLI result %#v does not match MCP result %#v", cliResult, mcpResult)

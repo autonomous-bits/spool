@@ -37,7 +37,7 @@ func NewBranchCommandWithToolProvider(toolProvider func() (*resolve.ResolveTool,
 			if err != nil {
 				return err
 			}
-			result, err := tool.EDGCreateBranch(command.Context(), branch.CreateRequest{
+			result, err := tool.SPLCreateBranch(command.Context(), branch.CreateRequest{
 				Name: args[0],
 				Source: branch.Source{
 					Branch: sourceBranch,
@@ -64,7 +64,7 @@ func NewBranchCommandWithToolProvider(toolProvider func() (*resolve.ResolveTool,
 			if err != nil {
 				return err
 			}
-			result, err := tool.EDGListBranches(command.Context())
+			result, err := tool.SPLListBranches(command.Context())
 			if err != nil {
 				return err
 			}
@@ -83,7 +83,7 @@ func NewBranchCommandWithToolProvider(toolProvider func() (*resolve.ResolveTool,
 			if err != nil {
 				return err
 			}
-			result, err := tool.EDGDeleteBranch(command.Context(), branch.DeleteRequest{Name: args[0]})
+			result, err := tool.SPLDeleteBranch(command.Context(), branch.DeleteRequest{Name: args[0]})
 			if err != nil {
 				return err
 			}

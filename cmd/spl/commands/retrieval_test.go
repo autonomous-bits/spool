@@ -36,11 +36,11 @@ func TestRetrievalCLIAndToolReturnEquivalentJSON(t *testing.T) {
 				return NewFilterCommand(func() (*resolve.ResolveTool, error) { return tool, nil })
 			}, args: []string{"--branch", "main", "--label", "Seed", "--max-rows", "10", "--max-response-bytes", "100000", "--timeout", "1s"}},
 			want: func() any {
-				result, err := tool.EDGFilter(context.Background(), resolve.FilterRequest{
+				result, err := tool.SPLFilter(context.Background(), resolve.FilterRequest{
 					Selector: resolve.SnapshotSelector{Branch: "main"}, Labels: []string{"Seed"}, Budget: budget,
 				})
 				if err != nil {
-					t.Fatalf("EDGFilter: %v", err)
+					t.Fatalf("SPLFilter: %v", err)
 				}
 				return result
 			}(),
@@ -55,11 +55,11 @@ func TestRetrievalCLIAndToolReturnEquivalentJSON(t *testing.T) {
 				return NewSearchCommand(func() (*resolve.ResolveTool, error) { return tool, nil })
 			}, args: []string{"--branch", "main", "--query", "evidence", "--max-rows", "10", "--max-response-bytes", "100000", "--timeout", "1s"}},
 			want: func() any {
-				result, err := tool.EDGSearch(context.Background(), resolve.SearchRequest{
+				result, err := tool.SPLSearch(context.Background(), resolve.SearchRequest{
 					Selector: resolve.SnapshotSelector{Branch: "main"}, Query: "evidence", Budget: budget,
 				})
 				if err != nil {
-					t.Fatalf("EDGSearch: %v", err)
+					t.Fatalf("SPLSearch: %v", err)
 				}
 				return result
 			}(),
@@ -74,12 +74,12 @@ func TestRetrievalCLIAndToolReturnEquivalentJSON(t *testing.T) {
 				return NewSearchExpandCommand(func() (*resolve.ResolveTool, error) { return tool, nil })
 			}, args: []string{"--branch", "main", "--query", "evidence", "--direction", "out", "--edge-type", "RELATED", "--seed-limit", "1", "--max-rows", "10", "--max-response-bytes", "100000", "--timeout", "1s"}},
 			want: func() any {
-				result, err := tool.EDGSearchExpand(context.Background(), resolve.SearchExpandRequest{
+				result, err := tool.SPLSearchExpand(context.Background(), resolve.SearchExpandRequest{
 					Selector: resolve.SnapshotSelector{Branch: "main"}, Seeds: contextual.SeedSelector{Query: "evidence"},
 					SeedLimit: 1, Direction: contextual.DirectionOut, EdgeTypes: []string{"RELATED"}, Budget: budget,
 				})
 				if err != nil {
-					t.Fatalf("EDGSearchExpand: %v", err)
+					t.Fatalf("SPLSearchExpand: %v", err)
 				}
 				return result
 			}(),
@@ -94,12 +94,12 @@ func TestRetrievalCLIAndToolReturnEquivalentJSON(t *testing.T) {
 				return NewContextCommand(func() (*resolve.ResolveTool, error) { return tool, nil })
 			}, args: []string{"--branch", "main", "--label", "Seed", "--direction", "both", "--edge-type", "RELATED", "--max-rows", "10", "--max-response-bytes", "100000", "--timeout", "1s"}},
 			want: func() any {
-				result, err := tool.EDGContext(context.Background(), resolve.ContextRequest{
+				result, err := tool.SPLContext(context.Background(), resolve.ContextRequest{
 					Selector: resolve.SnapshotSelector{Branch: "main"}, Seeds: contextual.SeedSelector{Labels: []string{"Seed"}},
 					Direction: contextual.DirectionBoth, EdgeTypes: []string{"RELATED"}, Budget: budget,
 				})
 				if err != nil {
-					t.Fatalf("EDGContext: %v", err)
+					t.Fatalf("SPLContext: %v", err)
 				}
 				return result
 			}(),
@@ -146,9 +146,9 @@ func TestGraphCLIAndToolReturnEquivalentJSON(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &actual); err != nil {
 		t.Fatalf("decode graph: %v", err)
 	}
-	want, err := tool.EDGGraph(context.Background(), resolve.SnapshotSelector{Branch: "main"})
+	want, err := tool.SPLGraph(context.Background(), resolve.SnapshotSelector{Branch: "main"})
 	if err != nil {
-		t.Fatalf("EDGGraph: %v", err)
+		t.Fatalf("SPLGraph: %v", err)
 	}
 	if !reflect.DeepEqual(actual, want) {
 		t.Fatalf("CLI graph result %#v, tool result %#v", actual, want)
@@ -178,7 +178,7 @@ func TestRetrievalCLIEnforcesBranchAndProjectionSelectorConstraints(t *testing.T
 	filter.SetArgs([]string{"--branch", "main", "--commit", string(historical), "--label", "Seed"})
 	cliErr := filter.Execute()
 	commit := string(historical)
-	_, toolErr := tool.EDGFilter(context.Background(), resolve.FilterRequest{
+	_, toolErr := tool.SPLFilter(context.Background(), resolve.FilterRequest{
 		Selector: resolve.SnapshotSelector{Branch: "main", Commit: &commit}, Labels: []string{"Seed"},
 	})
 	if !errors.Is(cliErr, repository.ErrHistoricalProjectionUnsupported) || !errors.Is(toolErr, repository.ErrHistoricalProjectionUnsupported) {

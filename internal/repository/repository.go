@@ -196,7 +196,7 @@ func newRepository() *Repository {
 }
 
 func (r *Repository) seed() error {
-	node := Node{ID: SeedNodeID, Title: "EDG walking skeleton"}
+	node := Node{ID: SeedNodeID, Title: "SPL walking skeleton"}
 	schemaRoot, err := r.objectStore.put("schema-root", BuiltinSchemaSnapshot())
 	if err != nil {
 		return err

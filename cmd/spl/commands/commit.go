@@ -24,7 +24,7 @@ func NewCommitCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra.
 			if err != nil {
 				return err
 			}
-			result, err := tool.EDGCommitStagedMutationBatch(command.Context(), repository.CommitStagedMutationRequest{
+			result, err := tool.SPLCommitStagedMutationBatch(command.Context(), repository.CommitStagedMutationRequest{
 				Branch: branchName, Author: author, Message: message,
 			})
 			if err != nil {

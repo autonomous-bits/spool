@@ -46,12 +46,12 @@ func TestHistoryCLIAndToolReturnEquivalentContracts(t *testing.T) {
 	}
 	rows, responseBytes := 1, 5000
 	timeout := time.Second
-	toolResult, err := tool.EDGHistory(context.Background(), resolve.HistoryRequest{
+	toolResult, err := tool.SPLHistory(context.Background(), resolve.HistoryRequest{
 		Selector: snapshotSelector("main", ""), EntityID: repository.SeedNodeID,
 		Budget: resolve.QueryBudgetRequest{MaxRows: &rows, MaxResponseBytes: &responseBytes, Timeout: &timeout},
 	})
 	if err != nil {
-		t.Fatalf("EDGHistory: %v", err)
+		t.Fatalf("SPLHistory: %v", err)
 	}
 	if !reflect.DeepEqual(comparableHistoryResult(cliResult), comparableHistoryResult(toolResult)) {
 		t.Fatalf("CLI history %#v, tool history %#v", cliResult, toolResult)
@@ -75,14 +75,14 @@ func TestHistoryCLIAndToolReturnEquivalentContracts(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &continuedCLIResult); err != nil {
 		t.Fatalf("decode continued history: %v", err)
 	}
-	toolResult, err = tool.EDGHistory(context.Background(), resolve.HistoryRequest{
+	toolResult, err = tool.SPLHistory(context.Background(), resolve.HistoryRequest{
 		Selector:          snapshotSelector("main", ""),
 		EntityID:          repository.SeedNodeID,
 		ContinuationToken: cliResult.ContinuationToken,
 		Budget:            resolve.QueryBudgetRequest{MaxRows: &rows, MaxResponseBytes: &responseBytes, Timeout: &timeout},
 	})
 	if err != nil {
-		t.Fatalf("continued EDGHistory: %v", err)
+		t.Fatalf("continued SPLHistory: %v", err)
 	}
 	if !reflect.DeepEqual(comparableHistoryResult(continuedCLIResult), comparableHistoryResult(toolResult)) {
 		t.Fatalf("continued CLI history %#v, tool history %#v", continuedCLIResult, toolResult)
@@ -118,7 +118,7 @@ func TestHistoryCLIAndToolRejectUnreachableCommitWithSameCategory(t *testing.T) 
 	command.SetArgs([]string{"--branch", "main", "--commit", commit, "--entity-id", repository.SeedNodeID})
 
 	cliErr := command.Execute()
-	_, mcpErr := tool.EDGHistory(context.Background(), resolve.HistoryRequest{
+	_, mcpErr := tool.SPLHistory(context.Background(), resolve.HistoryRequest{
 		Selector: resolve.SnapshotSelector{Branch: "main", Commit: &commit}, EntityID: repository.SeedNodeID,
 	})
 	if !errors.Is(cliErr, resolve.ErrUnsupportedCommit) || !errors.Is(mcpErr, resolve.ErrUnsupportedCommit) {
@@ -156,12 +156,12 @@ func TestBranchesContainingCLIAndToolReturnEquivalentContracts(t *testing.T) {
 	}
 	rows, responseBytes := 1, 5000
 	timeout := time.Second
-	toolResult, err := tool.EDGBranchesContainingPage(context.Background(), resolve.BranchesContainingRequest{
+	toolResult, err := tool.SPLBranchesContainingPage(context.Background(), resolve.BranchesContainingRequest{
 		Selector: resolve.ContainmentSelector{EntityID: repository.SeedNodeID},
 		Budget:   resolve.QueryBudgetRequest{MaxRows: &rows, MaxResponseBytes: &responseBytes, Timeout: &timeout},
 	})
 	if err != nil {
-		t.Fatalf("EDGBranchesContaining: %v", err)
+		t.Fatalf("SPLBranchesContaining: %v", err)
 	}
 	if !reflect.DeepEqual(comparableBranchesContainingResult(cliResult), comparableBranchesContainingResult(toolResult)) ||
 		!reflect.DeepEqual(cliResult.Branches, []string{"feature"}) {
@@ -186,13 +186,13 @@ func TestBranchesContainingCLIAndToolReturnEquivalentContracts(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &continuedCLIResult); err != nil {
 		t.Fatalf("decode continued containment: %v", err)
 	}
-	toolResult, err = tool.EDGBranchesContainingPage(context.Background(), resolve.BranchesContainingRequest{
+	toolResult, err = tool.SPLBranchesContainingPage(context.Background(), resolve.BranchesContainingRequest{
 		Selector:          resolve.ContainmentSelector{EntityID: repository.SeedNodeID},
 		ContinuationToken: cliResult.ContinuationToken,
 		Budget:            resolve.QueryBudgetRequest{MaxRows: &rows, MaxResponseBytes: &responseBytes, Timeout: &timeout},
 	})
 	if err != nil {
-		t.Fatalf("continued EDGBranchesContainingPage: %v", err)
+		t.Fatalf("continued SPLBranchesContainingPage: %v", err)
 	}
 	if !reflect.DeepEqual(comparableBranchesContainingResult(continuedCLIResult), comparableBranchesContainingResult(toolResult)) {
 		t.Fatalf("continued CLI containment %#v, tool containment %#v", continuedCLIResult, toolResult)

@@ -20,7 +20,7 @@ func NewGraphCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra.C
 			if err != nil {
 				return err
 			}
-			result, err := tool.EDGGraph(command.Context(), resolve.SnapshotSelector{Branch: branch})
+			result, err := tool.SPLGraph(command.Context(), resolve.SnapshotSelector{Branch: branch})
 			if err != nil {
 				return err
 			}

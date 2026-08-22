@@ -57,12 +57,12 @@ func TestDiffCLIAndMCPReturnEquivalentPayloads(t *testing.T) {
 	}
 	rows, responseBytes := 1, 5000
 	timeout := time.Second
-	mcpResult, err := tool.EDGDiff(context.Background(), resolve.DiffRequest{
+	mcpResult, err := tool.SPLDiff(context.Background(), resolve.DiffRequest{
 		Base: snapshotSelector("main", string(base)), Target: snapshotSelector("main", string(target.Commit)),
 		Budget: resolve.QueryBudgetRequest{MaxRows: &rows, MaxResponseBytes: &responseBytes, Timeout: &timeout},
 	})
 	if err != nil {
-		t.Fatalf("EDGDiff: %v", err)
+		t.Fatalf("SPLDiff: %v", err)
 	}
 	if !reflect.DeepEqual(comparableDiffResult(cliResult), comparableDiffResult(mcpResult)) {
 		t.Fatalf("CLI result %#v does not match MCP result %#v", cliResult, mcpResult)
@@ -87,13 +87,13 @@ func TestDiffCLIAndMCPReturnEquivalentPayloads(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &continuedCLIResult); err != nil {
 		t.Fatalf("decode continued CLI result: %v", err)
 	}
-	mcpResult, err = tool.EDGDiff(context.Background(), resolve.DiffRequest{
+	mcpResult, err = tool.SPLDiff(context.Background(), resolve.DiffRequest{
 		Base: snapshotSelector("main", string(base)), Target: snapshotSelector("main", string(target.Commit)),
 		ContinuationToken: cliResult.ContinuationToken,
 		Budget:            resolve.QueryBudgetRequest{MaxRows: &rows, MaxResponseBytes: &responseBytes, Timeout: &timeout},
 	})
 	if err != nil {
-		t.Fatalf("continued EDGDiff: %v", err)
+		t.Fatalf("continued SPLDiff: %v", err)
 	}
 	if !reflect.DeepEqual(comparableDiffResult(continuedCLIResult), comparableDiffResult(mcpResult)) {
 		t.Fatalf("continued CLI result %#v does not match MCP result %#v", continuedCLIResult, mcpResult)
@@ -141,7 +141,7 @@ func TestDiffCLIAndMCPReturnEquivalentErrors(t *testing.T) {
 			command.SetOut(&output)
 			command.SetArgs(testCase.args)
 			cliErr := command.Execute()
-			_, mcpErr := tool.EDGDiff(context.Background(), testCase.request)
+			_, mcpErr := tool.SPLDiff(context.Background(), testCase.request)
 			if !errors.Is(cliErr, testCase.want) || !errors.Is(mcpErr, testCase.want) {
 				t.Fatalf("CLI/MCP errors = %v/%v, want %v", cliErr, mcpErr, testCase.want)
 			}
@@ -184,7 +184,7 @@ func TestDiffCLIAndMCPRejectUnreachableCommitWithSameCategory(t *testing.T) {
 	})
 
 	cliErr := command.Execute()
-	_, mcpErr := tool.EDGDiff(context.Background(), resolve.DiffRequest{
+	_, mcpErr := tool.SPLDiff(context.Background(), resolve.DiffRequest{
 		Base:   snapshotSelector("main", ""),
 		Target: resolve.SnapshotSelector{Branch: "main", Commit: &commit},
 	})
