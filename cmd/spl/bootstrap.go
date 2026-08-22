@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"github.com/autonomous-bits/spool/internal/repository"
 	"github.com/autonomous-bits/spool/internal/repository/initialization"
 	"github.com/autonomous-bits/spool/internal/resolve"
+	"github.com/autonomous-bits/spool/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -58,6 +60,24 @@ func repositoryStateDir() (string, error) {
 }
 
 func repositoryStateDirFrom(workingDirectory string) (string, error) {
+	directory, err := filepath.Abs(workingDirectory)
+	if err != nil {
+		return "", err
+	}
+	root, err := workspace.StorageRoot()
+	if err == nil {
+		match, err := workspace.FindWorkspace(root, directory)
+		if err == nil {
+			return match.Workspace.StateDir, nil
+		}
+		if !errors.Is(err, workspace.ErrWorkspaceNotFound) {
+			return "", err
+		}
+	}
+	return localRepositoryStateDir(directory)
+}
+
+func localRepositoryStateDir(workingDirectory string) (string, error) {
 	directory, err := filepath.Abs(workingDirectory)
 	if err != nil {
 		return "", err
