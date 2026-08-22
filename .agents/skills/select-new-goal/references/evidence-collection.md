@@ -5,8 +5,10 @@
 - Run `git status --short --branch`; preserve all existing changes.
 - Read repository guidance and architecture documentation, then inspect the
   relevant CLI/API, use-case, storage/domain, and focused tests.
-- Inspect `docs/goals/*.html`; do not duplicate a goal already marked
-  `planned`, `in_progress`, or `done`.
+- Check the planning mode's own history (prior plans/todos in this
+  workspace) and any graph node `status` properties (see below); do not
+  propose a goal that duplicates one already `planned`, `in_progress`, or
+  `done`.
 
 ## Spool graph
 
