@@ -60,5 +60,6 @@ func newRootCommandWithLifecycle(
 	root.AddCommand(commands.NewMergeCommand(toolProvider))
 	root.AddCommand(commands.NewFsckCommand(fsckProvider))
 	root.AddCommand(commands.NewGCCommand(toolProvider))
+	root.AddCommand(commands.NewWorkspaceCommandDefault())
 	return root
 }
