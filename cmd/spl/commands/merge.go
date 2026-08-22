@@ -39,7 +39,7 @@ func newMergePreviewCommand(toolProvider func() (*resolve.ResolveTool, error)) *
 			if err != nil {
 				return err
 			}
-			result, err := tool.EDGMergePreview(command.Context(), source, target)
+			result, err := tool.SPLMergePreview(command.Context(), source, target)
 			if err != nil {
 				return err
 			}
@@ -65,13 +65,13 @@ func newMergeApplyCommand(toolProvider func() (*resolve.ResolveTool, error)) *co
 			if err != nil {
 				return err
 			}
-			commit, err := tool.EDGApplyMergePreview(command.Context(), resolve.MergeApplyRequest{
+			commit, err := tool.SPLApplyMergePreview(command.Context(), resolve.MergeApplyRequest{
 				SourceBranch: source, TargetBranch: target, TransactionID: transactionID,
 				PreviewID: repository.ObjectID(previewID), Author: author, Message: message,
 			})
 			if err != nil {
 				if errors.Is(err, repository.ErrMergeConflicted) {
-					result, inspectErr := tool.EDGMergeConflicts(command.Context(), resolve.MergeConflictsRequest{
+					result, inspectErr := tool.SPLMergeConflicts(command.Context(), resolve.MergeConflictsRequest{
 						TargetBranch: target, TransactionID: transactionID,
 					})
 					if inspectErr != nil {
@@ -112,7 +112,7 @@ func newMergeConflictsCommand(toolProvider func() (*resolve.ResolveTool, error))
 				return err
 			}
 
-			result, err := tool.EDGMergeConflicts(command.Context(), resolve.MergeConflictsRequest{
+			result, err := tool.SPLMergeConflicts(command.Context(), resolve.MergeConflictsRequest{
 				TargetBranch: target, TransactionID: transactionID,
 			})
 			if err != nil {
@@ -136,7 +136,7 @@ func newMergeFinalizeCommand(toolProvider func() (*resolve.ResolveTool, error)) 
 			if err != nil {
 				return err
 			}
-			commit, err := tool.EDGFinalizeMerge(command.Context(), resolve.MergeTransactionRequest{TargetBranch: target, TransactionID: transactionID})
+			commit, err := tool.SPLFinalizeMerge(command.Context(), resolve.MergeTransactionRequest{TargetBranch: target, TransactionID: transactionID})
 			if err != nil {
 				return err
 			}
@@ -177,7 +177,7 @@ func newMergeResolveCommand(toolProvider func() (*resolve.ResolveTool, error)) *
 			if err != nil {
 				return err
 			}
-			if err := tool.EDGResolveMerge(command.Context(), resolve.MergeResolveRequest{
+			if err := tool.SPLResolveMerge(command.Context(), resolve.MergeResolveRequest{
 				TargetBranch: target, TransactionID: transactionID, PreviewID: repository.ObjectID(previewID),
 				Selections: selections, Overrides: overrides,
 			}); err != nil {
@@ -206,7 +206,7 @@ func newMergeAbortCommand(toolProvider func() (*resolve.ResolveTool, error)) *co
 			if err != nil {
 				return err
 			}
-			if err := tool.EDGAbortMerge(command.Context(), resolve.MergeTransactionRequest{TargetBranch: target, TransactionID: transactionID}); err != nil {
+			if err := tool.SPLAbortMerge(command.Context(), resolve.MergeTransactionRequest{TargetBranch: target, TransactionID: transactionID}); err != nil {
 				return err
 			}
 			return json.NewEncoder(command.OutOrStdout()).Encode(struct {

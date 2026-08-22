@@ -26,7 +26,7 @@ func NewHistoryCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra
 			if err != nil {
 				return err
 			}
-			result, err := tool.EDGHistory(command.Context(), resolve.HistoryRequest{
+			result, err := tool.SPLHistory(command.Context(), resolve.HistoryRequest{
 				Selector: snapshotSelectorFlag(command, "commit", branch, commit), EntityID: entity, AllParents: allParents,
 				ContinuationToken: token, Budget: budgetFlags.request(command),
 			})
@@ -69,7 +69,7 @@ func NewBranchesContainingCommand(toolProvider func() (*resolve.ResolveTool, err
 			if err != nil {
 				return err
 			}
-			result, err := tool.EDGBranchesContainingPage(command.Context(), resolve.BranchesContainingRequest{
+			result, err := tool.SPLBranchesContainingPage(command.Context(), resolve.BranchesContainingRequest{
 				Selector: resolve.ContainmentSelector{
 					EntityID: entity, SnapshotID: repository.ObjectID(snapshot), NaturalKey: naturalKey,
 				},

@@ -1,12 +1,14 @@
 # Reading graphs
 
-All read commands write JSON. Prefer explicit branch selectors. `resolve` can select a reachable
+All read commands write JSON. Prefer explicit branch selectors. `graph` exports every node and edge
+from a branch snapshot. `resolve` can select a reachable
 historical commit; retrieval commands (`search`, `filter`, `search-expand`, and `context`) query
 the branch-head projection only, so historical commit selection is rejected.
 
 ```sh
 spl resolve --branch main --node <node-id>
 spl resolve --branch main --commit <commit-id> --node <node-id>
+spl graph --branch main
 spl search --branch main --query incident
 spl filter --branch main --label Task --property-text status=open
 spl filter --branch main --property-min priority=3

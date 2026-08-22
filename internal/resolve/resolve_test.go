@@ -62,14 +62,14 @@ func TestResolveToolRejectsCanceledMutationWithoutChangingRepository(t *testing.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := tool.EDGStageMutationBatch(ctx, repository.StageMutationRequest{
+	_, err := tool.SPLStageMutationBatch(ctx, repository.StageMutationRequest{
 		Branch: "main",
 		Operations: []repository.MutationOperation{
 			{Action: "add", Entity: "node", ID: "node-2", Title: "Second"},
 		},
 	})
 	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("EDGStageMutationBatch error = %v, want context.Canceled", err)
+		t.Fatalf("SPLStageMutationBatch error = %v, want context.Canceled", err)
 	}
 	status, err := repo.BranchStagingStatus("main")
 	if err != nil {
@@ -80,15 +80,15 @@ func TestResolveToolRejectsCanceledMutationWithoutChangingRepository(t *testing.
 	}
 }
 
-func TestEDGResolveReturnsSnapshotAndProjectionMetadata(t *testing.T) {
+func TestSPLResolveReturnsSnapshotAndProjectionMetadata(t *testing.T) {
 	tool := NewResolveTool(repository.NewSeedRepository())
 
-	got, err := tool.EDGResolve(context.Background(), ResolveRequest{
+	got, err := tool.SPLResolve(context.Background(), ResolveRequest{
 		Selector: SnapshotSelector{Branch: "main"},
 		NodeID:   repository.SeedNodeID,
 	})
 	if err != nil {
-		t.Fatalf("EDGResolve: %v", err)
+		t.Fatalf("SPLResolve: %v", err)
 	}
 
 	if got.Node.ID != repository.SeedNodeID {
@@ -102,7 +102,7 @@ func TestEDGResolveReturnsSnapshotAndProjectionMetadata(t *testing.T) {
 	}
 }
 
-func TestEDGResolveReportsMatchingBranchHeadProjection(t *testing.T) {
+func TestSPLResolveReportsMatchingBranchHeadProjection(t *testing.T) {
 	repo, err := repository.InitializeRepository(t.TempDir())
 	if err != nil {
 		t.Fatalf("InitializeRepository: %v", err)
@@ -121,12 +121,12 @@ func TestEDGResolveReportsMatchingBranchHeadProjection(t *testing.T) {
 		t.Fatalf("ProjectionStatus: %v", err)
 	}
 
-	got, err := NewResolveTool(repo).EDGResolve(context.Background(), ResolveRequest{
+	got, err := NewResolveTool(repo).SPLResolve(context.Background(), ResolveRequest{
 		Selector: SnapshotSelector{Branch: "main"},
 		NodeID:   repository.SeedNodeID,
 	})
 	if err != nil {
-		t.Fatalf("EDGResolve: %v", err)
+		t.Fatalf("SPLResolve: %v", err)
 	}
 
 	if got.Snapshot.Repository != repo.RepositoryID() || got.Snapshot.Branch != "main" ||
@@ -137,11 +137,11 @@ func TestEDGResolveReportsMatchingBranchHeadProjection(t *testing.T) {
 		got.Projection.SchemaVersion != "v1" {
 		t.Fatalf("projection metadata = %#v, status = %#v", got.Projection, status)
 	}
-	validation, err := NewResolveTool(repo).EDGValidateSchema(context.Background(), SchemaValidationRequest{
+	validation, err := NewResolveTool(repo).SPLValidateSchema(context.Background(), SchemaValidationRequest{
 		Selector: SnapshotSelector{Branch: "main"},
 	})
 	if err != nil {
-		t.Fatalf("EDGValidateSchema: %v", err)
+		t.Fatalf("SPLValidateSchema: %v", err)
 	}
 	if validation.Snapshot != got.Snapshot {
 		t.Fatalf("validation snapshot metadata = %#v, want %#v", validation.Snapshot, got.Snapshot)
@@ -151,7 +151,7 @@ func TestEDGResolveReportsMatchingBranchHeadProjection(t *testing.T) {
 	}
 }
 
-func TestEDGResolveReportsHistoricalProjectionAsUnavailable(t *testing.T) {
+func TestSPLResolveReportsHistoricalProjectionAsUnavailable(t *testing.T) {
 	repo, err := repository.InitializeRepository(t.TempDir())
 	if err != nil {
 		t.Fatalf("InitializeRepository: %v", err)
@@ -178,12 +178,12 @@ func TestEDGResolveReportsHistoricalProjectionAsUnavailable(t *testing.T) {
 	}
 	commit := string(historical)
 
-	got, err := NewResolveTool(repo).EDGResolve(context.Background(), ResolveRequest{
+	got, err := NewResolveTool(repo).SPLResolve(context.Background(), ResolveRequest{
 		Selector: SnapshotSelector{Branch: "main", Commit: &commit},
 		NodeID:   repository.SeedNodeID,
 	})
 	if err != nil {
-		t.Fatalf("EDGResolve: %v", err)
+		t.Fatalf("SPLResolve: %v", err)
 	}
 
 	if got.Snapshot.Commit != commit || got.Node.ID != repository.SeedNodeID {
@@ -228,23 +228,23 @@ func TestReadEnvelopesReportTargetProjectionProvenance(t *testing.T) {
 	}
 	tool := NewResolveTool(repo)
 	baseCommit := string(base)
-	diff, err := tool.EDGDiff(context.Background(), DiffRequest{
+	diff, err := tool.SPLDiff(context.Background(), DiffRequest{
 		Base:   SnapshotSelector{Branch: "main", Commit: &baseCommit},
 		Target: SnapshotSelector{Branch: "main"},
 	})
 	if err != nil {
-		t.Fatalf("EDGDiff: %v", err)
+		t.Fatalf("SPLDiff: %v", err)
 	}
 	if diff.Base.Commit != baseCommit || diff.Target != wantSnapshot || diff.Projection != wantProjection {
 		t.Fatalf("diff provenance = %#v, want base %q and target %#v / %#v", diff, base, wantSnapshot, wantProjection)
 	}
-	history, err := tool.EDGHistory(context.Background(), HistoryRequest{
+	history, err := tool.SPLHistory(context.Background(), HistoryRequest{
 		Selector: SnapshotSelector{Branch: "main"}, EntityID: repository.SeedNodeID,
 	})
 	if err != nil {
-		t.Fatalf("EDGHistory: %v", err)
+		t.Fatalf("SPLHistory: %v", err)
 	}
-	impact, err := tool.EDGImpact(context.Background(), ImpactRequest{
+	impact, err := tool.SPLImpact(context.Background(), ImpactRequest{
 		Selector: SnapshotSelector{Branch: "main"},
 		Request: repository.ImpactRequest{
 			Delta: []repository.MutationOperation{
@@ -253,13 +253,13 @@ func TestReadEnvelopesReportTargetProjectionProvenance(t *testing.T) {
 		},
 	})
 	if err != nil {
-		t.Fatalf("EDGImpact: %v", err)
+		t.Fatalf("SPLImpact: %v", err)
 	}
-	validation, err := tool.EDGValidateSchema(context.Background(), SchemaValidationRequest{
+	validation, err := tool.SPLValidateSchema(context.Background(), SchemaValidationRequest{
 		Selector: SnapshotSelector{Branch: "main"},
 	})
 	if err != nil {
-		t.Fatalf("EDGValidateSchema: %v", err)
+		t.Fatalf("SPLValidateSchema: %v", err)
 	}
 	for _, result := range []struct {
 		name   string
@@ -295,7 +295,7 @@ func TestReadEnvelopesReportTargetProjectionProvenance(t *testing.T) {
 	}
 }
 
-func TestEDGDiffBoundsPublicEnvelope(t *testing.T) {
+func TestSPLDiffBoundsPublicEnvelope(t *testing.T) {
 	repo := repository.NewSeedRepository()
 	base, err := repo.PinBranch("main")
 	if err != nil {
@@ -319,13 +319,13 @@ func TestEDGDiffBoundsPublicEnvelope(t *testing.T) {
 	tool := NewResolveTool(repo)
 	baseCommit, targetCommit := string(base), string(target.Commit)
 	one, generous := 1, 1<<20
-	page, err := tool.EDGDiff(context.Background(), DiffRequest{
+	page, err := tool.SPLDiff(context.Background(), DiffRequest{
 		Base:   SnapshotSelector{Branch: "main", Commit: &baseCommit},
 		Target: SnapshotSelector{Branch: "main", Commit: &targetCommit},
 		Budget: QueryBudgetRequest{MaxRows: &one, MaxResponseBytes: &generous},
 	})
 	if err != nil {
-		t.Fatalf("EDGDiff baseline: %v", err)
+		t.Fatalf("SPLDiff baseline: %v", err)
 	}
 	encoded, err := json.Marshal(page)
 	if err != nil {
@@ -335,13 +335,13 @@ func TestEDGDiffBoundsPublicEnvelope(t *testing.T) {
 	// Reserve room for the conservative elapsed-time metadata used while
 	// calculating the public payload budget.
 	rows, maxBytes := 3, len(encoded)+16
-	got, err := tool.EDGDiff(context.Background(), DiffRequest{
+	got, err := tool.SPLDiff(context.Background(), DiffRequest{
 		Base:   SnapshotSelector{Branch: "main", Commit: &baseCommit},
 		Target: SnapshotSelector{Branch: "main", Commit: &targetCommit},
 		Budget: QueryBudgetRequest{MaxRows: &rows, MaxResponseBytes: &maxBytes},
 	})
 	if err != nil {
-		t.Fatalf("EDGDiff bounded: %v", err)
+		t.Fatalf("SPLDiff bounded: %v", err)
 	}
 	encoded, err = json.Marshal(got)
 	if err != nil {
@@ -357,21 +357,21 @@ func TestEDGDiffBoundsPublicEnvelope(t *testing.T) {
 		got.Completion.Visited != len(got.Changes)+len(got.Context) || got.Completion.ResponseBytes != len(encoded) {
 		t.Fatalf("bounded completion = %#v", got.Completion)
 	}
-	next, err := tool.EDGDiff(context.Background(), DiffRequest{
+	next, err := tool.SPLDiff(context.Background(), DiffRequest{
 		Base:              SnapshotSelector{Branch: "main", Commit: &baseCommit},
 		Target:            SnapshotSelector{Branch: "main", Commit: &targetCommit},
 		Budget:            QueryBudgetRequest{MaxRows: &rows, MaxResponseBytes: &maxBytes},
 		ContinuationToken: got.ContinuationToken,
 	})
 	if err != nil {
-		t.Fatalf("EDGDiff continuation: %v", err)
+		t.Fatalf("SPLDiff continuation: %v", err)
 	}
 	if len(next.Changes) != 1 || next.Changes[0].ID == got.Changes[0].ID {
 		t.Fatalf("continuation result = %#v, want next single change", next)
 	}
 
 	tooSmall := 1
-	_, err = tool.EDGDiff(context.Background(), DiffRequest{
+	_, err = tool.SPLDiff(context.Background(), DiffRequest{
 		Base:   SnapshotSelector{Branch: "main", Commit: &baseCommit},
 		Target: SnapshotSelector{Branch: "main", Commit: &targetCommit},
 		Budget: QueryBudgetRequest{MaxResponseBytes: &tooSmall},
@@ -381,7 +381,7 @@ func TestEDGDiffBoundsPublicEnvelope(t *testing.T) {
 	}
 }
 
-func TestEDGImpactNormalizesTraversalBudget(t *testing.T) {
+func TestSPLImpactNormalizesTraversalBudget(t *testing.T) {
 	repo := repository.NewSeedRepository()
 	if _, err := repo.StageMutationBatch(repository.StageMutationRequest{Branch: "main", Operations: []repository.MutationOperation{
 		{Action: "add", Entity: "node", ID: "node-2", Title: "Second"},
@@ -399,7 +399,7 @@ func TestEDGImpactNormalizesTraversalBudget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PinBranch: %v", err)
 	}
-	result, err := NewResolveTool(repo).EDGImpact(context.Background(), ImpactRequest{
+	result, err := NewResolveTool(repo).SPLImpact(context.Background(), ImpactRequest{
 		Selector: SnapshotSelector{Branch: "main"},
 		Request: repository.ImpactRequest{
 			Delta: []repository.MutationOperation{
@@ -409,7 +409,7 @@ func TestEDGImpactNormalizesTraversalBudget(t *testing.T) {
 		Budget: QueryBudgetRequest{MaxDepth: &one, MaxVisited: &ten},
 	})
 	if err != nil {
-		t.Fatalf("EDGImpact: %v", err)
+		t.Fatalf("SPLImpact: %v", err)
 	}
 	if len(result.Impacts) != 2 ||
 		result.Impacts[0].Node.ID != repository.SeedNodeID ||
@@ -430,18 +430,18 @@ func TestEDGImpactNormalizesTraversalBudget(t *testing.T) {
 	}
 }
 
-func TestEDGHistoryReturnsSnapshotAndProjectionMetadata(t *testing.T) {
+func TestSPLHistoryReturnsSnapshotAndProjectionMetadata(t *testing.T) {
 	repo := repository.NewSeedRepository()
 	head, err := repo.PinBranch("main")
 	if err != nil {
 		t.Fatalf("PinBranch: %v", err)
 	}
 
-	result, err := NewResolveTool(repo).EDGHistory(context.Background(), HistoryRequest{
+	result, err := NewResolveTool(repo).SPLHistory(context.Background(), HistoryRequest{
 		Selector: SnapshotSelector{Branch: "main"}, EntityID: repository.SeedNodeID,
 	})
 	if err != nil {
-		t.Fatalf("EDGHistory: %v", err)
+		t.Fatalf("SPLHistory: %v", err)
 	}
 	if len(result.Entries) == 0 || result.Snapshot.Repository == "" ||
 		result.Snapshot.Branch != "main" || result.Snapshot.Commit != string(head) ||
@@ -476,37 +476,37 @@ func TestQueryEnvelopesReportCompletionAndFullResponseBytes(t *testing.T) {
 	tool := NewResolveTool(repo)
 	baseCommit, targetCommit := string(base), string(target.Commit)
 
-	resolved, err := tool.EDGResolve(context.Background(), ResolveRequest{
+	resolved, err := tool.SPLResolve(context.Background(), ResolveRequest{
 		Selector: SnapshotSelector{Branch: "main"}, NodeID: repository.SeedNodeID,
 	})
 	if err != nil {
-		t.Fatalf("EDGResolve: %v", err)
+		t.Fatalf("SPLResolve: %v", err)
 	}
-	diff, err := tool.EDGDiff(context.Background(), DiffRequest{
+	diff, err := tool.SPLDiff(context.Background(), DiffRequest{
 		Base:   SnapshotSelector{Branch: "main", Commit: &baseCommit},
 		Target: SnapshotSelector{Branch: "main", Commit: &targetCommit},
 	})
 	if err != nil {
-		t.Fatalf("EDGDiff: %v", err)
+		t.Fatalf("SPLDiff: %v", err)
 	}
-	history, err := tool.EDGHistory(context.Background(), HistoryRequest{
+	history, err := tool.SPLHistory(context.Background(), HistoryRequest{
 		Selector: SnapshotSelector{Branch: "main"}, EntityID: repository.SeedNodeID,
 	})
 	if err != nil {
-		t.Fatalf("EDGHistory: %v", err)
+		t.Fatalf("SPLHistory: %v", err)
 	}
-	branches, err := tool.EDGBranchesContaining(context.Background(), ContainmentSelector{EntityID: repository.SeedNodeID})
+	branches, err := tool.SPLBranchesContaining(context.Background(), ContainmentSelector{EntityID: repository.SeedNodeID})
 	if err != nil {
-		t.Fatalf("EDGBranchesContaining: %v", err)
+		t.Fatalf("SPLBranchesContaining: %v", err)
 	}
-	impact, err := tool.EDGImpact(context.Background(), ImpactRequest{
+	impact, err := tool.SPLImpact(context.Background(), ImpactRequest{
 		Selector: SnapshotSelector{Branch: "main"},
 		Request: repository.ImpactRequest{Delta: []repository.MutationOperation{
 			{Action: "update", Entity: "node", ID: repository.SeedNodeID, Title: "Changed"},
 		}},
 	})
 	if err != nil {
-		t.Fatalf("EDGImpact: %v", err)
+		t.Fatalf("SPLImpact: %v", err)
 	}
 
 	for _, query := range []struct {
@@ -578,13 +578,13 @@ func TestPagedQueryCompletionReportsRowAndVisitedTruncation(t *testing.T) {
 	tool := NewResolveTool(repo)
 	baseCommit, targetCommit := string(base), string(target.Commit)
 
-	diff, err := tool.EDGDiff(context.Background(), DiffRequest{
+	diff, err := tool.SPLDiff(context.Background(), DiffRequest{
 		Base:   SnapshotSelector{Branch: "main", Commit: &baseCommit},
 		Target: SnapshotSelector{Branch: "main", Commit: &targetCommit},
 		Budget: QueryBudgetRequest{MaxRows: &one, MaxResponseBytes: &generous},
 	})
 	if err != nil {
-		t.Fatalf("EDGDiff: %v", err)
+		t.Fatalf("SPLDiff: %v", err)
 	}
 	if !diff.Completion.Truncated || diff.Completion.Complete || diff.ContinuationToken == "" || diff.Completion.Visited != 1 {
 		t.Fatalf("diff completion = %#v, result = %#v", diff.Completion, diff.DiffResult)
@@ -620,7 +620,7 @@ func TestPagedQueryCompletionReportsRowAndVisitedTruncation(t *testing.T) {
 		t.Fatalf("commit context change: %v", err)
 	}
 	contextBaseCommit, contextTargetCommit := string(contextBase), string(contextTarget.Commit)
-	contextPage, err := NewResolveTool(contextRepo).EDGDiff(context.Background(), DiffRequest{
+	contextPage, err := NewResolveTool(contextRepo).SPLDiff(context.Background(), DiffRequest{
 		Base:          SnapshotSelector{Branch: "main", Commit: &contextBaseCommit},
 		Target:        SnapshotSelector{Branch: "main", Commit: &contextTargetCommit},
 		Filter:        repository.DiffFilter{NodeIDs: []string{repository.SeedNodeID}},
@@ -628,26 +628,26 @@ func TestPagedQueryCompletionReportsRowAndVisitedTruncation(t *testing.T) {
 		Budget:        QueryBudgetRequest{MaxRows: &one, MaxResponseBytes: &generous},
 	})
 	if err != nil {
-		t.Fatalf("EDGDiff one-hop context: %v", err)
+		t.Fatalf("SPLDiff one-hop context: %v", err)
 	}
 	if !contextPage.ContextTruncated || contextPage.ContinuationToken != "" ||
 		!contextPage.Completion.Truncated || contextPage.Completion.Complete {
 		t.Fatalf("context page = %#v", contextPage)
 	}
 
-	branches, err := tool.EDGBranchesContainingPage(context.Background(), BranchesContainingRequest{
+	branches, err := tool.SPLBranchesContainingPage(context.Background(), BranchesContainingRequest{
 		Selector: ContainmentSelector{EntityID: repository.SeedNodeID},
 		Budget:   QueryBudgetRequest{MaxRows: &one, MaxResponseBytes: &generous},
 	})
 	if err != nil {
-		t.Fatalf("EDGBranchesContainingPage: %v", err)
+		t.Fatalf("SPLBranchesContainingPage: %v", err)
 	}
 	if !branches.Completion.Truncated || branches.Completion.Complete ||
 		branches.ContinuationToken == "" || branches.Completion.Visited != 1 {
 		t.Fatalf("branch completion = %#v, result = %#v", branches.Completion, branches.BranchContainmentResult)
 	}
 
-	impact, err := tool.EDGImpact(context.Background(), ImpactRequest{
+	impact, err := tool.SPLImpact(context.Background(), ImpactRequest{
 		Selector: SnapshotSelector{Branch: "main"},
 		Request: repository.ImpactRequest{Delta: []repository.MutationOperation{
 			{Action: "update", Entity: "node", ID: repository.SeedNodeID, Title: "Changed"},
@@ -655,7 +655,7 @@ func TestPagedQueryCompletionReportsRowAndVisitedTruncation(t *testing.T) {
 		Budget: QueryBudgetRequest{MaxRows: &generous, MaxVisited: &one, MaxResponseBytes: &generous},
 	})
 	if err != nil {
-		t.Fatalf("EDGImpact: %v", err)
+		t.Fatalf("SPLImpact: %v", err)
 	}
 	if !impact.CapacityExhausted || !impact.Completion.Truncated || impact.Completion.Complete ||
 		impact.Completion.Visited != 1 {
@@ -665,13 +665,13 @@ func TestPagedQueryCompletionReportsRowAndVisitedTruncation(t *testing.T) {
 
 func TestQueryDeadlineWithoutListPrefixReturnsError(t *testing.T) {
 	zero := time.Duration(0)
-	_, err := NewResolveTool(repository.NewSeedRepository()).EDGResolve(context.Background(), ResolveRequest{
+	_, err := NewResolveTool(repository.NewSeedRepository()).SPLResolve(context.Background(), ResolveRequest{
 		Selector: SnapshotSelector{Branch: "main"},
 		NodeID:   repository.SeedNodeID,
 		Budget:   QueryBudgetRequest{Timeout: &zero},
 	})
 	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("EDGResolve deadline error = %v, want context.DeadlineExceeded", err)
+		t.Fatalf("SPLResolve deadline error = %v, want context.DeadlineExceeded", err)
 	}
 }
 
@@ -695,7 +695,7 @@ func TestResolveToolReadAPIsRejectUnreachableExplicitCommits(t *testing.T) {
 		{
 			name: "resolve",
 			call: func() error {
-				_, err := tool.EDGResolve(context.Background(), ResolveRequest{
+				_, err := tool.SPLResolve(context.Background(), ResolveRequest{
 					Selector: selector, NodeID: repository.SeedNodeID,
 				})
 				return err
@@ -704,14 +704,14 @@ func TestResolveToolReadAPIsRejectUnreachableExplicitCommits(t *testing.T) {
 		{
 			name: "validate",
 			call: func() error {
-				_, err := tool.EDGValidateSchema(context.Background(), SchemaValidationRequest{Selector: selector})
+				_, err := tool.SPLValidateSchema(context.Background(), SchemaValidationRequest{Selector: selector})
 				return err
 			},
 		},
 		{
 			name: "diff",
 			call: func() error {
-				_, err := tool.EDGDiff(context.Background(), DiffRequest{
+				_, err := tool.SPLDiff(context.Background(), DiffRequest{
 					Base: SnapshotSelector{Branch: "main"}, Target: selector,
 				})
 				return err
@@ -720,7 +720,7 @@ func TestResolveToolReadAPIsRejectUnreachableExplicitCommits(t *testing.T) {
 		{
 			name: "history",
 			call: func() error {
-				_, err := tool.EDGHistory(context.Background(), HistoryRequest{
+				_, err := tool.SPLHistory(context.Background(), HistoryRequest{
 					Selector: selector, EntityID: repository.SeedNodeID,
 				})
 				return err
@@ -729,7 +729,7 @@ func TestResolveToolReadAPIsRejectUnreachableExplicitCommits(t *testing.T) {
 		{
 			name: "impact",
 			call: func() error {
-				_, err := tool.EDGImpact(context.Background(), ImpactRequest{
+				_, err := tool.SPLImpact(context.Background(), ImpactRequest{
 					Selector: selector,
 					Request: repository.ImpactRequest{
 						Delta: []repository.MutationOperation{
@@ -763,33 +763,33 @@ func TestResolveToolReadAPIsAllowDetachedCommitsOnlyWhenConfigured(t *testing.T)
 	selector := SnapshotSelector{Branch: "main", Commit: &commit}
 	tool := NewResolveToolWithOptions(repo, Options{AllowDetachedCommit: true})
 
-	resolved, err := tool.EDGResolve(context.Background(), ResolveRequest{
+	resolved, err := tool.SPLResolve(context.Background(), ResolveRequest{
 		Selector: selector, NodeID: repository.SeedNodeID,
 	})
 	if err != nil {
-		t.Fatalf("EDGResolve with detached access: %v", err)
+		t.Fatalf("SPLResolve with detached access: %v", err)
 	}
 	if resolved.Snapshot.Commit != commit || resolved.Snapshot.Branch != "main" {
 		t.Fatalf("detached resolve envelope = %#v", resolved)
 	}
-	validation, err := tool.EDGValidateSchema(context.Background(), SchemaValidationRequest{Selector: selector})
+	validation, err := tool.SPLValidateSchema(context.Background(), SchemaValidationRequest{Selector: selector})
 	if err != nil {
-		t.Fatalf("EDGValidateSchema with detached access: %v", err)
+		t.Fatalf("SPLValidateSchema with detached access: %v", err)
 	}
 	if validation.Snapshot.Commit != commit || validation.Snapshot.Branch != "main" {
 		t.Fatalf("detached validation envelope = %#v", validation)
 	}
-	if _, err := tool.EDGDiff(context.Background(), DiffRequest{
+	if _, err := tool.SPLDiff(context.Background(), DiffRequest{
 		Base: SnapshotSelector{Branch: "main"}, Target: selector,
 	}); err != nil {
-		t.Fatalf("EDGDiff with detached access: %v", err)
+		t.Fatalf("SPLDiff with detached access: %v", err)
 	}
-	if _, err := tool.EDGHistory(context.Background(), HistoryRequest{
+	if _, err := tool.SPLHistory(context.Background(), HistoryRequest{
 		Selector: selector, EntityID: repository.SeedNodeID,
 	}); err != nil {
-		t.Fatalf("EDGHistory with detached access: %v", err)
+		t.Fatalf("SPLHistory with detached access: %v", err)
 	}
-	if _, err := tool.EDGImpact(context.Background(), ImpactRequest{
+	if _, err := tool.SPLImpact(context.Background(), ImpactRequest{
 		Selector: selector,
 		Request: repository.ImpactRequest{
 			Delta: []repository.MutationOperation{
@@ -797,7 +797,7 @@ func TestResolveToolReadAPIsAllowDetachedCommitsOnlyWhenConfigured(t *testing.T)
 			},
 		},
 	}); err != nil {
-		t.Fatalf("EDGImpact with detached access: %v", err)
+		t.Fatalf("SPLImpact with detached access: %v", err)
 	}
 }
 
@@ -810,21 +810,21 @@ func TestResolveToolSnapshotReadAPIsRequireBranch(t *testing.T) {
 		{
 			name: "resolve",
 			call: func() error {
-				_, err := tool.EDGResolve(context.Background(), ResolveRequest{NodeID: repository.SeedNodeID})
+				_, err := tool.SPLResolve(context.Background(), ResolveRequest{NodeID: repository.SeedNodeID})
 				return err
 			},
 		},
 		{
 			name: "validate",
 			call: func() error {
-				_, err := tool.EDGValidateSchema(context.Background(), SchemaValidationRequest{})
+				_, err := tool.SPLValidateSchema(context.Background(), SchemaValidationRequest{})
 				return err
 			},
 		},
 		{
 			name: "diff base",
 			call: func() error {
-				_, err := tool.EDGDiff(context.Background(), DiffRequest{
+				_, err := tool.SPLDiff(context.Background(), DiffRequest{
 					Base: SnapshotSelector{}, Target: SnapshotSelector{Branch: "main"},
 				})
 				return err
@@ -833,7 +833,7 @@ func TestResolveToolSnapshotReadAPIsRequireBranch(t *testing.T) {
 		{
 			name: "diff target",
 			call: func() error {
-				_, err := tool.EDGDiff(context.Background(), DiffRequest{
+				_, err := tool.SPLDiff(context.Background(), DiffRequest{
 					Base: SnapshotSelector{Branch: "main"}, Target: SnapshotSelector{},
 				})
 				return err
@@ -842,14 +842,14 @@ func TestResolveToolSnapshotReadAPIsRequireBranch(t *testing.T) {
 		{
 			name: "history",
 			call: func() error {
-				_, err := tool.EDGHistory(context.Background(), HistoryRequest{EntityID: repository.SeedNodeID})
+				_, err := tool.SPLHistory(context.Background(), HistoryRequest{EntityID: repository.SeedNodeID})
 				return err
 			},
 		},
 		{
 			name: "impact",
 			call: func() error {
-				_, err := tool.EDGImpact(context.Background(), ImpactRequest{
+				_, err := tool.SPLImpact(context.Background(), ImpactRequest{
 					Request: repository.ImpactRequest{
 						Delta: []repository.MutationOperation{
 							{Action: "update", Entity: "node", ID: repository.SeedNodeID, Title: "Changed"},
@@ -877,7 +877,7 @@ func TestResolveToolSingleSnapshotReadAPIsRemainPinnedAfterBranchAdvances(t *tes
 		{
 			name: "resolve",
 			call: func(tool *ResolveTool) (SnapshotMetadata, error) {
-				result, err := tool.EDGResolve(context.Background(), ResolveRequest{
+				result, err := tool.SPLResolve(context.Background(), ResolveRequest{
 					Selector: SnapshotSelector{Branch: "main"}, NodeID: repository.SeedNodeID,
 				})
 				return result.Snapshot, err
@@ -886,7 +886,7 @@ func TestResolveToolSingleSnapshotReadAPIsRemainPinnedAfterBranchAdvances(t *tes
 		{
 			name: "validate",
 			call: func(tool *ResolveTool) (SnapshotMetadata, error) {
-				result, err := tool.EDGValidateSchema(context.Background(), SchemaValidationRequest{
+				result, err := tool.SPLValidateSchema(context.Background(), SchemaValidationRequest{
 					Selector: SnapshotSelector{Branch: "main"},
 				})
 				return result.Snapshot, err
@@ -895,7 +895,7 @@ func TestResolveToolSingleSnapshotReadAPIsRemainPinnedAfterBranchAdvances(t *tes
 		{
 			name: "history",
 			call: func(tool *ResolveTool) (SnapshotMetadata, error) {
-				result, err := tool.EDGHistory(context.Background(), HistoryRequest{
+				result, err := tool.SPLHistory(context.Background(), HistoryRequest{
 					Selector: SnapshotSelector{Branch: "main"}, EntityID: repository.SeedNodeID,
 				})
 				return result.Snapshot, err
@@ -904,7 +904,7 @@ func TestResolveToolSingleSnapshotReadAPIsRemainPinnedAfterBranchAdvances(t *tes
 		{
 			name: "impact",
 			call: func(tool *ResolveTool) (SnapshotMetadata, error) {
-				result, err := tool.EDGImpact(context.Background(), ImpactRequest{
+				result, err := tool.SPLImpact(context.Background(), ImpactRequest{
 					Selector: SnapshotSelector{Branch: "main"},
 					Request: repository.ImpactRequest{
 						Delta: []repository.MutationOperation{
@@ -952,19 +952,19 @@ func TestResolveToolSingleSnapshotReadAPIsRemainPinnedAfterBranchAdvances(t *tes
 
 func TestResolveToolReadAPIsPreserveUnknownSelectorErrors(t *testing.T) {
 	tool := NewResolveTool(repository.NewSeedRepository())
-	if _, err := tool.EDGDiff(context.Background(), DiffRequest{
+	if _, err := tool.SPLDiff(context.Background(), DiffRequest{
 		Base: SnapshotSelector{Branch: "missing"}, Target: SnapshotSelector{Branch: "main"},
 	}); !errors.Is(err, ErrBranchNotFound) {
-		t.Fatalf("EDGDiff unknown branch error = %v, want ErrBranchNotFound", err)
+		t.Fatalf("SPLDiff unknown branch error = %v, want ErrBranchNotFound", err)
 	}
 
 	unknown := "unknown"
-	if _, err := tool.EDGHistory(context.Background(), HistoryRequest{
+	if _, err := tool.SPLHistory(context.Background(), HistoryRequest{
 		Selector: SnapshotSelector{Branch: "main", Commit: &unknown}, EntityID: repository.SeedNodeID,
 	}); !errors.Is(err, repository.ErrCommitNotFound) {
-		t.Fatalf("EDGHistory unknown commit error = %v, want ErrCommitNotFound", err)
+		t.Fatalf("SPLHistory unknown commit error = %v, want ErrCommitNotFound", err)
 	}
-	if _, err := tool.EDGImpact(context.Background(), ImpactRequest{
+	if _, err := tool.SPLImpact(context.Background(), ImpactRequest{
 		Selector: SnapshotSelector{Branch: "missing"},
 		Request: repository.ImpactRequest{
 			Delta: []repository.MutationOperation{
@@ -972,11 +972,11 @@ func TestResolveToolReadAPIsPreserveUnknownSelectorErrors(t *testing.T) {
 			},
 		},
 	}); !errors.Is(err, ErrBranchNotFound) {
-		t.Fatalf("EDGImpact unknown branch error = %v, want ErrBranchNotFound", err)
+		t.Fatalf("SPLImpact unknown branch error = %v, want ErrBranchNotFound", err)
 	}
 }
 
-func TestEDGDiffPinsBothEndpointsIndependently(t *testing.T) {
+func TestSPLDiffPinsBothEndpointsIndependently(t *testing.T) {
 	repo := repository.NewSeedRepository()
 	initial, err := repo.PinBranch("main")
 	if err != nil {
@@ -993,11 +993,11 @@ func TestEDGDiffPinsBothEndpointsIndependently(t *testing.T) {
 		}
 	}
 
-	result, err := tool.EDGDiff(context.Background(), DiffRequest{
+	result, err := tool.SPLDiff(context.Background(), DiffRequest{
 		Base: SnapshotSelector{Branch: "main"}, Target: SnapshotSelector{Branch: "main"},
 	})
 	if err != nil {
-		t.Fatalf("EDGDiff: %v", err)
+		t.Fatalf("SPLDiff: %v", err)
 	}
 	current, err := repo.PinBranch("main")
 	if err != nil {
@@ -1071,19 +1071,19 @@ func TestNormalizeQueryBudgetHonorsLowerRequestsWithoutExceedingConfiguration(t 
 	}
 }
 
-func TestEDGResolveRejectsMissingBranch(t *testing.T) {
+func TestSPLResolveRejectsMissingBranch(t *testing.T) {
 	tool := NewResolveTool(repository.NewSeedRepository())
 
-	_, err := tool.EDGResolve(context.Background(), ResolveRequest{
+	_, err := tool.SPLResolve(context.Background(), ResolveRequest{
 		Selector: SnapshotSelector{},
 		NodeID:   repository.SeedNodeID,
 	})
 	if !errors.Is(err, ErrMissingBranch) {
-		t.Fatalf("EDGResolve error = %v, want ErrMissingBranch", err)
+		t.Fatalf("SPLResolve error = %v, want ErrMissingBranch", err)
 	}
 }
 
-func TestEDGResolveUsesExplicitReachableCommit(t *testing.T) {
+func TestSPLResolveUsesExplicitReachableCommit(t *testing.T) {
 	repo := repository.NewSeedRepository()
 	olderCommit, err := repo.PinBranch("main")
 	if err != nil {
@@ -1094,19 +1094,19 @@ func TestEDGResolveUsesExplicitReachableCommit(t *testing.T) {
 	}
 
 	commit := string(olderCommit)
-	got, err := NewResolveTool(repo).EDGResolve(context.Background(), ResolveRequest{
+	got, err := NewResolveTool(repo).SPLResolve(context.Background(), ResolveRequest{
 		Selector: SnapshotSelector{Branch: "main", Commit: &commit},
 		NodeID:   repository.SeedNodeID,
 	})
 	if err != nil {
-		t.Fatalf("EDGResolve: %v", err)
+		t.Fatalf("SPLResolve: %v", err)
 	}
 	if got.Snapshot.Commit != commit {
 		t.Fatalf("selected commit = %q, want %q", got.Snapshot.Commit, commit)
 	}
 }
 
-func TestEDGResolveTraversesAllMergeParentsForExplicitCommit(t *testing.T) {
+func TestSPLResolveTraversesAllMergeParentsForExplicitCommit(t *testing.T) {
 	repo := repository.NewSeedRepository()
 	base, err := repo.PinBranch("main")
 	if err != nil {
@@ -1139,19 +1139,19 @@ func TestEDGResolveTraversesAllMergeParentsForExplicitCommit(t *testing.T) {
 	}
 
 	commit := string(featureCommit)
-	got, err := NewResolveTool(repo).EDGResolve(context.Background(), ResolveRequest{
+	got, err := NewResolveTool(repo).SPLResolve(context.Background(), ResolveRequest{
 		Selector: SnapshotSelector{Branch: "main", Commit: &commit},
 		NodeID:   repository.SeedNodeID,
 	})
 	if err != nil {
-		t.Fatalf("EDGResolve: %v", err)
+		t.Fatalf("SPLResolve: %v", err)
 	}
 	if got.Snapshot.Commit != commit {
 		t.Fatalf("selected commit = %q, want second-parent commit %q", got.Snapshot.Commit, commit)
 	}
 }
 
-func TestEDGResolveRejectsUnreachableExplicitCommitUnlessDetachedAccessAllowed(t *testing.T) {
+func TestSPLResolveRejectsUnreachableExplicitCommitUnlessDetachedAccessAllowed(t *testing.T) {
 	repo := repository.NewSeedRepository()
 	if _, err := repo.CreateBranch("feature", branch.Source{Branch: "main"}); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
@@ -1163,46 +1163,46 @@ func TestEDGResolveRejectsUnreachableExplicitCommitUnlessDetachedAccessAllowed(t
 	commit := string(featureCommit)
 	request := ResolveRequest{Selector: SnapshotSelector{Branch: "main", Commit: &commit}, NodeID: repository.SeedNodeID}
 
-	if _, err := NewResolveTool(repo).EDGResolve(context.Background(), request); !errors.Is(err, ErrUnsupportedCommit) {
+	if _, err := NewResolveTool(repo).SPLResolve(context.Background(), request); !errors.Is(err, ErrUnsupportedCommit) {
 		t.Fatalf("default policy error = %v, want ErrUnsupportedCommit", err)
 	}
-	got, err := NewResolveToolWithOptions(repo, Options{AllowDetachedCommit: true}).EDGResolve(context.Background(), request)
+	got, err := NewResolveToolWithOptions(repo, Options{AllowDetachedCommit: true}).SPLResolve(context.Background(), request)
 	if err != nil {
-		t.Fatalf("EDGResolve with detached access: %v", err)
+		t.Fatalf("SPLResolve with detached access: %v", err)
 	}
 	if got.Snapshot.Commit != commit {
 		t.Fatalf("selected commit = %q, want %q", got.Snapshot.Commit, commit)
 	}
 }
 
-func TestEDGResolveRejectsUnknownExplicitCommitWithoutUnsupportedCategory(t *testing.T) {
+func TestSPLResolveRejectsUnknownExplicitCommitWithoutUnsupportedCategory(t *testing.T) {
 	commit := "unknown"
 	request := ResolveRequest{Selector: SnapshotSelector{Branch: "main", Commit: &commit}, NodeID: repository.SeedNodeID}
 	for _, options := range []Options{{}, {AllowDetachedCommit: true}} {
-		_, err := NewResolveToolWithOptions(repository.NewSeedRepository(), options).EDGResolve(context.Background(), request)
+		_, err := NewResolveToolWithOptions(repository.NewSeedRepository(), options).SPLResolve(context.Background(), request)
 		if !errors.Is(err, repository.ErrCommitNotFound) || errors.Is(err, ErrUnsupportedCommit) {
 			t.Fatalf("options %#v error = %v, want ErrCommitNotFound without ErrUnsupportedCommit", options, err)
 		}
 	}
 }
 
-func TestEDGResolveValidatesBranchWhenDetachedAccessAllowed(t *testing.T) {
+func TestSPLResolveValidatesBranchWhenDetachedAccessAllowed(t *testing.T) {
 	repo := repository.NewSeedRepository()
 	commit, err := repo.PinBranch("main")
 	if err != nil {
 		t.Fatalf("PinBranch: %v", err)
 	}
 	selected := string(commit)
-	_, err = NewResolveToolWithOptions(repo, Options{AllowDetachedCommit: true}).EDGResolve(context.Background(), ResolveRequest{
+	_, err = NewResolveToolWithOptions(repo, Options{AllowDetachedCommit: true}).SPLResolve(context.Background(), ResolveRequest{
 		Selector: SnapshotSelector{Branch: "missing", Commit: &selected},
 		NodeID:   repository.SeedNodeID,
 	})
 	if !errors.Is(err, ErrBranchNotFound) {
-		t.Fatalf("EDGResolve error = %v, want ErrBranchNotFound", err)
+		t.Fatalf("SPLResolve error = %v, want ErrBranchNotFound", err)
 	}
 }
 
-func TestEDGCreateBranchUsesExplicitSource(t *testing.T) {
+func TestSPLCreateBranchUsesExplicitSource(t *testing.T) {
 	repo := repository.NewSeedRepository()
 	tool := NewResolveTool(repo)
 	mainHead, err := repo.PinBranch("main")
@@ -1210,32 +1210,32 @@ func TestEDGCreateBranchUsesExplicitSource(t *testing.T) {
 		t.Fatalf("PinBranch: %v", err)
 	}
 
-	result, err := tool.EDGCreateBranch(context.Background(), branch.CreateRequest{
+	result, err := tool.SPLCreateBranch(context.Background(), branch.CreateRequest{
 		Name:   "feature",
 		Source: branch.Source{Branch: "main"},
 	})
 	if err != nil {
-		t.Fatalf("EDGCreateBranch: %v", err)
+		t.Fatalf("SPLCreateBranch: %v", err)
 	}
 	if result != (branch.CreateResult{Name: "feature", Commit: string(mainHead)}) {
 		t.Fatalf("result = %#v, want name feature at %q", result, mainHead)
 	}
 }
 
-func TestEDGCreateBranchRejectsMissingSourceBeforeDuplicateName(t *testing.T) {
+func TestSPLCreateBranchRejectsMissingSourceBeforeDuplicateName(t *testing.T) {
 	tool := NewResolveTool(repository.NewSeedRepository())
 
-	_, err := tool.EDGCreateBranch(context.Background(), branch.CreateRequest{
+	_, err := tool.SPLCreateBranch(context.Background(), branch.CreateRequest{
 		Name:   "main",
 		Source: branch.Source{Branch: "missing"},
 	})
 	if !errors.Is(err, branch.ErrSourceNotFound) {
-		t.Fatalf("EDGCreateBranch error = %v, want ErrSourceNotFound", err)
+		t.Fatalf("SPLCreateBranch error = %v, want ErrSourceNotFound", err)
 	}
 
 }
 
-func TestEDGListBranchesReturnsSortedLocalBranchNames(t *testing.T) {
+func TestSPLListBranchesReturnsSortedLocalBranchNames(t *testing.T) {
 	repo := repository.NewSeedRepository()
 	if _, err := repo.CreateBranch("zebra", branch.Source{Branch: "main"}); err != nil {
 		t.Fatalf("CreateBranch zebra: %v", err)
@@ -1245,9 +1245,9 @@ func TestEDGListBranchesReturnsSortedLocalBranchNames(t *testing.T) {
 		t.Fatalf("CreateBranch alpha: %v", err)
 	}
 
-	result, err := NewResolveTool(repo).EDGListBranches(context.Background())
+	result, err := NewResolveTool(repo).SPLListBranches(context.Background())
 	if err != nil {
-		t.Fatalf("EDGListBranches: %v", err)
+		t.Fatalf("SPLListBranches: %v", err)
 	}
 	want := []string{"alpha", "main", "zebra"}
 	if !reflect.DeepEqual(result.Branches, want) {
@@ -1255,15 +1255,15 @@ func TestEDGListBranchesReturnsSortedLocalBranchNames(t *testing.T) {
 	}
 }
 
-func TestEDGDeleteBranchDeletesExistingNonDefaultBranch(t *testing.T) {
+func TestSPLDeleteBranchDeletesExistingNonDefaultBranch(t *testing.T) {
 	repo := repository.NewSeedRepository()
 	if _, err := repo.CreateBranch("feature", branch.Source{Branch: "main"}); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
 	}
 
-	result, err := NewResolveTool(repo).EDGDeleteBranch(context.Background(), branch.DeleteRequest{Name: "feature"})
+	result, err := NewResolveTool(repo).SPLDeleteBranch(context.Background(), branch.DeleteRequest{Name: "feature"})
 	if err != nil {
-		t.Fatalf("EDGDeleteBranch: %v", err)
+		t.Fatalf("SPLDeleteBranch: %v", err)
 	}
 	if result != (branch.DeleteResult{Name: "feature"}) {
 		t.Fatalf("result = %#v", result)
@@ -1273,7 +1273,7 @@ func TestEDGDeleteBranchDeletesExistingNonDefaultBranch(t *testing.T) {
 	}
 }
 
-func TestEDGDeleteBranchRejectsDefaultAndMissingBranches(t *testing.T) {
+func TestSPLDeleteBranchRejectsDefaultAndMissingBranches(t *testing.T) {
 	tool := NewResolveTool(repository.NewSeedRepository())
 	for _, testCase := range []struct {
 		name string
@@ -1283,24 +1283,24 @@ func TestEDGDeleteBranchRejectsDefaultAndMissingBranches(t *testing.T) {
 		{name: "missing", want: branch.ErrNotFound},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			_, err := tool.EDGDeleteBranch(context.Background(), branch.DeleteRequest{Name: testCase.name})
+			_, err := tool.SPLDeleteBranch(context.Background(), branch.DeleteRequest{Name: testCase.name})
 			if !errors.Is(err, testCase.want) {
-				t.Fatalf("EDGDeleteBranch error = %v, want %v", err, testCase.want)
+				t.Fatalf("SPLDeleteBranch error = %v, want %v", err, testCase.want)
 			}
 
 		})
 	}
 }
 
-func TestEDGSwitchBranchMakesExistingInactiveBranchActive(t *testing.T) {
+func TestSPLSwitchBranchMakesExistingInactiveBranchActive(t *testing.T) {
 	repo := repository.NewSeedRepository()
 	if _, err := repo.CreateBranch("feature", branch.Source{Branch: "main"}); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
 	}
 
-	result, err := NewResolveTool(repo).EDGSwitchBranch(context.Background(), branch.SwitchRequest{Name: "feature"})
+	result, err := NewResolveTool(repo).SPLSwitchBranch(context.Background(), branch.SwitchRequest{Name: "feature"})
 	if err != nil {
-		t.Fatalf("EDGSwitchBranch: %v", err)
+		t.Fatalf("SPLSwitchBranch: %v", err)
 	}
 	if result != (branch.SwitchResult{ActiveBranch: "feature"}) {
 		t.Fatalf("result = %#v", result)
@@ -1314,7 +1314,7 @@ func TestEDGSwitchBranchMakesExistingInactiveBranchActive(t *testing.T) {
 	}
 }
 
-func TestEDGSwitchBranchRejectsMissingBranchWithoutChangingActiveBranch(t *testing.T) {
+func TestSPLSwitchBranchRejectsMissingBranchWithoutChangingActiveBranch(t *testing.T) {
 	repo := repository.NewSeedRepository()
 	tool := NewResolveTool(repo)
 	originalActiveBranch, err := repo.Initialization()
@@ -1322,8 +1322,8 @@ func TestEDGSwitchBranchRejectsMissingBranchWithoutChangingActiveBranch(t *testi
 		t.Fatalf("Initialization before switch: %v", err)
 	}
 
-	if _, err := tool.EDGSwitchBranch(context.Background(), branch.SwitchRequest{Name: "missing"}); !errors.Is(err, branch.ErrNotFound) {
-		t.Fatalf("EDGSwitchBranch error = %v, want ErrNotFound", err)
+	if _, err := tool.SPLSwitchBranch(context.Background(), branch.SwitchRequest{Name: "missing"}); !errors.Is(err, branch.ErrNotFound) {
+		t.Fatalf("SPLSwitchBranch error = %v, want ErrNotFound", err)
 	}
 	current, err := repo.Initialization()
 	if err != nil {
@@ -1334,12 +1334,12 @@ func TestEDGSwitchBranchRejectsMissingBranchWithoutChangingActiveBranch(t *testi
 	}
 }
 
-func TestEDGSwitchBranchSucceedsWhenBranchIsAlreadyActive(t *testing.T) {
+func TestSPLSwitchBranchSucceedsWhenBranchIsAlreadyActive(t *testing.T) {
 	repo := repository.NewSeedRepository()
 
-	result, err := NewResolveTool(repo).EDGSwitchBranch(context.Background(), branch.SwitchRequest{Name: "main"})
+	result, err := NewResolveTool(repo).SPLSwitchBranch(context.Background(), branch.SwitchRequest{Name: "main"})
 	if err != nil {
-		t.Fatalf("EDGSwitchBranch: %v", err)
+		t.Fatalf("SPLSwitchBranch: %v", err)
 	}
 
 	if result != (branch.SwitchResult{ActiveBranch: "main"}) {
@@ -1354,7 +1354,7 @@ func TestEDGSwitchBranchSucceedsWhenBranchIsAlreadyActive(t *testing.T) {
 	}
 }
 
-func TestEDGBranchStagingStatusReportsStagedDelta(t *testing.T) {
+func TestSPLBranchStagingStatusReportsStagedDelta(t *testing.T) {
 	repo := repository.NewSeedRepository()
 	if _, err := repo.StageMutationBatch(repository.StageMutationRequest{
 		Branch: "main",
@@ -1365,16 +1365,16 @@ func TestEDGBranchStagingStatusReportsStagedDelta(t *testing.T) {
 		t.Fatalf("StageMutationBatch: %v", err)
 	}
 
-	status, err := NewResolveTool(repo).EDGBranchStagingStatus(context.Background(), "main")
+	status, err := NewResolveTool(repo).SPLBranchStagingStatus(context.Background(), "main")
 	if err != nil {
-		t.Fatalf("EDGBranchStagingStatus: %v", err)
+		t.Fatalf("SPLBranchStagingStatus: %v", err)
 	}
 	if status.Branch != "main" || status.BaseCommit == "" || status.Operations != 1 {
 		t.Fatalf("status = %#v", status)
 	}
 }
 
-func TestEDGCommitStagedMutationsRejectsStaleBaseWithoutChangingBranchOrStaging(t *testing.T) {
+func TestSPLCommitStagedMutationsRejectsStaleBaseWithoutChangingBranchOrStaging(t *testing.T) {
 	repo := repository.NewSeedRepository()
 	if _, err := repo.StageMutationBatch(repository.StageMutationRequest{
 		Branch:     "main",
@@ -1394,8 +1394,8 @@ func TestEDGCommitStagedMutationsRejectsStaleBaseWithoutChangingBranchOrStaging(
 		t.Fatalf("BranchStagingStatus before commit: %v", err)
 	}
 
-	if _, err := NewResolveTool(repo).EDGCommitStagedMutations(context.Background(), "main"); !errors.Is(err, repository.ErrStaleStagedBase) {
-		t.Fatalf("EDGCommitStagedMutations error = %v, want ErrStaleStagedBase", err)
+	if _, err := NewResolveTool(repo).SPLCommitStagedMutations(context.Background(), "main"); !errors.Is(err, repository.ErrStaleStagedBase) {
+		t.Fatalf("SPLCommitStagedMutations error = %v, want ErrStaleStagedBase", err)
 	}
 
 	currentHead, err := repo.PinBranch("main")
@@ -1411,12 +1411,12 @@ func TestEDGCommitStagedMutationsRejectsStaleBaseWithoutChangingBranchOrStaging(
 	}
 }
 
-func TestEDGGCRejectsCanceledContext(t *testing.T) {
+func TestSPLGCRejectsCanceledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := NewResolveTool(repository.NewSeedRepository()).EDGGC(ctx, repository.GCOptions{})
+	_, err := NewResolveTool(repository.NewSeedRepository()).SPLGC(ctx, repository.GCOptions{})
 	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("EDGGC error = %v, want context.Canceled", err)
+		t.Fatalf("SPLGC error = %v, want context.Canceled", err)
 	}
 }

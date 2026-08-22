@@ -103,9 +103,37 @@ type SearchExpandResult struct {
 // ContextResult is the public context-assembly result.
 type ContextResult = SearchExpandResult
 
-// EDGFilter returns a bounded page of nodes selected only through the
+// GraphResult contains every node and edge in one immutable branch snapshot.
+type GraphResult struct {
+	Snapshot SnapshotMetadata  `json:"snapshot"`
+	Nodes    []repository.Node `json:"nodes"`
+	Edges    []repository.Edge `json:"edges"`
+}
+
+// SPLGraph returns the complete graph for a branch snapshot.
+func (t *ResolveTool) SPLGraph(ctx context.Context, selector SnapshotSelector) (GraphResult, error) {
+	commit, err := t.resolver.resolveSnapshotCommit(ctx, selector)
+	if err != nil {
+		return GraphResult{}, err
+	}
+	snapshot, err := t.resolver.snapshotMetadataForCommitContext(ctx, selector.Branch, commit)
+	if err != nil {
+		return GraphResult{}, err
+	}
+	nodes, err := t.repository.PinnedNodesContext(ctx, commit)
+	if err != nil {
+		return GraphResult{}, err
+	}
+	edges, err := t.repository.PinnedEdgesContext(ctx, commit)
+	if err != nil {
+		return GraphResult{}, err
+	}
+	return GraphResult{Snapshot: snapshot, Nodes: nodes, Edges: edges}, nil
+}
+
+// SPLFilter returns a bounded page of nodes selected only through the
 // branch-head projection's typed filter API.
-func (t *ResolveTool) EDGFilter(ctx context.Context, request FilterRequest) (FilterResult, error) {
+func (t *ResolveTool) SPLFilter(ctx context.Context, request FilterRequest) (FilterResult, error) {
 	budget := NormalizeQueryBudget(request.Budget, t.queryBudget)
 	queryCtx, execution, cancel := BeginQuery(ctx, budget)
 	defer cancel()
@@ -144,9 +172,9 @@ func (t *ResolveTool) EDGFilter(ctx context.Context, request FilterRequest) (Fil
 	return result, nil
 }
 
-// EDGSearch returns a bounded page of lexical matches from the branch-head
+// SPLSearch returns a bounded page of lexical matches from the branch-head
 // projection. Historical commits fail with ErrHistoricalProjectionUnsupported.
-func (t *ResolveTool) EDGSearch(ctx context.Context, request SearchRequest) (SearchResult, error) {
+func (t *ResolveTool) SPLSearch(ctx context.Context, request SearchRequest) (SearchResult, error) {
 	budget := NormalizeQueryBudget(request.Budget, t.queryBudget)
 	queryCtx, execution, cancel := BeginQuery(ctx, budget)
 	defer cancel()
@@ -185,13 +213,13 @@ func (t *ResolveTool) EDGSearch(ctx context.Context, request SearchRequest) (Sea
 	return result, nil
 }
 
-// EDGSearchExpand returns lexical or filter evidence plus bounded graph context.
-func (t *ResolveTool) EDGSearchExpand(ctx context.Context, request SearchExpandRequest) (SearchExpandResult, error) {
+// SPLSearchExpand returns lexical or filter evidence plus bounded graph context.
+func (t *ResolveTool) SPLSearchExpand(ctx context.Context, request SearchExpandRequest) (SearchExpandResult, error) {
 	return t.edgContextual(ctx, request, false)
 }
 
-// EDGContext returns evidence-focused bounded graph context.
-func (t *ResolveTool) EDGContext(ctx context.Context, request ContextRequest) (ContextResult, error) {
+// SPLContext returns evidence-focused bounded graph context.
+func (t *ResolveTool) SPLContext(ctx context.Context, request ContextRequest) (ContextResult, error) {
 	return t.edgContextual(ctx, request, true)
 }
 

@@ -26,7 +26,7 @@ func NewValidateCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobr
 			if command.Flags().Changed("commit") {
 				selector.Commit = &commit
 			}
-			result, err := tool.EDGValidateSchema(command.Context(), resolve.SchemaValidationRequest{Selector: selector})
+			result, err := tool.SPLValidateSchema(command.Context(), resolve.SchemaValidationRequest{Selector: selector})
 			if err != nil {
 				return err
 			}

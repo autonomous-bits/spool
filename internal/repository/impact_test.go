@@ -52,7 +52,7 @@ func TestImpactAppliesDeltaInMemoryAndTraversesOutgoingDependencies(t *testing.T
 	if err != nil {
 		t.Fatalf("ResolvePinned: %v", err)
 	}
-	if resolved.Node.Title != "EDG walking skeleton" {
+	if resolved.Node.Title != "SPL walking skeleton" {
 		t.Fatalf("hypothetical delta persisted: %#v", resolved.Node)
 	}
 }

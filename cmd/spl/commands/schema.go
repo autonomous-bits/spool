@@ -53,7 +53,7 @@ func NewSchemaMigrateCommand(toolProvider func() (*resolve.ResolveTool, error)) 
 			if err != nil {
 				return err
 			}
-			result, err := tool.EDGStageSchemaMigration(command.Context(), repository.SchemaMigrationRequest{
+			result, err := tool.SPLStageSchemaMigration(command.Context(), repository.SchemaMigrationRequest{
 				Branch: branchName, SchemaTOML: schemaTOML, Operations: operations,
 			})
 			if err != nil {

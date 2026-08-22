@@ -22,7 +22,7 @@ func NewSwitchCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra.
 			if err != nil {
 				return err
 			}
-			result, err := tool.EDGSwitchBranch(command.Context(), branch.SwitchRequest{Name: args[0]})
+			result, err := tool.SPLSwitchBranch(command.Context(), branch.SwitchRequest{Name: args[0]})
 			if err != nil {
 				return err
 			}

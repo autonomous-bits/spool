@@ -25,12 +25,12 @@ func TestCreateBranchCLIAndMCPReturnEquivalentPayloads(t *testing.T) {
 	}
 
 	mcpTool := resolve.NewResolveTool(repository.NewSeedRepository())
-	mcpResult, err := mcpTool.EDGCreateBranch(context.Background(), branch.CreateRequest{
+	mcpResult, err := mcpTool.SPLCreateBranch(context.Background(), branch.CreateRequest{
 		Name:   "from-branch",
 		Source: branch.Source{Branch: "main"},
 	})
 	if err != nil {
-		t.Fatalf("EDGCreateBranch: %v", err)
+		t.Fatalf("SPLCreateBranch: %v", err)
 	}
 	if !reflect.DeepEqual(cliResult, mcpResult) {
 		t.Fatalf("CLI result %#v does not match MCP result %#v", cliResult, mcpResult)
@@ -39,7 +39,7 @@ func TestCreateBranchCLIAndMCPReturnEquivalentPayloads(t *testing.T) {
 
 func TestCreateBranchCLIAndMCPSupportCommitSource(t *testing.T) {
 	cliTool := resolve.NewResolveTool(repository.NewSeedRepository())
-	source, err := cliTool.EDGResolve(context.Background(), resolve.ResolveRequest{
+	source, err := cliTool.SPLResolve(context.Background(), resolve.ResolveRequest{
 		Selector: resolve.SnapshotSelector{Branch: "main"},
 		NodeID:   repository.SeedNodeID,
 	})
@@ -56,12 +56,12 @@ func TestCreateBranchCLIAndMCPSupportCommitSource(t *testing.T) {
 	}
 
 	mcpTool := resolve.NewResolveTool(repository.NewSeedRepository())
-	mcpResult, err := mcpTool.EDGCreateBranch(context.Background(), branch.CreateRequest{
+	mcpResult, err := mcpTool.SPLCreateBranch(context.Background(), branch.CreateRequest{
 		Name:   "from-commit",
 		Source: branch.Source{Commit: source.Snapshot.Commit},
 	})
 	if err != nil {
-		t.Fatalf("EDGCreateBranch: %v", err)
+		t.Fatalf("SPLCreateBranch: %v", err)
 	}
 	if !reflect.DeepEqual(cliResult, mcpResult) {
 		t.Fatalf("CLI result %#v does not match MCP result %#v", cliResult, mcpResult)
@@ -142,9 +142,9 @@ func TestListBranchesCLIAndMCPReturnEquivalentPayloads(t *testing.T) {
 	if _, err := mcpRepo.CreateBranch("alpha", branch.Source{Branch: "main"}); err != nil {
 		t.Fatalf("CreateBranch alpha: %v", err)
 	}
-	mcpResult, err := resolve.NewResolveTool(mcpRepo).EDGListBranches(context.Background())
+	mcpResult, err := resolve.NewResolveTool(mcpRepo).SPLListBranches(context.Background())
 	if err != nil {
-		t.Fatalf("EDGListBranches: %v", err)
+		t.Fatalf("SPLListBranches: %v", err)
 	}
 	if !reflect.DeepEqual(cliResult, mcpResult) {
 		t.Fatalf("CLI result %#v does not match MCP result %#v", cliResult, mcpResult)
@@ -169,11 +169,11 @@ func TestDeleteBranchCLIAndMCPReturnEquivalentPayloads(t *testing.T) {
 	if _, err := mcpRepo.CreateBranch("feature", branch.Source{Branch: "main"}); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
 	}
-	mcpResult, err := resolve.NewResolveTool(mcpRepo).EDGDeleteBranch(
+	mcpResult, err := resolve.NewResolveTool(mcpRepo).SPLDeleteBranch(
 		context.Background(), branch.DeleteRequest{Name: "feature"},
 	)
 	if err != nil {
-		t.Fatalf("EDGDeleteBranch: %v", err)
+		t.Fatalf("SPLDeleteBranch: %v", err)
 	}
 	if !reflect.DeepEqual(cliResult, mcpResult) {
 		t.Fatalf("CLI result %#v does not match MCP result %#v", cliResult, mcpResult)

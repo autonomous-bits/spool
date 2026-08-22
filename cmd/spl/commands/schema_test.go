@@ -57,11 +57,11 @@ func TestSchemaMigrateCLIStagesEquivalentMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read schema: %v", err)
 	}
-	mcpResult, err := resolve.NewResolveTool(mcpRepo).EDGStageSchemaMigration(context.Background(), repository.SchemaMigrationRequest{
+	mcpResult, err := resolve.NewResolveTool(mcpRepo).SPLStageSchemaMigration(context.Background(), repository.SchemaMigrationRequest{
 		Branch: "main", SchemaTOML: schemaTOML, Operations: schemaMigratePeopleOperations(),
 	})
 	if err != nil {
-		t.Fatalf("EDGStageSchemaMigration: %v", err)
+		t.Fatalf("SPLStageSchemaMigration: %v", err)
 	}
 	if !reflect.DeepEqual(cliResult, mcpResult) {
 		t.Fatalf("CLI result %#v does not match tool result %#v", cliResult, mcpResult)

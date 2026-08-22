@@ -39,9 +39,9 @@ func TestStatusCLIAndMCPReportEquivalentSharedStagingDelta(t *testing.T) {
 	if _, err := mcpRepo.StageMutationBatch(repository.StageMutationRequest{Branch: "main", Operations: operations}); err != nil {
 		t.Fatalf("stage MCP repository batch: %v", err)
 	}
-	mcpResult, err := resolve.NewResolveTool(mcpRepo).EDGBranchStagingStatus(context.Background(), "main")
+	mcpResult, err := resolve.NewResolveTool(mcpRepo).SPLBranchStagingStatus(context.Background(), "main")
 	if err != nil {
-		t.Fatalf("EDGBranchStagingStatus: %v", err)
+		t.Fatalf("SPLBranchStagingStatus: %v", err)
 	}
 	if !reflect.DeepEqual(cliResult, mcpResult) {
 		t.Fatalf("CLI result %#v does not match MCP result %#v", cliResult, mcpResult)

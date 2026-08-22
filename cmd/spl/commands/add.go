@@ -41,7 +41,7 @@ func NewAddCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra.Com
 			if err != nil {
 				return err
 			}
-			result, err := tool.EDGStageMutationBatch(command.Context(), repository.StageMutationRequest{
+			result, err := tool.SPLStageMutationBatch(command.Context(), repository.StageMutationRequest{
 				Branch: branchName, Operations: operations,
 			})
 			if err != nil {

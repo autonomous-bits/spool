@@ -27,11 +27,11 @@ func TestValidateCLIReturnsToolSchemaReport(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &cliResult); err != nil {
 		t.Fatalf("decode validate result: %v", err)
 	}
-	toolResult, err := tool.EDGValidateSchema(context.Background(), resolve.SchemaValidationRequest{
+	toolResult, err := tool.SPLValidateSchema(context.Background(), resolve.SchemaValidationRequest{
 		Selector: resolve.SnapshotSelector{Branch: "main"},
 	})
 	if err != nil {
-		t.Fatalf("EDGValidateSchema: %v", err)
+		t.Fatalf("SPLValidateSchema: %v", err)
 	}
 	if !reflect.DeepEqual(cliResult, toolResult) {
 		t.Fatalf("CLI result %#v does not match tool result %#v", cliResult, toolResult)

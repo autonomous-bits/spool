@@ -31,12 +31,12 @@ func TestResolveCLIAndMCPReturnEquivalentPayloads(t *testing.T) {
 	if cliResult.Completion.ResponseBytes != output.Len() {
 		t.Fatalf("CLI resolve bytes = %d, want responseBytes %d", output.Len(), cliResult.Completion.ResponseBytes)
 	}
-	mcpResult, err := tool.EDGResolve(context.Background(), resolve.ResolveRequest{
+	mcpResult, err := tool.SPLResolve(context.Background(), resolve.ResolveRequest{
 		Selector: resolve.SnapshotSelector{Branch: "main"},
 		NodeID:   repository.SeedNodeID,
 	})
 	if err != nil {
-		t.Fatalf("EDGResolve: %v", err)
+		t.Fatalf("SPLResolve: %v", err)
 	}
 	if !reflect.DeepEqual(comparableResolveResult(cliResult), comparableResolveResult(mcpResult)) {
 		t.Fatalf("CLI result %#v does not match MCP result %#v", cliResult, mcpResult)
@@ -78,12 +78,12 @@ func TestResolveCLIAndMCPUseExplicitOlderCommit(t *testing.T) {
 		t.Fatalf("decode CLI result: %v", err)
 	}
 	selected := string(olderCommit)
-	mcpResult, err := tool.EDGResolve(context.Background(), resolve.ResolveRequest{
+	mcpResult, err := tool.SPLResolve(context.Background(), resolve.ResolveRequest{
 		Selector: resolve.SnapshotSelector{Branch: "main", Commit: &selected},
 		NodeID:   repository.SeedNodeID,
 	})
 	if err != nil {
-		t.Fatalf("EDGResolve: %v", err)
+		t.Fatalf("SPLResolve: %v", err)
 	}
 	if !reflect.DeepEqual(comparableResolveResult(cliResult), comparableResolveResult(mcpResult)) || cliResult.Snapshot.Commit != selected {
 		t.Fatalf("CLI/MCP results = %#v/%#v, want selected commit %q", cliResult, mcpResult, selected)
@@ -125,7 +125,7 @@ func TestResolveCLIHONorsLowerBudgetAndCapsOverLimitRequests(t *testing.T) {
 
 	rows, responseBytes, depth, visited := 25, 800, 3, 100
 	timeout := 100 * time.Millisecond
-	mcpResult, err := tool.EDGResolve(context.Background(), resolve.ResolveRequest{
+	mcpResult, err := tool.SPLResolve(context.Background(), resolve.ResolveRequest{
 		Selector: resolve.SnapshotSelector{Branch: "main"},
 		NodeID:   repository.SeedNodeID,
 		Budget: resolve.QueryBudgetRequest{
@@ -134,7 +134,7 @@ func TestResolveCLIHONorsLowerBudgetAndCapsOverLimitRequests(t *testing.T) {
 		},
 	})
 	if err != nil {
-		t.Fatalf("EDGResolve: %v", err)
+		t.Fatalf("SPLResolve: %v", err)
 	}
 	if !reflect.DeepEqual(comparableResolveResult(cliResult), comparableResolveResult(mcpResult)) {
 		t.Fatalf("CLI result %#v does not match MCP result %#v", cliResult, mcpResult)

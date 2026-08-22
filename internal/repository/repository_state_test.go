@@ -214,7 +214,7 @@ func TestOpenRepositoryRejectsLegacyRecordsWithoutEnrichedFields(t *testing.T) {
 		return id
 	}
 
-	node := legacyNode{ID: SeedNodeID, Title: "EDG walking skeleton"}
+	node := legacyNode{ID: SeedNodeID, Title: "SPL walking skeleton"}
 	nodeID := storeLegacy("node", node)
 	nodeRoot := storeLegacy("prolly-node-root", []ObjectID{nodeID})
 	edge := legacyEdge{ID: "edge-1", Source: SeedNodeID, Target: SeedNodeID}
@@ -236,7 +236,7 @@ func TestOpenRepositoryRejectsLegacyRecordsWithoutEnrichedFields(t *testing.T) {
 		Branches:      map[string]ObjectID{"main": commitID},
 		Commits:       map[ObjectID]commit{commitID: seedCommit},
 		Snapshots:     map[ObjectID]graphSnapshot{snapshotID: snapshot},
-		Projections:   map[ObjectID]map[string]Node{nodeRoot: {SeedNodeID: {ID: SeedNodeID, Title: "EDG walking skeleton"}}},
+		Projections:   map[ObjectID]map[string]Node{nodeRoot: {SeedNodeID: {ID: SeedNodeID, Title: "SPL walking skeleton"}}},
 		Objects:       objects,
 	}
 	data, err := json.Marshal(state)
@@ -634,7 +634,7 @@ func TestCanonicalRootsReconstructIndependentlyOfDerivedProjection(t *testing.T)
 	if !ok {
 		t.Fatal("reconstruct canonical seed projection")
 	}
-	if got, want := canonical[SeedNodeID], (Node{ID: SeedNodeID, Title: "EDG walking skeleton"}); !got.Equal(want) {
+	if got, want := canonical[SeedNodeID], (Node{ID: SeedNodeID, Title: "SPL walking skeleton"}); !got.Equal(want) {
 		t.Fatalf("canonical node = %#v, want %#v", got, want)
 	}
 

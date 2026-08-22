@@ -134,7 +134,7 @@ func NewFilterCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra.
 			if err != nil {
 				return err
 			}
-			result, err := tool.EDGFilter(command.Context(), resolve.FilterRequest{
+			result, err := tool.SPLFilter(command.Context(), resolve.FilterRequest{
 				Selector: snapshotSelectorFlag(command, "commit", branch, commit), Labels: filters.labels, Predicates: predicates,
 				ContinuationToken: token, Budget: budgetFlags.request(command),
 			})
@@ -165,7 +165,7 @@ func NewSearchCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra.
 			if err != nil {
 				return err
 			}
-			result, err := tool.EDGSearch(command.Context(), resolve.SearchRequest{
+			result, err := tool.SPLSearch(command.Context(), resolve.SearchRequest{
 				Selector: snapshotSelectorFlag(command, "commit", branch, commit), Query: query,
 				ContinuationToken: token, Budget: budgetFlags.request(command),
 			})
@@ -220,13 +220,13 @@ func newContextualCommand(use, short, long, example string, toolProvider func() 
 				Budget: budgetFlags.request(command),
 			}
 			if evidenceFirst {
-				result, err := tool.EDGContext(command.Context(), request)
+				result, err := tool.SPLContext(command.Context(), request)
 				if err != nil {
 					return err
 				}
 				return writeJSON(command, result, "context")
 			}
-			result, err := tool.EDGSearchExpand(command.Context(), request)
+			result, err := tool.SPLSearchExpand(command.Context(), request)
 			if err != nil {
 				return err
 			}

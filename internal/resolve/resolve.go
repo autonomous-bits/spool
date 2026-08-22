@@ -424,8 +424,8 @@ func NewPersistentFsckTool(stateDir string) *FsckTool {
 	}}
 }
 
-// EDGFsck honors cancellation and returns a deterministic integrity report.
-func (t *FsckTool) EDGFsck(ctx context.Context) (repository.FsckResult, error) {
+// SPLFsck honors cancellation and returns a deterministic integrity report.
+func (t *FsckTool) SPLFsck(ctx context.Context) (repository.FsckResult, error) {
 	if err := ctx.Err(); err != nil {
 		return repository.FsckResult{}, err
 	}
@@ -448,26 +448,26 @@ func NewResolveToolWithOptions(repo *repository.Repository, options Options) *Re
 	}
 }
 
-// EDGGC honors cancellation before beginning the atomic maintenance operation.
+// SPLGC honors cancellation before beginning the atomic maintenance operation.
 // Once GC starts, it must run to a durable result so cancellation cannot leave
 // a caller uncertain whether publication or cleanup occurred.
-func (t *ResolveTool) EDGGC(ctx context.Context, options repository.GCOptions) (repository.GCResult, error) {
+func (t *ResolveTool) SPLGC(ctx context.Context, options repository.GCOptions) (repository.GCResult, error) {
 	if err := ctx.Err(); err != nil {
 		return repository.GCResult{}, err
 	}
 	return t.repository.GC(options)
 }
 
-// EDGMergePreview computes a deterministic, non-mutating three-way merge preview.
-func (t *ResolveTool) EDGMergePreview(ctx context.Context, sourceBranch, targetBranch string) (repository.MergePreview, error) {
+// SPLMergePreview computes a deterministic, non-mutating three-way merge preview.
+func (t *ResolveTool) SPLMergePreview(ctx context.Context, sourceBranch, targetBranch string) (repository.MergePreview, error) {
 	if err := ctx.Err(); err != nil {
 		return repository.MergePreview{}, err
 	}
 	return t.merges.Preview(sourceBranch, targetBranch)
 }
 
-// EDGApplyMergePreview applies an exact clean preview.
-func (t *ResolveTool) EDGApplyMergePreview(ctx context.Context, request MergeApplyRequest) (repository.ObjectID, error) {
+// SPLApplyMergePreview applies an exact clean preview.
+func (t *ResolveTool) SPLApplyMergePreview(ctx context.Context, request MergeApplyRequest) (repository.ObjectID, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
@@ -477,40 +477,40 @@ func (t *ResolveTool) EDGApplyMergePreview(ctx context.Context, request MergeApp
 	)
 }
 
-// EDGMergeConflicts returns the durable preview and resolution state for its owner.
-func (t *ResolveTool) EDGMergeConflicts(ctx context.Context, request MergeConflictsRequest) (repository.MergeTransactionStatus, error) {
+// SPLMergeConflicts returns the durable preview and resolution state for its owner.
+func (t *ResolveTool) SPLMergeConflicts(ctx context.Context, request MergeConflictsRequest) (repository.MergeTransactionStatus, error) {
 	if err := ctx.Err(); err != nil {
 		return repository.MergeTransactionStatus{}, err
 	}
 	return t.merges.Conflicts(request.TargetBranch, request.TransactionID)
 }
 
-// EDGFinalizeMerge commits a fully resolved conflicted merge.
-func (t *ResolveTool) EDGFinalizeMerge(ctx context.Context, request MergeTransactionRequest) (repository.ObjectID, error) {
+// SPLFinalizeMerge commits a fully resolved conflicted merge.
+func (t *ResolveTool) SPLFinalizeMerge(ctx context.Context, request MergeTransactionRequest) (repository.ObjectID, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
 	return t.merges.Finalize(request.TargetBranch, request.TransactionID)
 }
 
-// EDGResolveMerge persists a complete, schema-valid conflict resolution.
-func (t *ResolveTool) EDGResolveMerge(ctx context.Context, request MergeResolveRequest) error {
+// SPLResolveMerge persists a complete, schema-valid conflict resolution.
+func (t *ResolveTool) SPLResolveMerge(ctx context.Context, request MergeResolveRequest) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	return t.merges.ResolveConflicts(request)
 }
 
-// EDGAbortMerge durably abandons a conflicted merge and releases its target lease.
-func (t *ResolveTool) EDGAbortMerge(ctx context.Context, request MergeTransactionRequest) error {
+// SPLAbortMerge durably abandons a conflicted merge and releases its target lease.
+func (t *ResolveTool) SPLAbortMerge(ctx context.Context, request MergeTransactionRequest) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	return t.merges.Abort(request.TargetBranch, request.TransactionID)
 }
 
-// EDGResolve resolves one node within the effective query deadline.
-func (t *ResolveTool) EDGResolve(ctx context.Context, request ResolveRequest) (ResolveResult, error) {
+// SPLResolve resolves one node within the effective query deadline.
+func (t *ResolveTool) SPLResolve(ctx context.Context, request ResolveRequest) (ResolveResult, error) {
 	budget := NormalizeQueryBudget(request.Budget, t.queryBudget)
 	queryCtx, execution, cancel := BeginQuery(ctx, budget)
 	defer cancel()
@@ -531,16 +531,16 @@ func (t *ResolveTool) EDGResolve(ctx context.Context, request ResolveRequest) (R
 	return result, nil
 }
 
-// EDGValidateSchema honors cancellation and validates one immutable snapshot.
-func (t *ResolveTool) EDGValidateSchema(ctx context.Context, request SchemaValidationRequest) (SchemaValidationResult, error) {
+// SPLValidateSchema honors cancellation and validates one immutable snapshot.
+func (t *ResolveTool) SPLValidateSchema(ctx context.Context, request SchemaValidationRequest) (SchemaValidationResult, error) {
 	if err := ctx.Err(); err != nil {
 		return SchemaValidationResult{}, err
 	}
 	return t.resolver.ValidateSchema(ctx, request.Selector)
 }
 
-// EDGDiff returns a deadline-bounded repository diff page.
-func (t *ResolveTool) EDGDiff(ctx context.Context, request DiffRequest) (DiffResult, error) {
+// SPLDiff returns a deadline-bounded repository diff page.
+func (t *ResolveTool) SPLDiff(ctx context.Context, request DiffRequest) (DiffResult, error) {
 	budget := NormalizeQueryBudget(request.Budget, t.queryBudget)
 	queryCtx, execution, cancel := BeginQuery(ctx, budget)
 	defer cancel()
@@ -659,8 +659,8 @@ func finalizeToolQuery(
 	return nil
 }
 
-// EDGHistory returns a deadline-bounded repository entity-history page.
-func (t *ResolveTool) EDGHistory(ctx context.Context, request HistoryRequest) (HistoryResult, error) {
+// SPLHistory returns a deadline-bounded repository entity-history page.
+func (t *ResolveTool) SPLHistory(ctx context.Context, request HistoryRequest) (HistoryResult, error) {
 	budget := NormalizeQueryBudget(request.Budget, t.queryBudget)
 	queryCtx, execution, cancel := BeginQuery(ctx, budget)
 	defer cancel()
@@ -708,14 +708,14 @@ func (t *ResolveTool) EDGHistory(ctx context.Context, request HistoryRequest) (H
 	return result, nil
 }
 
-// EDGBranchesContaining returns the first bounded containment page for selector.
-// EDGBranchesContainingPage accepts continuation and narrowed-budget controls.
-func (t *ResolveTool) EDGBranchesContaining(ctx context.Context, selector ContainmentSelector) (BranchesContainingResult, error) {
-	return t.EDGBranchesContainingPage(ctx, BranchesContainingRequest{Selector: selector})
+// SPLBranchesContaining returns the first bounded containment page for selector.
+// SPLBranchesContainingPage accepts continuation and narrowed-budget controls.
+func (t *ResolveTool) SPLBranchesContaining(ctx context.Context, selector ContainmentSelector) (BranchesContainingResult, error) {
+	return t.SPLBranchesContainingPage(ctx, BranchesContainingRequest{Selector: selector})
 }
 
-// EDGBranchesContainingPage returns a deadline-bounded containment page.
-func (t *ResolveTool) EDGBranchesContainingPage(ctx context.Context, request BranchesContainingRequest) (BranchesContainingResult, error) {
+// SPLBranchesContainingPage returns a deadline-bounded containment page.
+func (t *ResolveTool) SPLBranchesContainingPage(ctx context.Context, request BranchesContainingRequest) (BranchesContainingResult, error) {
 	budget := NormalizeQueryBudget(request.Budget, t.queryBudget)
 	queryCtx, execution, cancel := BeginQuery(ctx, budget)
 	defer cancel()
@@ -752,8 +752,8 @@ func (t *ResolveTool) EDGBranchesContainingPage(ctx context.Context, request Bra
 	return result, nil
 }
 
-// EDGImpact returns a deadline-bounded non-persistent impact page.
-func (t *ResolveTool) EDGImpact(ctx context.Context, request ImpactRequest) (ImpactResult, error) {
+// SPLImpact returns a deadline-bounded non-persistent impact page.
+func (t *ResolveTool) SPLImpact(ctx context.Context, request ImpactRequest) (ImpactResult, error) {
 	budget := NormalizeQueryBudget(request.Budget, t.queryBudget)
 	queryCtx, execution, cancel := BeginQuery(ctx, budget)
 	defer cancel()
@@ -802,61 +802,61 @@ func (t *ResolveTool) EDGImpact(ctx context.Context, request ImpactRequest) (Imp
 	return result, nil
 }
 
-// EDGCreateBranch delegates a context-aware branch creation request.
-func (t *ResolveTool) EDGCreateBranch(ctx context.Context, request branch.CreateRequest) (branch.CreateResult, error) {
+// SPLCreateBranch delegates a context-aware branch creation request.
+func (t *ResolveTool) SPLCreateBranch(ctx context.Context, request branch.CreateRequest) (branch.CreateResult, error) {
 	return t.branches.Create(ctx, request)
 }
 
-// EDGListBranches delegates a context-aware branch listing request.
-func (t *ResolveTool) EDGListBranches(ctx context.Context) (branch.ListResult, error) {
+// SPLListBranches delegates a context-aware branch listing request.
+func (t *ResolveTool) SPLListBranches(ctx context.Context) (branch.ListResult, error) {
 	return t.branches.List(ctx)
 }
 
-// EDGDeleteBranch delegates a context-aware branch deletion request.
-func (t *ResolveTool) EDGDeleteBranch(ctx context.Context, request branch.DeleteRequest) (branch.DeleteResult, error) {
+// SPLDeleteBranch delegates a context-aware branch deletion request.
+func (t *ResolveTool) SPLDeleteBranch(ctx context.Context, request branch.DeleteRequest) (branch.DeleteResult, error) {
 	return t.branches.Delete(ctx, request)
 }
 
-// EDGSwitchBranch delegates a context-aware branch switch request.
-func (t *ResolveTool) EDGSwitchBranch(ctx context.Context, request branch.SwitchRequest) (branch.SwitchResult, error) {
+// SPLSwitchBranch delegates a context-aware branch switch request.
+func (t *ResolveTool) SPLSwitchBranch(ctx context.Context, request branch.SwitchRequest) (branch.SwitchResult, error) {
 	return t.branches.Switch(ctx, request)
 }
 
-// EDGStageMutationBatch honors cancellation and replaces a branch's shared staged mutations.
-func (t *ResolveTool) EDGStageMutationBatch(ctx context.Context, request repository.StageMutationRequest) (repository.StageMutationResult, error) {
+// SPLStageMutationBatch honors cancellation and replaces a branch's shared staged mutations.
+func (t *ResolveTool) SPLStageMutationBatch(ctx context.Context, request repository.StageMutationRequest) (repository.StageMutationResult, error) {
 	if err := ctx.Err(); err != nil {
 		return repository.StageMutationResult{}, err
 	}
 	return t.resolver.repo.StageMutationBatch(request)
 }
 
-// EDGStageSchemaMigration honors cancellation and atomically stages a target
+// SPLStageSchemaMigration honors cancellation and atomically stages a target
 // schema with the graph mutations required to conform to it.
-func (t *ResolveTool) EDGStageSchemaMigration(ctx context.Context, request repository.SchemaMigrationRequest) (repository.StageMutationResult, error) {
+func (t *ResolveTool) SPLStageSchemaMigration(ctx context.Context, request repository.SchemaMigrationRequest) (repository.StageMutationResult, error) {
 	if err := ctx.Err(); err != nil {
 		return repository.StageMutationResult{}, err
 	}
 	return t.resolver.repo.StageSchemaMigration(request)
 }
 
-// EDGBranchStagingStatus honors cancellation and returns a branch's shared staging summary.
-func (t *ResolveTool) EDGBranchStagingStatus(ctx context.Context, branch string) (repository.BranchStagingStatus, error) {
+// SPLBranchStagingStatus honors cancellation and returns a branch's shared staging summary.
+func (t *ResolveTool) SPLBranchStagingStatus(ctx context.Context, branch string) (repository.BranchStagingStatus, error) {
 	if err := ctx.Err(); err != nil {
 		return repository.BranchStagingStatus{}, err
 	}
 	return t.resolver.repo.BranchStagingStatus(branch)
 }
 
-// EDGCommitStagedMutations honors cancellation and commits a branch's staged mutations.
-func (t *ResolveTool) EDGCommitStagedMutations(ctx context.Context, branch string) (repository.CommitStagedMutationResult, error) {
+// SPLCommitStagedMutations honors cancellation and commits a branch's staged mutations.
+func (t *ResolveTool) SPLCommitStagedMutations(ctx context.Context, branch string) (repository.CommitStagedMutationResult, error) {
 	if err := ctx.Err(); err != nil {
 		return repository.CommitStagedMutationResult{}, err
 	}
 	return t.resolver.repo.CommitStagedMutations(branch)
 }
 
-// EDGCommitStagedMutationBatch honors cancellation and commits staged mutations with metadata.
-func (t *ResolveTool) EDGCommitStagedMutationBatch(ctx context.Context, request repository.CommitStagedMutationRequest) (repository.CommitStagedMutationResult, error) {
+// SPLCommitStagedMutationBatch honors cancellation and commits staged mutations with metadata.
+func (t *ResolveTool) SPLCommitStagedMutationBatch(ctx context.Context, request repository.CommitStagedMutationRequest) (repository.CommitStagedMutationResult, error) {
 	if err := ctx.Err(); err != nil {
 		return repository.CommitStagedMutationResult{}, err
 	}
