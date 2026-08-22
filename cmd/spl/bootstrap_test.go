@@ -9,6 +9,143 @@ import (
 	"github.com/autonomous-bits/spool/internal/workspace"
 )
 
+func TestRepositoryStateDirFromArgs(t *testing.T) {
+	lookupEnv := func(values map[string]string) func(string) (string, bool) {
+		return func(key string) (string, bool) {
+			value, ok := values[key]
+			return value, ok
+		}
+	}
+
+	t.Run("state-dir flag wins over everything", func(t *testing.T) {
+		repositoryPath := makeDirectory(t, t.TempDir(), "repo")
+		registeredStateDir := filepath.Join(t.TempDir(), "repos", "ws_00000010")
+		registerWorkspace(t, "storefront", "ws_00000010", registeredStateDir, repositoryPath)
+		explicitStateDir := filepath.Join(t.TempDir(), "explicit")
+
+		resolvedStateDir, err := repositoryStateDirFromArgs(
+			[]string{"resolve", "--state-dir", explicitStateDir},
+			lookupEnv(map[string]string{"SPOOL_DIR": "/should/not/be/used"}),
+			repositoryPath,
+		)
+		if err != nil {
+			t.Fatalf("repositoryStateDirFromArgs: %v", err)
+		}
+		if resolvedStateDir != explicitStateDir {
+			t.Fatalf("state directory = %q, want explicit %q", resolvedStateDir, explicitStateDir)
+		}
+	})
+
+	t.Run("state-dir flag accepts equals syntax", func(t *testing.T) {
+		explicitStateDir := filepath.Join(t.TempDir(), "explicit")
+		resolvedStateDir, err := repositoryStateDirFromArgs(
+			[]string{"--state-dir=" + explicitStateDir},
+			lookupEnv(nil),
+			t.TempDir(),
+		)
+		if err != nil {
+			t.Fatalf("repositoryStateDirFromArgs: %v", err)
+		}
+		if resolvedStateDir != explicitStateDir {
+			t.Fatalf("state directory = %q, want explicit %q", resolvedStateDir, explicitStateDir)
+		}
+	})
+
+	t.Run("state-dir flag rejects empty value", func(t *testing.T) {
+		_, err := repositoryStateDirFromArgs(
+			[]string{"--state-dir", ""},
+			lookupEnv(nil),
+			t.TempDir(),
+		)
+		if err == nil {
+			t.Fatal("repositoryStateDirFromArgs: want error for empty --state-dir value")
+		}
+	})
+
+	t.Run("SPOOL_DIR overrides registry and local fallback", func(t *testing.T) {
+		repositoryPath := makeDirectory(t, t.TempDir(), "repo")
+		registeredStateDir := filepath.Join(t.TempDir(), "repos", "ws_00000011")
+		registerWorkspace(t, "storefront", "ws_00000011", registeredStateDir, repositoryPath)
+		envStateDirValue := filepath.Join(t.TempDir(), "env-dir")
+
+		resolvedStateDir, err := repositoryStateDirFromArgs(
+			nil,
+			lookupEnv(map[string]string{"SPOOL_DIR": envStateDirValue}),
+			repositoryPath,
+		)
+		if err != nil {
+			t.Fatalf("repositoryStateDirFromArgs: %v", err)
+		}
+		if resolvedStateDir != envStateDirValue {
+			t.Fatalf("state directory = %q, want SPOOL_DIR value %q", resolvedStateDir, envStateDirValue)
+		}
+	})
+
+	t.Run("SPOOL_WORKSPACE resolves a registered workspace by name", func(t *testing.T) {
+		root := configureStorageRoot(t)
+		unrelatedPath := makeDirectory(t, t.TempDir(), "other-repo")
+		stateDir := filepath.Join(t.TempDir(), "repos", "ws_00000012")
+		registerWorkspaceIn(t, root, "analytics", "ws_00000012", stateDir, unrelatedPath)
+
+		resolvedStateDir, err := repositoryStateDirFromArgs(
+			nil,
+			lookupEnv(map[string]string{"SPOOL_WORKSPACE": "analytics"}),
+			t.TempDir(),
+		)
+		if err != nil {
+			t.Fatalf("repositoryStateDirFromArgs: %v", err)
+		}
+		if resolvedStateDir != stateDir {
+			t.Fatalf("state directory = %q, want SPOOL_WORKSPACE-resolved %q", resolvedStateDir, stateDir)
+		}
+	})
+
+	t.Run("SPOOL_WORKSPACE errors on unknown workspace name", func(t *testing.T) {
+		configureStorageRoot(t)
+		_, err := repositoryStateDirFromArgs(
+			nil,
+			lookupEnv(map[string]string{"SPOOL_WORKSPACE": "does-not-exist"}),
+			t.TempDir(),
+		)
+		if err == nil {
+			t.Fatal("repositoryStateDirFromArgs: want error for unregistered SPOOL_WORKSPACE")
+		}
+	})
+
+	t.Run("SPOOL_DIR takes priority over SPOOL_WORKSPACE", func(t *testing.T) {
+		root := configureStorageRoot(t)
+		workspaceStateDir := filepath.Join(t.TempDir(), "repos", "ws_00000013")
+		registerWorkspaceIn(t, root, "analytics", "ws_00000013", workspaceStateDir, makeDirectory(t, t.TempDir(), "other-repo"))
+		envStateDirValue := filepath.Join(t.TempDir(), "env-dir")
+
+		resolvedStateDir, err := repositoryStateDirFromArgs(
+			nil,
+			lookupEnv(map[string]string{"SPOOL_DIR": envStateDirValue, "SPOOL_WORKSPACE": "analytics"}),
+			t.TempDir(),
+		)
+		if err != nil {
+			t.Fatalf("repositoryStateDirFromArgs: %v", err)
+		}
+		if resolvedStateDir != envStateDirValue {
+			t.Fatalf("state directory = %q, want SPOOL_DIR value %q", resolvedStateDir, envStateDirValue)
+		}
+	})
+
+	t.Run("no override falls back to registry-based discovery", func(t *testing.T) {
+		repositoryPath := makeDirectory(t, t.TempDir(), "repo")
+		registeredStateDir := filepath.Join(t.TempDir(), "repos", "ws_00000014")
+		registerWorkspace(t, "storefront", "ws_00000014", registeredStateDir, repositoryPath)
+
+		resolvedStateDir, err := repositoryStateDirFromArgs(nil, lookupEnv(nil), repositoryPath)
+		if err != nil {
+			t.Fatalf("repositoryStateDirFromArgs: %v", err)
+		}
+		if resolvedStateDir != registeredStateDir {
+			t.Fatalf("state directory = %q, want registry-resolved %q", resolvedStateDir, registeredStateDir)
+		}
+	})
+}
+
 func TestRepositoryStateDirFrom(t *testing.T) {
 	t.Run("registry match wins over local spl directory", func(t *testing.T) {
 		repositoryPath := makeDirectory(t, t.TempDir(), "repo")
@@ -119,6 +256,14 @@ func configureStorageRoot(t *testing.T) string {
 func registerWorkspace(t *testing.T, slug, id, stateDir string, paths ...string) {
 	t.Helper()
 	root := configureStorageRoot(t)
+	registerWorkspaceIn(t, root, slug, id, stateDir, paths...)
+}
+
+// registerWorkspaceIn registers a workspace in the registry rooted at root,
+// for tests that need to reuse a single storage root across multiple helper
+// calls (configureStorageRoot always provisions a fresh temporary root).
+func registerWorkspaceIn(t *testing.T, root, slug, id, stateDir string, paths ...string) {
+	t.Helper()
 	name, err := workspace.ParseName(slug)
 	if err != nil {
 		t.Fatalf("ParseName(%q): %v", slug, err)
