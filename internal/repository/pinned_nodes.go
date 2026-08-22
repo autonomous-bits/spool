@@ -27,7 +27,10 @@ func (r *Repository) PinnedNodesContext(ctx context.Context, commitID ObjectID) 
 	if !ok {
 		return nil, ErrCommitNotFound
 	}
-	nodes := r.projections[snapshot.NodeRoot]
+	nodes, ok := r.projections[snapshot.NodeRoot]
+	if !ok {
+		return nil, ErrProjectionUnavailable
+	}
 	result := make([]Node, 0, len(nodes))
 	for _, node := range nodes {
 		if err := ctx.Err(); err != nil {

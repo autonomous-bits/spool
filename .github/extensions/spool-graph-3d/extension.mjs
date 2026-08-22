@@ -144,7 +144,7 @@ async function startServer(branch) {
         }
     };
     const server = createServer(async (request, response) => {
-        const url = new URL(request.url, "http://127.0.0.1");
+        const url = new URL(request.url ?? "/", "http://127.0.0.1");
         if (url.pathname === "/graph") {
             if (!entry.graph && !entry.error) await load();
             return entry.error ? sendJson(response, 500, { error: entry.error }) : sendJson(response, 200, entry.graph);
