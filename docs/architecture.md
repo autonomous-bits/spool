@@ -15,17 +15,21 @@ flowchart LR
     Tool --> Repository[repository.Repository]
     Services --> Repository
     Repository --> Memory[In-memory graph and ref indexes]
-    Repository --> Objects[".spl/objects/{loose,pack,info}"]
-    Repository --> Projection[".spl/graph.db (derived SQLite/FTS5)"]
-    Repository --> State[".spl/config.toml, reflog-retention, HEAD, refs, staged, logs"]
-    Repository --> Merge[".spl/merge/<hashed-branch>.json"]
-    Repository --> Lock[".spl/repository.lock"]
+    Repository --> Objects["state-dir/objects/{loose,pack,info}"]
+    Repository --> Projection["state-dir/graph.db (derived SQLite/FTS5)"]
+    Repository --> State["state-dir/config.toml, reflog-retention, HEAD, refs, staged, logs"]
+    Repository --> Merge["state-dir/merge/<hashed-branch>.json"]
+    Repository --> Lock["state-dir/repository.lock"]
 ```
 
-The CLI discovers the nearest parent `.spl` directory. `spl init` creates it;
-subsequent commands open the existing repository, acquire its process lock,
-perform the operation, persist any state change, and release the lock at
-process exit.
+The CLI resolves a state directory before running a command. An explicit `--state-dir` takes
+priority, followed by `SPOOL_DIR`, `SPOOL_WORKSPACE` (a registered workspace name), and a persisted
+active-workspace preference. Otherwise, an attached workspace owning the current path is selected
+by longest matching path prefix. If no workspace applies, the CLI discovers the nearest parent
+`.spl` directory; `spl init` creates local state at the directory containing `go.work`, or at the
+current directory when none exists. Subsequent commands open the resolved repository, acquire its
+process lock, perform the operation, persist any state change, and release the lock at process
+exit.
 
 ## Components
 
@@ -67,7 +71,7 @@ The repository is an immutable graph history:
 
 Every immutable object is encoded with canonical CBOR. Its ID is the BLAKE3
 hash of a type-and-length header plus those bytes, and it is stored as a
-canonical CBOR envelope at `.spl/objects/loose/<first-two-hex>/<rest>`.
+canonical CBOR envelope at `state-dir/objects/loose/<first-two-hex>/<rest>`.
 Equivalent objects therefore have the same ID; a type, hash, envelope, or
 payload mismatch is corruption. Loose objects are the write location and the
 first durable lookup location. If absent there, reads consult the atomically
@@ -200,8 +204,8 @@ restart only when their persisted binding and preview remain valid.
 
 ## Durability and concurrency
 
-`Repository` uses an in-process read/write mutex and a `.spl/repository.lock`
-file to prevent concurrent processes from mutating the same local repository.
+`Repository` uses an in-process read/write mutex and a `state-dir/repository.lock`
+file to prevent concurrent processes from mutating the same repository.
 Each immutable object is made durable before a mutable ref can point to it.
 Projection maintenance runs after the canonical transition. A projection failure
 does not roll back a durable commit or ref; it remains visible as a failed
@@ -263,17 +267,20 @@ or deletes data.
 
 ## Multi-repo workspaces
 
-`internal/workspace` manages a central, detached workspace registry that groups independently
-checked-out repository paths under one named workspace, entirely outside any single repository's
-`.spl` directory. It is stored as `registry.toml` under a platform-appropriate XDG (or Windows
-per-user application-data) storage root, alongside a `current.toml` persisted-preference file, and
-is protected by an `flock`-based lock and the same durable temp-file-plus-rename write path the
-repository package uses for its own control files.
+`internal/workspace` manages a central, detached workspace registry that maps independently
+checked-out paths to one named workspace and its detached repository state. The registry is stored
+as `registry.toml` under a platform-appropriate XDG (or Windows per-user application-data) storage
+root, alongside a `current.toml` persisted-preference file. Workspace state lives at
+`repos/<workspace-id>` under the same root. The registry is protected by an `flock`-based lock and
+the same durable temp-file-plus-rename write path the repository package uses for its own control
+files.
 
-`spl workspace init` creates a workspace; `attach`/`detach` associate or remove a repository path
-(one workspace per path); `list` and `current` inspect the registry; `use`/`unset` persist or clear
-which workspace future sessions treat as active. This registry is independent of, and does not
-replace, the per-repository `.spl` state described above.
+`spl workspace init` registers a workspace but does not initialize its state. After attaching the
+first path with `spl workspace attach --workspace <name> <path>`, run `spl init` once from that
+path to initialize the workspace state. `attach`/`detach` then associate or remove paths (one
+workspace per path); `list` and `current` inspect the registry; `use`/`unset` persist or clear
+which workspace future sessions treat as active. A path attached to a workspace resolves to its
+detached state instead of a local `.spl` directory.
 
 ## Extension points and current scope
 

@@ -6,8 +6,8 @@ description: Use the local Spool graph version-control CLI (`spl`) to initialize
 # Spool
 
 Use `spl` from a Spool workspace. Successful commands emit JSON on stdout; errors are written to
-stderr. Do not edit `.spl/` directly. Use `spl <command> --help` before relying on flags or output
-fields not covered by these references.
+stderr. Do not edit the resolved Spool state directory directly. Use `spl <command> --help` before
+relying on flags or output fields not covered by these references.
 
 ## Command index
 
