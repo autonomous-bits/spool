@@ -77,11 +77,13 @@ func NewWorkspaceCommand(registryRoot func() (string, error)) *cobra.Command {
 		Use:          "workspace",
 		Short:        "Manage detached workspaces",
 		Long:         "Create, attach, detach, inspect, and resolve detached workspaces stored in the central workspace registry.",
-		Example:      "  spl workspace init ecommerce-platform\n  spl workspace attach --workspace ecommerce-platform\n  spl workspace list\n  spl workspace current",
+		Example:      "  spl workspace init ecommerce-platform\n  spl workspace use ecommerce-platform\n  spl workspace unset\n  spl workspace attach --workspace ecommerce-platform\n  spl workspace list\n  spl workspace current",
 		SilenceUsage: true,
 	}
 	command.AddCommand(
 		newWorkspaceInitCommand(registryRoot),
+		newWorkspaceUseCommand(registryRoot),
+		newWorkspaceUnsetCommand(registryRoot),
 		newWorkspaceAttachCommand(registryRoot),
 		newWorkspaceDetachCommand(registryRoot),
 		newWorkspaceListCommand(registryRoot),
@@ -177,6 +179,76 @@ func newWorkspaceAttachCommand(registryRoot func() (string, error)) *cobra.Comma
 	command.Flags().StringVar(&workspaceName, "workspace", "", "existing workspace to attach the path to")
 	_ = command.MarkFlagRequired("workspace")
 	return command
+}
+
+func newWorkspaceUseCommand(registryRoot func() (string, error)) *cobra.Command {
+	return &cobra.Command{
+		Use:          "use <name>",
+		Short:        "Set the active detached workspace",
+		Long:         "Set the persisted active detached workspace preference for future sessions and write the selected workspace as JSON.",
+		Example:      "  spl workspace use ecommerce-platform",
+		Args:         cobra.ExactArgs(1),
+		SilenceUsage: true,
+		RunE: func(command *cobra.Command, args []string) error {
+			name, err := workspacepkg.ParseName(args[0])
+			if err != nil {
+				return err
+			}
+			root, err := registryRoot()
+			if err != nil {
+				return err
+			}
+			if err := workspacepkg.SetCurrentWorkspace(root, name); err != nil {
+				return err
+			}
+			registry, err := workspacepkg.LoadRegistry(root)
+			if err != nil {
+				return err
+			}
+			entry := registry.Workspaces[name]
+			if entry.Paths == nil {
+				entry.Paths = []string{}
+			}
+			return json.NewEncoder(command.OutOrStdout()).Encode(workspaceEntry{Slug: name, Workspace: entry})
+		},
+	}
+}
+
+// workspaceUnsetResult reports whether a persisted active-workspace
+// preference existed before being cleared, so scripts can distinguish
+// clearing an existing preference from a no-op on an already-clear one.
+type workspaceUnsetResult struct {
+	Cleared bool `json:"cleared"`
+}
+
+func newWorkspaceUnsetCommand(registryRoot func() (string, error)) *cobra.Command {
+	return &cobra.Command{
+		Use:          "unset",
+		Short:        "Clear the active detached workspace preference",
+		Long:         "Clear the persisted active detached workspace preference set by \"spl workspace use\" and write the result as JSON. Succeeds even when no preference is set, which also recovers from a stale preference that points at a workspace no longer in the registry.",
+		Example:      "  spl workspace unset",
+		Args:         cobra.NoArgs,
+		SilenceUsage: true,
+		RunE: func(command *cobra.Command, _ []string) error {
+			root, err := registryRoot()
+			if err != nil {
+				return err
+			}
+			// A stale or malformed preference file must still be clearable:
+			// "unset" is the documented recovery path when a broken
+			// preference blocks every command, since bootstrap resolves the
+			// state directory (honoring this preference) before any
+			// subcommand -- including this one -- runs. So a best-effort
+			// read failure is reported as if a preference was present
+			// rather than surfacing a hard error that would defeat the
+			// point of this recovery command.
+			_, hadPreference, readErr := workspacepkg.CurrentWorkspaceName(root)
+			if err := workspacepkg.ClearCurrentWorkspace(root); err != nil {
+				return err
+			}
+			return json.NewEncoder(command.OutOrStdout()).Encode(workspaceUnsetResult{Cleared: hadPreference || readErr != nil})
+		},
+	}
 }
 
 func newWorkspaceDetachCommand(registryRoot func() (string, error)) *cobra.Command {
