@@ -261,6 +261,20 @@ the report invalid. `fsck` returns a non-zero status for corruption while still
 writing the report, so automation can retain the diagnostics; it never repairs
 or deletes data.
 
+## Multi-repo workspaces
+
+`internal/workspace` manages a central, detached workspace registry that groups independently
+checked-out repository paths under one named workspace, entirely outside any single repository's
+`.spl` directory. It is stored as `registry.toml` under a platform-appropriate XDG (or Windows
+per-user application-data) storage root, alongside a `current.toml` persisted-preference file, and
+is protected by an `flock`-based lock and the same durable temp-file-plus-rename write path the
+repository package uses for its own control files.
+
+`spl workspace init` creates a workspace; `attach`/`detach` associate or remove a repository path
+(one workspace per path); `list` and `current` inspect the registry; `use`/`unset` persist or clear
+which workspace future sessions treat as active. This registry is independent of, and does not
+replace, the per-repository `.spl` state described above.
+
 ## Extension points and current scope
 
 The repository package is the storage authority. New lifecycle behavior belongs

@@ -2,7 +2,29 @@ name: CI
 
 on:
   push:
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - ".agents/**"
+      - ".vscode/**"
+      - ".gitattributes"
+      - ".gitignore"
+      - "LICENSE"
+      - "security.txt"
+      - ".github/CODEOWNERS"
+      - ".github/dependabot.yml"
   pull_request:
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - ".agents/**"
+      - ".vscode/**"
+      - ".gitattributes"
+      - ".gitignore"
+      - "LICENSE"
+      - "security.txt"
+      - ".github/CODEOWNERS"
+      - ".github/dependabot.yml"
 
 permissions:
   contents: read

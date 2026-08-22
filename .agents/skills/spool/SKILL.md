@@ -20,4 +20,5 @@ fields not covered by these references.
 | `resolve`, `search`, `filter`, `search-expand`, `context` | [Reading graphs](references/reading-graphs.md) |
 | `merge`, `merge preview`, `merge apply`, `merge conflicts`, `merge resolve`, `merge finalize`, `merge abort` | [Merges](references/merges.md) |
 | `fsck`, `gc` | [Maintenance](references/maintenance.md) |
+| `workspace`, `workspace init`, `workspace attach`, `workspace detach`, `workspace list`, `workspace current`, `workspace use`, `workspace unset` | [Multi-repo workspaces](references/workspaces.md) |
 | `completion`, `help` | [CLI help](references/cli-help.md) |

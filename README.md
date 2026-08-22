@@ -135,6 +135,13 @@ branch-head projection; selecting a historical commit is rejected. Use `--max-ro
 `--max-response-bytes`, `--timeout`, `--max-visited`, and `--max-depth` to narrow the configured
 query limits.
 
+Export a branch's complete immutable graph snapshot as JSON for visualization or offline
+inspection:
+
+```sh
+spl graph --branch main
+```
+
 Run `spl <command> --help` for all commands, flags, response-budget controls, and examples.
 
 Preview a merge before moving a branch, then apply the exact clean preview:
@@ -163,6 +170,33 @@ Each selection is `{"conflictId":"...","choice":"source"}` or
 mutation-array format as `spl add` and can repair a schema-derived semantic conflict. Resolution
 and finalization reject stale previews, require transaction ownership, and keep the target lease
 until finalization or abort.
+
+## Multi-repo workspaces
+
+A detached workspace groups several independently checked-out repository paths under one name,
+recorded in a central registry outside any single repository. Registry data lives under the
+platform-appropriate XDG data location (or `%LOCALAPPDATA%` on Windows), not inside `.spl`.
+
+```sh
+spl workspace init ecommerce-platform
+spl workspace attach --workspace ecommerce-platform ~/repos/order-service
+spl workspace attach --workspace ecommerce-platform ~/repos/inventory-service
+spl workspace list
+spl workspace current
+spl workspace detach ~/repos/inventory-service
+```
+
+A repository path can be attached to only one workspace at a time. `spl workspace current`
+resolves the registered workspace that owns the current working directory by longest matching
+attached path. Persist or clear a preferred active workspace for future sessions with:
+
+```sh
+spl workspace use ecommerce-platform
+spl workspace unset
+```
+
+`unset` always succeeds, including when no preference is set, so it also recovers from a stale
+preference pointing at a workspace no longer in the registry.
 
 ## Learn more
 
