@@ -98,18 +98,20 @@ func stateDirOverride(args []string, lookupEnv func(string) (string, bool)) (str
 		}
 		return stateDir, true, nil
 	}
-	root, err := workspace.StorageRoot()
-	if err == nil {
-		name, ok, err := workspace.CurrentWorkspaceName(root)
-		if err != nil {
-			return "", false, err
-		}
-		if ok {
-			stateDir, err := registeredWorkspaceStateDir(root, name, "current workspace preference")
-			if err != nil {
-				return "", false, err
+	// A broken persisted preference (malformed current.toml, or a slug that
+	// no longer exists in the registry) must not become a hard error here:
+	// repositoryStateDir runs unconditionally in main() before cobra parses
+	// which subcommand was requested, so an error at this point would block
+	// every spl invocation -- including "spl workspace use"/"spl workspace
+	// unset", the only commands that can fix a broken preference. Treat any
+	// resolution failure the same as no preference being set and fall
+	// through to path-prefix discovery, mirroring how workspace.StorageRoot
+	// errors are already tolerated below and in repositoryStateDirFrom.
+	if root, err := workspace.StorageRoot(); err == nil {
+		if name, ok, err := workspace.CurrentWorkspaceName(root); err == nil && ok {
+			if stateDir, err := registeredWorkspaceStateDir(root, name, "current workspace preference"); err == nil {
+				return stateDir, true, nil
 			}
-			return stateDir, true, nil
 		}
 	}
 	return "", false, nil

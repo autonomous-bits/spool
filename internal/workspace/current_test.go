@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
+	"github.com/pelletier/go-toml/v2"
 )
 
 func TestSetCurrentWorkspacePersistsAndCanBeReadBack(t *testing.T) {
@@ -23,8 +24,19 @@ func TestSetCurrentWorkspacePersistsAndCanBeReadBack(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read current workspace preference: %v", err)
 	}
-	if !strings.Contains(string(contents), "version = 1") || !strings.Contains(string(contents), "name = 'storefront'") {
-		t.Fatalf("current workspace preference is not persisted as expected TOML:\n%s", contents)
+	// Decode rather than string-match the raw file: go-toml/v2 currently
+	// emits single-quoted literal strings for simple values (e.g.
+	// name = 'storefront'), but asserting on that exact quoting style would
+	// make this test brittle to unrelated encoder formatting changes.
+	var persisted currentWorkspacePreference
+	if err := toml.Unmarshal(contents, &persisted); err != nil {
+		t.Fatalf("decode persisted current workspace preference:\n%s\nerror: %v", contents, err)
+	}
+	if persisted.Version != currentWorkspaceVersion {
+		t.Fatalf("persisted version = %d, want %d:\n%s", persisted.Version, currentWorkspaceVersion, contents)
+	}
+	if persisted.Name != "storefront" {
+		t.Fatalf("persisted name = %q, want %q:\n%s", persisted.Name, "storefront", contents)
 	}
 
 	name, ok, err := CurrentWorkspaceName(root)

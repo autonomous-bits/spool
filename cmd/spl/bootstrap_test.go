@@ -3,7 +3,6 @@ package main
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -240,19 +239,25 @@ func TestRepositoryStateDirFromArgs(t *testing.T) {
 		}
 	})
 
-	t.Run("stale persisted current workspace preference errors clearly", func(t *testing.T) {
+	t.Run("stale persisted current workspace preference falls through to path-prefix discovery", func(t *testing.T) {
 		root := configureStorageRoot(t)
 		stateDir := filepath.Join(t.TempDir(), "repos", "ws_00000021")
 		registerWorkspaceIn(t, root, "analytics", "ws_00000021", stateDir, makeDirectory(t, t.TempDir(), "other-repo"))
 		setCurrentWorkspace(t, root, "analytics")
 		removeWorkspace(t, root, "analytics")
 
-		_, err := repositoryStateDirFromArgs(nil, lookupEnv(nil), t.TempDir())
-		if err == nil {
-			t.Fatal("repositoryStateDirFromArgs: want error for stale persisted current workspace preference")
+		// A stale preference must not hard-error: repositoryStateDir runs
+		// unconditionally in main() before any subcommand is dispatched, so
+		// erroring here would block even "spl workspace use"/"unset", the
+		// only commands that could otherwise fix a broken preference.
+		workingDirectory := makeDirectory(t, t.TempDir(), "unattached-repo")
+		resolvedStateDir, err := repositoryStateDirFromArgs(nil, lookupEnv(nil), workingDirectory)
+		if err != nil {
+			t.Fatalf("repositoryStateDirFromArgs: %v", err)
 		}
-		if !strings.Contains(err.Error(), "current workspace preference") || !strings.Contains(err.Error(), "analytics") || !strings.Contains(err.Error(), "not registered") {
-			t.Fatalf("repositoryStateDirFromArgs error = %v, want clear stale preference error", err)
+		wantStateDir := filepath.Join(workingDirectory, ".spl")
+		if resolvedStateDir != wantStateDir {
+			t.Fatalf("state directory = %q, want local fallback %q", resolvedStateDir, wantStateDir)
 		}
 	})
 }

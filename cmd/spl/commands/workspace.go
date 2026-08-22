@@ -205,7 +205,16 @@ func newWorkspaceUseCommand(registryRoot func() (string, error)) *cobra.Command 
 			if err != nil {
 				return err
 			}
-			entry := registry.Workspaces[name]
+			// SetCurrentWorkspace already confirmed name exists, but the
+			// registry is reloaded here under a separate lock acquisition,
+			// so a concurrent mutation (e.g. another process detaching or
+			// otherwise rewriting the registry) could remove it in between.
+			// Report that explicitly rather than silently encoding a
+			// zero-value workspace.
+			entry, exists := registry.Workspaces[name]
+			if !exists {
+				return fmt.Errorf("%w: workspace %q is not registered", workspacepkg.ErrWorkspaceNotRegistered, name)
+			}
 			if entry.Paths == nil {
 				entry.Paths = []string{}
 			}
