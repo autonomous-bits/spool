@@ -132,6 +132,29 @@ func TestRetrievalCLIAndToolReturnEquivalentJSON(t *testing.T) {
 	}
 }
 
+func TestGraphCLIAndToolReturnEquivalentJSON(t *testing.T) {
+	repo := retrievalCommandRepository(t)
+	tool := resolve.NewResolveTool(repo)
+	var output bytes.Buffer
+	command := NewGraphCommand(func() (*resolve.ResolveTool, error) { return tool, nil })
+	command.SetOut(&output)
+	command.SetArgs([]string{"--branch", "main"})
+	if err := command.Execute(); err != nil {
+		t.Fatalf("execute graph: %v", err)
+	}
+	var actual resolve.GraphResult
+	if err := json.Unmarshal(output.Bytes(), &actual); err != nil {
+		t.Fatalf("decode graph: %v", err)
+	}
+	want, err := tool.EDGGraph(context.Background(), resolve.SnapshotSelector{Branch: "main"})
+	if err != nil {
+		t.Fatalf("EDGGraph: %v", err)
+	}
+	if !reflect.DeepEqual(actual, want) {
+		t.Fatalf("CLI graph result %#v, tool result %#v", actual, want)
+	}
+}
+
 func TestRetrievalCLIEnforcesBranchAndProjectionSelectorConstraints(t *testing.T) {
 	repo := retrievalCommandRepository(t)
 	tool := resolve.NewResolveTool(repo)

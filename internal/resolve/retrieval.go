@@ -103,6 +103,34 @@ type SearchExpandResult struct {
 // ContextResult is the public context-assembly result.
 type ContextResult = SearchExpandResult
 
+// GraphResult contains every node and edge in one immutable branch snapshot.
+type GraphResult struct {
+	Snapshot SnapshotMetadata  `json:"snapshot"`
+	Nodes    []repository.Node `json:"nodes"`
+	Edges    []repository.Edge `json:"edges"`
+}
+
+// EDGGraph returns the complete graph for a branch snapshot.
+func (t *ResolveTool) EDGGraph(ctx context.Context, selector SnapshotSelector) (GraphResult, error) {
+	commit, err := t.resolver.resolveSnapshotCommit(ctx, selector)
+	if err != nil {
+		return GraphResult{}, err
+	}
+	snapshot, err := t.resolver.snapshotMetadataForCommitContext(ctx, selector.Branch, commit)
+	if err != nil {
+		return GraphResult{}, err
+	}
+	nodes, err := t.repository.PinnedNodesContext(ctx, commit)
+	if err != nil {
+		return GraphResult{}, err
+	}
+	edges, err := t.repository.PinnedEdgesContext(ctx, commit)
+	if err != nil {
+		return GraphResult{}, err
+	}
+	return GraphResult{Snapshot: snapshot, Nodes: nodes, Edges: edges}, nil
+}
+
 // EDGFilter returns a bounded page of nodes selected only through the
 // branch-head projection's typed filter API.
 func (t *ResolveTool) EDGFilter(ctx context.Context, request FilterRequest) (FilterResult, error) {
