@@ -101,10 +101,15 @@ func stateDirOverride(args []string, lookupEnv func(string) (string, bool)) (str
 }
 
 // parseFlagValue scans args for a "--name value" or "--name=value" occurrence
-// of the named flag and reports its value.
+// of the named flag and reports its value. It stops scanning at a bare "--"
+// argument-terminator, matching cobra's own convention that everything after
+// "--" is positional and must not be reinterpreted as a flag.
 func parseFlagValue(args []string, name string) (string, bool) {
 	prefix := name + "="
 	for index, arg := range args {
+		if arg == "--" {
+			break
+		}
 		if arg == name {
 			if index+1 < len(args) {
 				return args[index+1], true

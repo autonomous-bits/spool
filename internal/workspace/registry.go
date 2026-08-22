@@ -207,7 +207,7 @@ func normalizeAndValidateRegistry(registry *Registry) error {
 		paths := make([]string, 0, len(workspace.Paths))
 		seen := make(map[string]struct{}, len(workspace.Paths))
 		for _, path := range workspace.Paths {
-			canonicalPath, err := CanonicalPath(path)
+			canonicalPath, err := canonicalizeStoredPath(path)
 			if err != nil {
 				return err
 			}
@@ -223,6 +223,29 @@ func normalizeAndValidateRegistry(registry *Registry) error {
 	return validateRegistry(*registry)
 }
 
+// canonicalizeStoredPath resolves path the same way CanonicalPath does, but
+// tolerates a path whose target no longer exists on disk (e.g. a previously
+// attached repository that was later deleted or moved outside of Spool): in
+// that case it falls back to the absolute, cleaned form of path without
+// requiring filesystem access. Without this fallback, one workspace's stale
+// attachment would fail EvalSymlinks and break every future registry
+// mutation (attach/detach/init for any workspace), not just operations on
+// the affected workspace.
+func canonicalizeStoredPath(path string) (string, error) {
+	canonicalPath, err := CanonicalPath(path)
+	if err == nil {
+		return canonicalPath, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	absolutePath, absErr := filepath.Abs(path)
+	if absErr != nil {
+		return "", fmt.Errorf("make repository path absolute: %w", absErr)
+	}
+	return filepath.Clean(absolutePath), nil
+}
+
 func validateRegistry(registry Registry) error {
 	if registry.Version != CurrentRegistryVersion {
 		return fmt.Errorf("%w: version %d is unsupported", ErrInvalidRegistry, registry.Version)
@@ -236,14 +259,16 @@ func validateRegistry(registry Registry) error {
 			return fmt.Errorf("%w: workspace %q: %w", ErrInvalidRegistry, name, err)
 		}
 		for _, path := range workspace.Paths {
+			// Only check that stored paths are well-formed (absolute and
+			// already clean). Do not re-resolve symlinks here: unlike
+			// attach-time canonicalization in normalizeAndValidateRegistry,
+			// this runs on every load (including read-only LoadRegistry)
+			// and must not depend on every attached path across every
+			// workspace still existing on disk.
 			if !filepath.IsAbs(path) {
 				return fmt.Errorf("%w: attached path %q for workspace %q must be absolute", ErrInvalidRegistry, path, name)
 			}
-			canonicalPath, err := CanonicalPath(path)
-			if err != nil {
-				return fmt.Errorf("canonicalize attached path for workspace %q: %w", name, err)
-			}
-			if path != canonicalPath {
+			if filepath.Clean(path) != path {
 				return fmt.Errorf("%w: attached path %q for workspace %q is not canonical", ErrInvalidRegistry, path, name)
 			}
 			if previousName, exists := paths[path]; exists && previousName != name {

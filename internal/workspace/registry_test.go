@@ -128,6 +128,69 @@ func TestAttachPathRejectsWorkspaceCollision(t *testing.T) {
 	}
 }
 
+func TestRegistrySurvivesDeletedAttachedPath(t *testing.T) {
+	root := t.TempDir()
+	stalePath := filepath.Join(root, "repositories", "deleted-repo")
+	if err := os.MkdirAll(stalePath, 0o755); err != nil {
+		t.Fatalf("create stale repository path: %v", err)
+	}
+	if err := AttachWorkspace(root, "alpha", "ws_00000001", stalePath); err != nil {
+		t.Fatalf("attach alpha: %v", err)
+	}
+	// Simulate the attached repository being deleted or moved outside of
+	// Spool's knowledge, without going through `spl workspace detach`.
+	if err := os.RemoveAll(stalePath); err != nil {
+		t.Fatalf("remove stale repository path: %v", err)
+	}
+
+	// A read-only load must still succeed: it must not require every
+	// attached path, across every workspace, to still exist on disk.
+	if _, err := LoadRegistry(root); err != nil {
+		t.Fatalf("LoadRegistry after attached path was deleted: %v", err)
+	}
+
+	// An unrelated mutation (creating a second, unrelated workspace) must
+	// also succeed, rather than being blocked by the first workspace's
+	// stale attachment.
+	otherPath := filepath.Join(root, "repositories", "other-repo")
+	if err := os.MkdirAll(otherPath, 0o755); err != nil {
+		t.Fatalf("create other repository path: %v", err)
+	}
+	if err := AttachWorkspace(root, "beta", "ws_00000002", otherPath); err != nil {
+		t.Fatalf("attach beta after alpha's path was deleted: %v", err)
+	}
+
+	registry, err := LoadRegistry(root)
+	if err != nil {
+		t.Fatalf("LoadRegistry: %v", err)
+	}
+	if len(registry.Workspaces["alpha"].Paths) != 1 || registry.Workspaces["alpha"].Paths[0] == "" {
+		t.Fatalf("alpha paths = %#v, want the stale path preserved", registry.Workspaces["alpha"].Paths)
+	}
+	canonicalOtherPath, err := CanonicalPath(otherPath)
+	if err != nil {
+		t.Fatalf("CanonicalPath(otherPath): %v", err)
+	}
+	if len(registry.Workspaces["beta"].Paths) != 1 || registry.Workspaces["beta"].Paths[0] != canonicalOtherPath {
+		t.Fatalf("beta paths = %#v, want [%q]", registry.Workspaces["beta"].Paths, canonicalOtherPath)
+	}
+}
+
+// AttachWorkspace is a small test helper that creates workspace name/id (if
+// absent) and attaches path to it in one step.
+func AttachWorkspace(root string, slug, id, path string) error {
+	name := Name(slug)
+	if err := UpdateRegistry(root, func(registry *Registry) error {
+		if _, exists := registry.Workspaces[name]; !exists {
+			registry.Workspaces[name] = testWorkspace(root, id, nil)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	return AttachPath(root, name, path)
+}
+
 func TestLoadRegistryRejectsMalformedTOML(t *testing.T) {
 	root := t.TempDir()
 	registryPath, err := RegistryPath(root)

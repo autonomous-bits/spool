@@ -62,6 +62,24 @@ func TestRepositoryStateDirFromArgs(t *testing.T) {
 		}
 	})
 
+	t.Run("state-dir after -- argument terminator is treated as positional, not a flag", func(t *testing.T) {
+		repositoryPath := makeDirectory(t, t.TempDir(), "repo")
+		registeredStateDir := filepath.Join(t.TempDir(), "repos", "ws_00000015")
+		registerWorkspace(t, "storefront", "ws_00000015", registeredStateDir, repositoryPath)
+
+		resolvedStateDir, err := repositoryStateDirFromArgs(
+			[]string{"commit", "-m", "--", "--state-dir", "message that looks like a flag"},
+			lookupEnv(nil),
+			repositoryPath,
+		)
+		if err != nil {
+			t.Fatalf("repositoryStateDirFromArgs: %v", err)
+		}
+		if resolvedStateDir != registeredStateDir {
+			t.Fatalf("state directory = %q, want registry-resolved %q (a --state-dir token after -- must not be treated as the flag)", resolvedStateDir, registeredStateDir)
+		}
+	})
+
 	t.Run("SPOOL_DIR overrides registry and local fallback", func(t *testing.T) {
 		repositoryPath := makeDirectory(t, t.TempDir(), "repo")
 		registeredStateDir := filepath.Join(t.TempDir(), "repos", "ws_00000011")
