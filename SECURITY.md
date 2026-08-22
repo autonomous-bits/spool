@@ -14,8 +14,6 @@ currently being supported with security updates.
 
 ## Reporting a Vulnerability
 
-Use this section to tell people how to report a vulnerability.
+Please report security vulnerabilities through [GitHub private vulnerability reporting](https://github.com/autonomous-bits/spool/security/advisories/new) or by emailing the maintainers via your GitHub inbox.
 
-Tell them where to go, how often they can expect to get an update on a
-reported vulnerability, what to expect if the vulnerability is accepted or
-declined, etc.
+You can expect an acknowledgement within 48 hours. We aim to provide a fix or mitigation within 90 days of a confirmed vulnerability. If the vulnerability is accepted, we will coordinate a disclosure date with you. If it is declined, we will explain our reasoning.
