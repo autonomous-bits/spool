@@ -88,7 +88,7 @@ func UpdateRegistry(root string, mutate func(*Registry) error) error {
 		if err != nil {
 			return fmt.Errorf("encode workspace registry: %w", err)
 		}
-		if err := writeDurableRegistry(path, data); err != nil {
+		if err := writeDurableFile(path, data, ".registry-*", "workspace registry"); err != nil {
 			return err
 		}
 		return nil
@@ -326,15 +326,15 @@ func validateRegistry(registry Registry) error {
 	return nil
 }
 
-func writeDurableRegistry(path string, data []byte) (err error) {
-	temp, err := os.CreateTemp(filepath.Dir(path), ".registry-*")
+func writeDurableFile(path string, data []byte, tempPattern, label string) (err error) {
+	temp, err := os.CreateTemp(filepath.Dir(path), tempPattern)
 	if err != nil {
-		return fmt.Errorf("create workspace registry temporary file: %w", err)
+		return fmt.Errorf("create %s temporary file: %w", label, err)
 	}
 	tempPath := temp.Name()
 	defer func() {
 		if removeErr := os.Remove(tempPath); removeErr != nil && !os.IsNotExist(removeErr) {
-			removeErr = fmt.Errorf("remove workspace registry temporary file: %w", removeErr)
+			removeErr = fmt.Errorf("remove %s temporary file: %w", label, removeErr)
 			if err == nil {
 				err = removeErr
 			} else {
@@ -343,23 +343,23 @@ func writeDurableRegistry(path string, data []byte) (err error) {
 		}
 	}()
 	if _, err := temp.Write(data); err != nil {
-		return closeRegistryTempAfterFailure(temp, fmt.Errorf("write workspace registry: %w", err))
+		return closeTempFileAfterFailure(temp, fmt.Errorf("write %s: %w", label, err), label)
 	}
 	if err := temp.Sync(); err != nil {
-		return closeRegistryTempAfterFailure(temp, fmt.Errorf("sync workspace registry: %w", err))
+		return closeTempFileAfterFailure(temp, fmt.Errorf("sync %s: %w", label, err), label)
 	}
 	if err := temp.Close(); err != nil {
-		return fmt.Errorf("close workspace registry: %w", err)
+		return fmt.Errorf("close %s: %w", label, err)
 	}
-	if err := replaceDurableRegistryFile(tempPath, path); err != nil {
-		return fmt.Errorf("replace workspace registry: %w", err)
+	if err := replaceDurableFile(tempPath, path, label); err != nil {
+		return fmt.Errorf("replace %s: %w", label, err)
 	}
 	return nil
 }
 
-func closeRegistryTempAfterFailure(temp *os.File, operationErr error) error {
+func closeTempFileAfterFailure(temp *os.File, operationErr error, label string) error {
 	if err := temp.Close(); err != nil {
-		return errors.Join(operationErr, fmt.Errorf("close workspace registry temporary file: %w", err))
+		return errors.Join(operationErr, fmt.Errorf("close %s temporary file: %w", label, err))
 	}
 	return operationErr
 }

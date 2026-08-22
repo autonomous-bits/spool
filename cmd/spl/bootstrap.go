@@ -77,9 +77,10 @@ func repositoryStateDirFromArgs(args []string, lookupEnv func(string) (string, b
 }
 
 // stateDirOverride resolves an explicit state-directory override from the
-// --state-dir flag or the SPOOL_DIR/SPOOL_WORKSPACE environment variables, in
-// that priority order. It reports ok=false when no override applies, so
-// callers fall back to registry-based path-prefix discovery.
+// --state-dir flag, the SPOOL_DIR/SPOOL_WORKSPACE environment variables, or
+// the persisted current-workspace preference, in that priority order. It
+// reports ok=false when no override applies, so callers fall back to
+// registry-based path-prefix discovery.
 func stateDirOverride(args []string, lookupEnv func(string) (string, bool)) (string, bool, error) {
 	if value, found := parseFlagValue(args, stateDirFlagName); found {
 		if value == "" {
@@ -96,6 +97,22 @@ func stateDirOverride(args []string, lookupEnv func(string) (string, bool)) (str
 			return "", false, err
 		}
 		return stateDir, true, nil
+	}
+	// A broken persisted preference (malformed current.toml, or a slug that
+	// no longer exists in the registry) must not become a hard error here:
+	// repositoryStateDir runs unconditionally in main() before cobra parses
+	// which subcommand was requested, so an error at this point would block
+	// every spl invocation -- including "spl workspace use"/"spl workspace
+	// unset", the only commands that can fix a broken preference. Treat any
+	// resolution failure the same as no preference being set and fall
+	// through to path-prefix discovery, mirroring how workspace.StorageRoot
+	// errors are already tolerated below and in repositoryStateDirFrom.
+	if root, err := workspace.StorageRoot(); err == nil {
+		if name, ok, err := workspace.CurrentWorkspaceName(root); err == nil && ok {
+			if stateDir, err := registeredWorkspaceStateDir(root, name, "current workspace preference"); err == nil {
+				return stateDir, true, nil
+			}
+		}
 	}
 	return "", false, nil
 }
@@ -132,13 +149,17 @@ func workspaceStateDirByName(rawName string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", envWorkspaceName, err)
 	}
+	return registeredWorkspaceStateDir(root, name, envWorkspaceName)
+}
+
+func registeredWorkspaceStateDir(root string, name workspace.Name, source string) (string, error) {
 	registry, err := workspace.LoadRegistry(root)
 	if err != nil {
 		return "", err
 	}
 	entry, exists := registry.Workspaces[name]
 	if !exists {
-		return "", fmt.Errorf("%s: workspace %q is not registered", envWorkspaceName, name)
+		return "", fmt.Errorf("%s: workspace %q is not registered", source, name)
 	}
 	return entry.StateDir, nil
 }

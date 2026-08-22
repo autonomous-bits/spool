@@ -149,6 +149,82 @@ func TestRepositoryStateDirFromArgs(t *testing.T) {
 		}
 	})
 
+	t.Run("persisted current workspace resolves when no flag or env override is present", func(t *testing.T) {
+		root := configureStorageRoot(t)
+		stateDir := filepath.Join(t.TempDir(), "repos", "ws_00000016")
+		registerWorkspaceIn(t, root, "analytics", "ws_00000016", stateDir, makeDirectory(t, t.TempDir(), "other-repo"))
+		setCurrentWorkspace(t, root, "analytics")
+
+		resolvedStateDir, err := repositoryStateDirFromArgs(nil, lookupEnv(nil), t.TempDir())
+		if err != nil {
+			t.Fatalf("repositoryStateDirFromArgs: %v", err)
+		}
+		if resolvedStateDir != stateDir {
+			t.Fatalf("state directory = %q, want persisted current workspace state directory %q", resolvedStateDir, stateDir)
+		}
+	})
+
+	t.Run("state-dir flag still wins over persisted current workspace preference", func(t *testing.T) {
+		root := configureStorageRoot(t)
+		preferredStateDir := filepath.Join(t.TempDir(), "repos", "ws_00000017")
+		registerWorkspaceIn(t, root, "analytics", "ws_00000017", preferredStateDir, makeDirectory(t, t.TempDir(), "other-repo"))
+		setCurrentWorkspace(t, root, "analytics")
+		explicitStateDir := filepath.Join(t.TempDir(), "explicit")
+
+		resolvedStateDir, err := repositoryStateDirFromArgs(
+			[]string{"resolve", "--state-dir", explicitStateDir},
+			lookupEnv(nil),
+			t.TempDir(),
+		)
+		if err != nil {
+			t.Fatalf("repositoryStateDirFromArgs: %v", err)
+		}
+		if resolvedStateDir != explicitStateDir {
+			t.Fatalf("state directory = %q, want explicit %q", resolvedStateDir, explicitStateDir)
+		}
+	})
+
+	t.Run("SPOOL_DIR still wins over persisted current workspace preference", func(t *testing.T) {
+		root := configureStorageRoot(t)
+		preferredStateDir := filepath.Join(t.TempDir(), "repos", "ws_00000018")
+		registerWorkspaceIn(t, root, "analytics", "ws_00000018", preferredStateDir, makeDirectory(t, t.TempDir(), "other-repo"))
+		setCurrentWorkspace(t, root, "analytics")
+		envStateDirValue := filepath.Join(t.TempDir(), "env-dir")
+
+		resolvedStateDir, err := repositoryStateDirFromArgs(
+			nil,
+			lookupEnv(map[string]string{"SPOOL_DIR": envStateDirValue}),
+			t.TempDir(),
+		)
+		if err != nil {
+			t.Fatalf("repositoryStateDirFromArgs: %v", err)
+		}
+		if resolvedStateDir != envStateDirValue {
+			t.Fatalf("state directory = %q, want SPOOL_DIR value %q", resolvedStateDir, envStateDirValue)
+		}
+	})
+
+	t.Run("SPOOL_WORKSPACE still wins over persisted current workspace preference", func(t *testing.T) {
+		root := configureStorageRoot(t)
+		persistedStateDir := filepath.Join(t.TempDir(), "repos", "ws_00000019")
+		envWorkspaceStateDir := filepath.Join(t.TempDir(), "repos", "ws_00000020")
+		registerWorkspaceIn(t, root, "analytics", "ws_00000019", persistedStateDir, makeDirectory(t, t.TempDir(), "analytics-repo"))
+		registerWorkspaceIn(t, root, "billing", "ws_00000020", envWorkspaceStateDir, makeDirectory(t, t.TempDir(), "billing-repo"))
+		setCurrentWorkspace(t, root, "analytics")
+
+		resolvedStateDir, err := repositoryStateDirFromArgs(
+			nil,
+			lookupEnv(map[string]string{"SPOOL_WORKSPACE": "billing"}),
+			t.TempDir(),
+		)
+		if err != nil {
+			t.Fatalf("repositoryStateDirFromArgs: %v", err)
+		}
+		if resolvedStateDir != envWorkspaceStateDir {
+			t.Fatalf("state directory = %q, want SPOOL_WORKSPACE-resolved %q", resolvedStateDir, envWorkspaceStateDir)
+		}
+	})
+
 	t.Run("no override falls back to registry-based discovery", func(t *testing.T) {
 		repositoryPath := makeDirectory(t, t.TempDir(), "repo")
 		registeredStateDir := filepath.Join(t.TempDir(), "repos", "ws_00000014")
@@ -160,6 +236,28 @@ func TestRepositoryStateDirFromArgs(t *testing.T) {
 		}
 		if resolvedStateDir != registeredStateDir {
 			t.Fatalf("state directory = %q, want registry-resolved %q", resolvedStateDir, registeredStateDir)
+		}
+	})
+
+	t.Run("stale persisted current workspace preference falls through to path-prefix discovery", func(t *testing.T) {
+		root := configureStorageRoot(t)
+		stateDir := filepath.Join(t.TempDir(), "repos", "ws_00000021")
+		registerWorkspaceIn(t, root, "analytics", "ws_00000021", stateDir, makeDirectory(t, t.TempDir(), "other-repo"))
+		setCurrentWorkspace(t, root, "analytics")
+		removeWorkspace(t, root, "analytics")
+
+		// A stale preference must not hard-error: repositoryStateDir runs
+		// unconditionally in main() before any subcommand is dispatched, so
+		// erroring here would block even "spl workspace use"/"unset", the
+		// only commands that could otherwise fix a broken preference.
+		workingDirectory := makeDirectory(t, t.TempDir(), "unattached-repo")
+		resolvedStateDir, err := repositoryStateDirFromArgs(nil, lookupEnv(nil), workingDirectory)
+		if err != nil {
+			t.Fatalf("repositoryStateDirFromArgs: %v", err)
+		}
+		wantStateDir := filepath.Join(workingDirectory, ".spl")
+		if resolvedStateDir != wantStateDir {
+			t.Fatalf("state directory = %q, want local fallback %q", resolvedStateDir, wantStateDir)
 		}
 	})
 }
@@ -307,6 +405,31 @@ func registerWorkspaceIn(t *testing.T, root, slug, id, stateDir string, paths ..
 		return nil
 	}); err != nil {
 		t.Fatalf("UpdateRegistry: %v", err)
+	}
+}
+
+func setCurrentWorkspace(t *testing.T, root, slug string) {
+	t.Helper()
+	name, err := workspace.ParseName(slug)
+	if err != nil {
+		t.Fatalf("ParseName(%q): %v", slug, err)
+	}
+	if err := workspace.SetCurrentWorkspace(root, name); err != nil {
+		t.Fatalf("SetCurrentWorkspace(%q): %v", slug, err)
+	}
+}
+
+func removeWorkspace(t *testing.T, root, slug string) {
+	t.Helper()
+	name, err := workspace.ParseName(slug)
+	if err != nil {
+		t.Fatalf("ParseName(%q): %v", slug, err)
+	}
+	if err := workspace.UpdateRegistry(root, func(registry *workspace.Registry) error {
+		delete(registry.Workspaces, name)
+		return nil
+	}); err != nil {
+		t.Fatalf("UpdateRegistry(remove %q): %v", slug, err)
 	}
 }
 

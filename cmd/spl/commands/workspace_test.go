@@ -73,6 +73,186 @@ func TestWorkspaceInitRejectsDuplicateName(t *testing.T) {
 	}
 }
 
+func TestWorkspaceUseSucceedsAndPersistsPreference(t *testing.T) {
+	root := t.TempDir()
+	if err := runWorkspaceCommand(root, []string{"init", "alpha"}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("init workspace: %v", err)
+	}
+
+	var output bytes.Buffer
+	if err := runWorkspaceCommand(root, []string{"use", "alpha"}, &output); err != nil {
+		t.Fatalf("use workspace: %v", err)
+	}
+
+	var result struct {
+		Slug     string   `json:"slug"`
+		Name     string   `json:"name"`
+		StateDir string   `json:"stateDir"`
+		Paths    []string `json:"paths"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+		t.Fatalf("decode use output: %v", err)
+	}
+	if result.Slug != "alpha" {
+		t.Fatalf("use output slug = %q, want alpha", result.Slug)
+	}
+	if result.Name != "alpha" {
+		t.Fatalf("use output name = %q, want alpha", result.Name)
+	}
+	if result.StateDir == "" {
+		t.Fatal("use output stateDir is empty")
+	}
+	if len(result.Paths) != 0 {
+		t.Fatalf("use output paths = %#v, want empty", result.Paths)
+	}
+
+	current, ok, err := workspacepkg.CurrentWorkspaceName(root)
+	if err != nil {
+		t.Fatalf("load current workspace preference: %v", err)
+	}
+	if !ok {
+		t.Fatal("current workspace preference not persisted")
+	}
+	if current != workspacepkg.Name("alpha") {
+		t.Fatalf("current workspace preference = %q, want alpha", current)
+	}
+}
+
+func TestWorkspaceUseRejectsMissingWorkspace(t *testing.T) {
+	root := t.TempDir()
+
+	var output bytes.Buffer
+	err := runWorkspaceCommand(root, []string{"use", "missing"}, &output)
+	if !errors.Is(err, workspacepkg.ErrWorkspaceNotRegistered) {
+		t.Fatalf("use missing workspace error = %v, want ErrWorkspaceNotRegistered", err)
+	}
+	if !strings.Contains(err.Error(), `workspace "missing" is not registered`) {
+		t.Fatalf("use missing workspace error = %q, want not-registered message", err)
+	}
+	if output.Len() != 0 {
+		t.Fatalf("use missing workspace wrote success output: %q", output.String())
+	}
+	current, ok, err := workspacepkg.CurrentWorkspaceName(root)
+	if err != nil {
+		t.Fatalf("load current workspace preference: %v", err)
+	}
+	if ok {
+		t.Fatalf("current workspace preference = %q, want unset", current)
+	}
+}
+
+func TestWorkspaceUseRejectsMissingArgsAndInvalidName(t *testing.T) {
+	root := t.TempDir()
+
+	var output bytes.Buffer
+	err := runWorkspaceCommand(root, []string{"use"}, &output)
+	if err == nil {
+		t.Fatal("use without args error = nil, want error")
+	}
+	if output.Len() != 0 {
+		t.Fatalf("use without args wrote success output: %q", output.String())
+	}
+
+	output.Reset()
+	err = runWorkspaceCommand(root, []string{"use", "Alpha"}, &output)
+	if !errors.Is(err, workspacepkg.ErrInvalidName) {
+		t.Fatalf("use invalid workspace name error = %v, want ErrInvalidName", err)
+	}
+	if output.Len() != 0 {
+		t.Fatalf("use invalid workspace name wrote success output: %q", output.String())
+	}
+}
+
+func TestWorkspaceUnsetClearsPersistedPreference(t *testing.T) {
+	root := t.TempDir()
+	if err := runWorkspaceCommand(root, []string{"init", "alpha"}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("init workspace: %v", err)
+	}
+	if err := runWorkspaceCommand(root, []string{"use", "alpha"}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("use workspace: %v", err)
+	}
+
+	var output bytes.Buffer
+	if err := runWorkspaceCommand(root, []string{"unset"}, &output); err != nil {
+		t.Fatalf("unset workspace: %v", err)
+	}
+
+	var result struct {
+		Cleared bool `json:"cleared"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+		t.Fatalf("decode unset output: %v", err)
+	}
+	if !result.Cleared {
+		t.Fatal("unset output cleared = false, want true")
+	}
+
+	_, ok, err := workspacepkg.CurrentWorkspaceName(root)
+	if err != nil {
+		t.Fatalf("load current workspace preference: %v", err)
+	}
+	if ok {
+		t.Fatal("current workspace preference still set after unset")
+	}
+}
+
+func TestWorkspaceUnsetWithoutPreferenceReportsNotCleared(t *testing.T) {
+	root := t.TempDir()
+
+	var output bytes.Buffer
+	if err := runWorkspaceCommand(root, []string{"unset"}, &output); err != nil {
+		t.Fatalf("unset workspace: %v", err)
+	}
+
+	var result struct {
+		Cleared bool `json:"cleared"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+		t.Fatalf("decode unset output: %v", err)
+	}
+	if result.Cleared {
+		t.Fatal("unset output cleared = true, want false when no preference was set")
+	}
+}
+
+func TestWorkspaceUnsetRecoversFromStalePreference(t *testing.T) {
+	root := t.TempDir()
+	if err := runWorkspaceCommand(root, []string{"init", "alpha"}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("init workspace: %v", err)
+	}
+	if err := runWorkspaceCommand(root, []string{"use", "alpha"}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("use workspace: %v", err)
+	}
+	if err := workspacepkg.UpdateRegistry(root, func(registry *workspacepkg.Registry) error {
+		delete(registry.Workspaces, workspacepkg.Name("alpha"))
+		return nil
+	}); err != nil {
+		t.Fatalf("remove workspace from registry: %v", err)
+	}
+
+	var output bytes.Buffer
+	if err := runWorkspaceCommand(root, []string{"unset"}, &output); err != nil {
+		t.Fatalf("unset stale workspace preference: %v", err)
+	}
+
+	var result struct {
+		Cleared bool `json:"cleared"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+		t.Fatalf("decode unset output: %v", err)
+	}
+	if !result.Cleared {
+		t.Fatal("unset output cleared = false, want true for a stale preference")
+	}
+	_, ok, err := workspacepkg.CurrentWorkspaceName(root)
+	if err != nil {
+		t.Fatalf("load current workspace preference: %v", err)
+	}
+	if ok {
+		t.Fatal("current workspace preference still set after unset")
+	}
+}
+
 func TestWorkspaceAttachSucceeds(t *testing.T) {
 	root := t.TempDir()
 	repositoryPath := filepath.Join(root, "repo")
