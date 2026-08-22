@@ -40,6 +40,10 @@ func newRootCommandWithLifecycle(
 		SilenceUsage: true,
 	}
 	root.SetOut(stdout)
+	// state-dir is consumed manually in main() before the root command is
+	// constructed (it determines which repository to open); it is declared
+	// here only so cobra recognizes the flag instead of rejecting it.
+	root.PersistentFlags().String("state-dir", "", "override the resolved Spool repository state directory")
 	root.AddCommand(commands.NewInitCommand(initialize))
 	root.AddCommand(commands.NewAddCommand(toolProvider))
 	root.AddCommand(commands.NewStatusCommand(toolProvider))
@@ -60,5 +64,6 @@ func newRootCommandWithLifecycle(
 	root.AddCommand(commands.NewMergeCommand(toolProvider))
 	root.AddCommand(commands.NewFsckCommand(fsckProvider))
 	root.AddCommand(commands.NewGCCommand(toolProvider))
+	root.AddCommand(commands.NewWorkspaceCommandDefault())
 	return root
 }
