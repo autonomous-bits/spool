@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	workspacepkg "github.com/autonomous-bits/spool/internal/workspace"
 )
@@ -200,6 +201,46 @@ func TestWorkspaceDetachRejectsMissingPath(t *testing.T) {
 	}
 }
 
+func TestWorkspaceDetachSucceedsAfterAttachedRepositoryIsDeleted(t *testing.T) {
+	root := t.TempDir()
+	repositoryPath := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repositoryPath, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	if err := runWorkspaceCommand(root, []string{"init", "alpha"}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("init workspace: %v", err)
+	}
+	if err := runWorkspaceCommand(root, []string{"attach", "--workspace", "alpha", repositoryPath}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("attach workspace: %v", err)
+	}
+	canonicalPath, err := workspacepkg.CanonicalPath(repositoryPath)
+	if err != nil {
+		t.Fatalf("canonicalize repository path: %v", err)
+	}
+	if err := os.RemoveAll(repositoryPath); err != nil {
+		t.Fatalf("remove attached repository: %v", err)
+	}
+
+	var output bytes.Buffer
+	if err := runWorkspaceCommand(root, []string{"detach", repositoryPath}, &output); err != nil {
+		t.Fatalf("detach path whose repository was deleted: %v", err)
+	}
+	var result workspacePathResult
+	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+		t.Fatalf("decode detach output: %v", err)
+	}
+	if result.Workspace != "alpha" || result.Detached != canonicalPath {
+		t.Fatalf("detach result = %#v, want workspace alpha detached %q", result, canonicalPath)
+	}
+	registry, err := workspacepkg.LoadRegistry(root)
+	if err != nil {
+		t.Fatalf("load registry: %v", err)
+	}
+	if got := registry.Workspaces[workspacepkg.Name("alpha")].Paths; len(got) != 0 {
+		t.Fatalf("attached paths after detach = %#v, want empty", got)
+	}
+}
+
 func TestWorkspaceListHandlesEmptyRegistryAndSortedOutput(t *testing.T) {
 	root := t.TempDir()
 
@@ -261,6 +302,74 @@ func TestWorkspaceListHandlesEmptyRegistryAndSortedOutput(t *testing.T) {
 	}
 	if len(listed[1].Paths) != 1 || listed[1].Paths[0] != zetaCanonical {
 		t.Fatalf("zeta listed paths = %#v, want [%q]", listed[1].Paths, zetaCanonical)
+	}
+}
+
+func TestWorkspaceListAndCurrentExposeRegistrySlugSeparatelyFromDisplayName(t *testing.T) {
+	root := t.TempDir()
+	repositoryPath := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repositoryPath, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	canonicalPath, err := workspacepkg.CanonicalPath(repositoryPath)
+	if err != nil {
+		t.Fatalf("canonicalize repository path: %v", err)
+	}
+	// Registry keys are stable slugs while Workspace.Name is a separate
+	// display name; construct an entry where they diverge, as can already
+	// happen for registries not solely produced by "workspace init".
+	if err := workspacepkg.UpdateRegistry(root, func(registry *workspacepkg.Registry) error {
+		registry.Workspaces[workspacepkg.Name("ecommerce-platform")] = workspacepkg.Workspace{
+			ID:        "ws_00000001",
+			Name:      "E-Commerce Platform",
+			StateDir:  filepath.Join(root, "repos", "ws_00000001"),
+			CreatedAt: time.Now().UTC(),
+			Paths:     []string{canonicalPath},
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("seed registry: %v", err)
+	}
+
+	var listOutput bytes.Buffer
+	if err := runWorkspaceCommand(root, []string{"list"}, &listOutput); err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	var listed []struct {
+		Slug string `json:"slug"`
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(listOutput.Bytes(), &listed); err != nil {
+		t.Fatalf("decode list output: %v", err)
+	}
+	if len(listed) != 1 || listed[0].Slug != "ecommerce-platform" || listed[0].Name != "E-Commerce Platform" {
+		t.Fatalf("listed = %#v, want slug ecommerce-platform with display name E-Commerce Platform", listed)
+	}
+
+	originalWorkingDirectory, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+	if err := os.Chdir(repositoryPath); err != nil {
+		t.Fatalf("change working directory: %v", err)
+	}
+	defer func() {
+		_ = os.Chdir(originalWorkingDirectory)
+	}()
+
+	var currentOutput bytes.Buffer
+	if err := runWorkspaceCommand(root, []string{"current"}, &currentOutput); err != nil {
+		t.Fatalf("current: %v", err)
+	}
+	var current struct {
+		Slug string `json:"slug"`
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(currentOutput.Bytes(), &current); err != nil {
+		t.Fatalf("decode current output: %v", err)
+	}
+	if current.Slug != "ecommerce-platform" || current.Name != "E-Commerce Platform" {
+		t.Fatalf("current = %#v, want slug ecommerce-platform with display name E-Commerce Platform", current)
 	}
 }
 

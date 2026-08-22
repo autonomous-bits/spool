@@ -191,6 +191,39 @@ func AttachWorkspace(root string, slug, id, path string) error {
 	return AttachPath(root, name, path)
 }
 
+func TestUpdateRegistryRejectsDuplicateWorkspaceIdentity(t *testing.T) {
+	root := t.TempDir()
+
+	err := UpdateRegistry(root, func(registry *Registry) error {
+		registry.Workspaces[Name("alpha")] = testWorkspace(root, "ws_00000001", nil)
+		duplicate := testWorkspace(root, "ws_00000001", nil)
+		duplicate.StateDir = filepath.Join(root, "repos", "ws_00000002")
+		registry.Workspaces[Name("beta")] = duplicate
+		return nil
+	})
+	if !errors.Is(err, ErrInvalidRegistry) {
+		t.Fatalf("UpdateRegistry with duplicate identity error = %v, want ErrInvalidRegistry", err)
+	}
+}
+
+func TestUpdateRegistryRejectsDuplicateStateDirectory(t *testing.T) {
+	root := t.TempDir()
+	sharedStateDir := filepath.Join(root, "repos", "ws_00000001")
+
+	err := UpdateRegistry(root, func(registry *Registry) error {
+		first := testWorkspace(root, "ws_00000001", nil)
+		first.StateDir = sharedStateDir
+		registry.Workspaces[Name("alpha")] = first
+		second := testWorkspace(root, "ws_00000002", nil)
+		second.StateDir = sharedStateDir
+		registry.Workspaces[Name("beta")] = second
+		return nil
+	})
+	if !errors.Is(err, ErrInvalidRegistry) {
+		t.Fatalf("UpdateRegistry with duplicate state directory error = %v, want ErrInvalidRegistry", err)
+	}
+}
+
 func TestLoadRegistryRejectsMalformedTOML(t *testing.T) {
 	root := t.TempDir()
 	registryPath, err := RegistryPath(root)

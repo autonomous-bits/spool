@@ -18,6 +18,49 @@ type workspacePathResult struct {
 	Detached  string `json:"detached,omitempty"`
 }
 
+// workspaceEntry mirrors workspacepkg.Workspace but also carries the stable
+// registry slug (the map key), since Workspace.Name is only a display name
+// and can differ from the slug that "workspace attach --workspace" and
+// SPOOL_WORKSPACE actually accept.
+type workspaceEntry struct {
+	Slug workspacepkg.Name `json:"slug"`
+	workspacepkg.Workspace
+}
+
+const maxWorkspaceIdentityAttempts = 8
+
+// uniqueWorkspaceIdentity generates a workspace ID (and its derived state
+// directory) that does not collide with any ID or state directory already
+// present in registry. Workspace IDs are derived from only four random
+// bytes, so a collision across enough workspaces is plausible; without this
+// check two differently named workspaces could end up sharing one
+// repos/<id> state directory and silently share graph state. Called while
+// holding the registry lock (from within an UpdateRegistry mutation) so the
+// collision check is against the authoritative, current registry contents.
+func uniqueWorkspaceIdentity(registry *workspacepkg.Registry, root string) (workspacepkg.ID, string, error) {
+	for attempt := 0; attempt < maxWorkspaceIdentityAttempts; attempt++ {
+		id, err := workspacepkg.NewID()
+		if err != nil {
+			return "", "", err
+		}
+		stateDir, err := workspacepkg.RepositoryPath(root, id)
+		if err != nil {
+			return "", "", err
+		}
+		collision := false
+		for _, other := range registry.Workspaces {
+			if other.ID == id || other.StateDir == stateDir {
+				collision = true
+				break
+			}
+		}
+		if !collision {
+			return id, stateDir, nil
+		}
+	}
+	return "", "", fmt.Errorf("generate workspace identity: could not find a unique ID after %d attempts", maxWorkspaceIdentityAttempts)
+}
+
 // NewWorkspaceCommandDefault creates the workspace command using the default
 // detached-storage root provider.
 func NewWorkspaceCommandDefault() *cobra.Command {
@@ -64,24 +107,21 @@ func newWorkspaceInitCommand(registryRoot func() (string, error)) *cobra.Command
 			if err != nil {
 				return err
 			}
-			request, err := workspacepkg.NewCreateRequest(name)
-			if err != nil {
-				return err
-			}
-			stateDir, err := workspacepkg.RepositoryPath(root, request.ID)
-			if err != nil {
-				return err
-			}
-			created := workspacepkg.Workspace{
-				ID:        request.ID,
-				Name:      string(name),
-				StateDir:  stateDir,
-				CreatedAt: time.Now().UTC(),
-				Paths:     nil,
-			}
+			var created workspacepkg.Workspace
 			if err := workspacepkg.UpdateRegistry(root, func(registry *workspacepkg.Registry) error {
 				if _, exists := registry.Workspaces[name]; exists {
 					return fmt.Errorf("workspace %q already exists", name)
+				}
+				id, stateDir, err := uniqueWorkspaceIdentity(registry, root)
+				if err != nil {
+					return err
+				}
+				created = workspacepkg.Workspace{
+					ID:        id,
+					Name:      string(name),
+					StateDir:  stateDir,
+					CreatedAt: time.Now().UTC(),
+					Paths:     nil,
 				}
 				registry.Workspaces[name] = created
 				return nil
@@ -183,13 +223,13 @@ func newWorkspaceListCommand(registryRoot func() (string, error)) *cobra.Command
 				names = append(names, name)
 			}
 			sort.Slice(names, func(i, j int) bool { return names[i] < names[j] })
-			result := make([]workspacepkg.Workspace, 0, len(names))
+			result := make([]workspaceEntry, 0, len(names))
 			for _, name := range names {
 				entry := registry.Workspaces[name]
 				if entry.Paths == nil {
 					entry.Paths = []string{}
 				}
-				result = append(result, entry)
+				result = append(result, workspaceEntry{Slug: name, Workspace: entry})
 			}
 			return json.NewEncoder(command.OutOrStdout()).Encode(result)
 		},
@@ -223,13 +263,19 @@ func newWorkspaceCurrentCommand(registryRoot func() (string, error)) *cobra.Comm
 			if match.Workspace.Paths == nil {
 				match.Workspace.Paths = []string{}
 			}
-			return json.NewEncoder(command.OutOrStdout()).Encode(match.Workspace)
+			return json.NewEncoder(command.OutOrStdout()).Encode(workspaceEntry{Slug: match.Name, Workspace: match.Workspace})
 		},
 	}
 }
 
 func detachWorkspacePath(root, path string) (workspacePathResult, error) {
-	canonicalPath, err := workspacepkg.CanonicalPath(path)
+	// Use CanonicalStoredPath (not CanonicalPath) so that detaching a path
+	// whose repository was already deleted or moved still works: the
+	// registry tolerates and stores such stale attachments (see
+	// CanonicalStoredPath's documentation), and detach is the only way to
+	// remove one, so it must not fail with ENOENT on the very entry it is
+	// meant to clean up.
+	canonicalPath, err := workspacepkg.CanonicalStoredPath(path)
 	if err != nil {
 		return workspacePathResult{}, err
 	}

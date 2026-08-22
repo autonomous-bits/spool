@@ -6,7 +6,19 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 )
+
+// replaceDurableRegistryFile durably replaces path with the contents of the
+// already-synced temporary file at tempPath. On POSIX systems renaming is
+// atomic, but the rename itself must additionally be fsync'd via the
+// containing directory to survive a crash.
+func replaceDurableRegistryFile(tempPath, path string) error {
+	if err := os.Rename(tempPath, path); err != nil {
+		return err
+	}
+	return syncRegistryDirectory(filepath.Dir(path))
+}
 
 func syncRegistryDirectory(path string) (err error) {
 	directory, err := os.Open(path)

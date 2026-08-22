@@ -207,7 +207,7 @@ func normalizeAndValidateRegistry(registry *Registry) error {
 		paths := make([]string, 0, len(workspace.Paths))
 		seen := make(map[string]struct{}, len(workspace.Paths))
 		for _, path := range workspace.Paths {
-			canonicalPath, err := canonicalizeStoredPath(path)
+			canonicalPath, err := CanonicalStoredPath(path)
 			if err != nil {
 				return err
 			}
@@ -223,15 +223,22 @@ func normalizeAndValidateRegistry(registry *Registry) error {
 	return validateRegistry(*registry)
 }
 
-// canonicalizeStoredPath resolves path the same way CanonicalPath does, but
+// CanonicalStoredPath resolves path the same way CanonicalPath does, but
 // tolerates a path whose target no longer exists on disk (e.g. a previously
-// attached repository that was later deleted or moved outside of Spool): in
-// that case it falls back to the absolute, cleaned form of path without
-// requiring filesystem access. Without this fallback, one workspace's stale
-// attachment would fail EvalSymlinks and break every future registry
-// mutation (attach/detach/init for any workspace), not just operations on
-// the affected workspace.
-func canonicalizeStoredPath(path string) (string, error) {
+// attached repository that was later deleted or moved outside of Spool). In
+// that case it resolves symlinks for the longest existing ancestor directory
+// and re-appends the missing trailing components verbatim, which matches how
+// the path was canonicalized while it still existed (its leaf directory is
+// not itself a symlink) rather than a plain, symlink-unaware Abs/Clean. This
+// matters on platforms such as macOS where a common ancestor (e.g. /var) is
+// itself a symlink: without resolving it, a deleted attachment would
+// canonicalize to a different string than the one originally stored, so
+// callers like `spl workspace detach` would report it as not attached.
+// Callers that only need to match against an already-persisted canonical
+// path (rather than validate a fresh attachment) should prefer this over
+// CanonicalPath, since a stale attachment must remain resolvable so it can
+// still be found, listed, and detached.
+func CanonicalStoredPath(path string) (string, error) {
 	canonicalPath, err := CanonicalPath(path)
 	if err == nil {
 		return canonicalPath, nil
@@ -243,7 +250,32 @@ func canonicalizeStoredPath(path string) (string, error) {
 	if absErr != nil {
 		return "", fmt.Errorf("make repository path absolute: %w", absErr)
 	}
-	return filepath.Clean(absolutePath), nil
+	return canonicalizeExistingAncestor(filepath.Clean(absolutePath)), nil
+}
+
+// canonicalizeExistingAncestor walks up from absolutePath until it finds an
+// ancestor directory that still exists, resolves that ancestor's symlinks,
+// and rejoins the missing trailing path components onto the resolved
+// ancestor. If no ancestor exists (or symlink resolution otherwise fails all
+// the way to the filesystem root), it returns absolutePath unchanged.
+func canonicalizeExistingAncestor(absolutePath string) string {
+	var trailingComponents []string
+	current := absolutePath
+	for {
+		resolved, err := filepath.EvalSymlinks(current)
+		if err == nil {
+			for index := len(trailingComponents) - 1; index >= 0; index-- {
+				resolved = filepath.Join(resolved, trailingComponents[index])
+			}
+			return filepath.Clean(resolved)
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return absolutePath
+		}
+		trailingComponents = append(trailingComponents, filepath.Base(current))
+		current = parent
+	}
 }
 
 func validateRegistry(registry Registry) error {
@@ -251,6 +283,8 @@ func validateRegistry(registry Registry) error {
 		return fmt.Errorf("%w: version %d is unsupported", ErrInvalidRegistry, registry.Version)
 	}
 	paths := make(map[string]Name)
+	ids := make(map[ID]Name, len(registry.Workspaces))
+	stateDirs := make(map[string]Name, len(registry.Workspaces))
 	for name, workspace := range registry.Workspaces {
 		if err := name.Validate(); err != nil {
 			return fmt.Errorf("%w: workspace key %q: %w", ErrInvalidRegistry, name, err)
@@ -258,6 +292,18 @@ func validateRegistry(registry Registry) error {
 		if err := workspace.Validate(); err != nil {
 			return fmt.Errorf("%w: workspace %q: %w", ErrInvalidRegistry, name, err)
 		}
+		// Reject two workspace entries that share an ID or state directory:
+		// since RepositoryPath derives repos/<ID>, a collision (including a
+		// NewID collision at creation time) would otherwise let two names
+		// silently share one repository's graph state.
+		if previousName, exists := ids[workspace.ID]; exists && previousName != name {
+			return fmt.Errorf("%w: identity %q belongs to both %q and %q", ErrInvalidRegistry, workspace.ID, previousName, name)
+		}
+		ids[workspace.ID] = name
+		if previousName, exists := stateDirs[workspace.StateDir]; exists && previousName != name {
+			return fmt.Errorf("%w: state directory %q belongs to both %q and %q", ErrInvalidRegistry, workspace.StateDir, previousName, name)
+		}
+		stateDirs[workspace.StateDir] = name
 		for _, path := range workspace.Paths {
 			// Only check that stored paths are well-formed (absolute and
 			// already clean). Do not re-resolve symlinks here: unlike
@@ -305,11 +351,8 @@ func writeDurableRegistry(path string, data []byte) (err error) {
 	if err := temp.Close(); err != nil {
 		return fmt.Errorf("close workspace registry: %w", err)
 	}
-	if err := os.Rename(tempPath, path); err != nil {
+	if err := replaceDurableRegistryFile(tempPath, path); err != nil {
 		return fmt.Errorf("replace workspace registry: %w", err)
-	}
-	if err := syncRegistryDirectory(filepath.Dir(path)); err != nil {
-		return fmt.Errorf("sync workspace registry directory: %w", err)
 	}
 	return nil
 }
