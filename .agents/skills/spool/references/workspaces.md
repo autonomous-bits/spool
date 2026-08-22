@@ -1,19 +1,21 @@
 # Multi-repo workspaces
 
-A detached workspace groups several independently checked-out repository paths under one name in a
-central registry stored outside any single repository (not inside `.spl`). Use it when a task spans
-more than one repository.
+A detached workspace maps one or more checked-out paths to a single Spool graph state in central,
+detached storage. Create the workspace, attach the first path, then initialize its state once:
 
 ```sh
 spl workspace init ecommerce-platform
 spl workspace attach --workspace ecommerce-platform ~/repos/order-service
+spl init
 spl workspace attach --workspace ecommerce-platform ~/repos/inventory-service
 spl workspace list
 spl workspace current
 spl workspace detach ~/repos/inventory-service
 ```
 
-A repository path can be attached to only one workspace at a time; `attach` on an already-attached
+`workspace init` registers the detached state location but does not initialize it. Run `spl init`
+once after the first attachment; additional attached paths use the same initialized state. A
+repository path can be attached to only one workspace at a time; `attach` on an already-attached
 path fails rather than moving it. `current` resolves the registered workspace owning the current
 working directory by longest matching attached path and fails when no workspace owns it.
 

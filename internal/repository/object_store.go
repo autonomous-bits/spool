@@ -31,7 +31,7 @@ type looseObjectEnvelope struct {
 const objectIDHexLength = 64
 
 // looseObjectStore keeps canonical object bytes in memory and, when stateDir is
-// set, durably mirrors them below .spl/objects/loose.
+// set, durably mirrors them below stateDir/objects/loose.
 type looseObjectStore struct {
 	looseDir    string
 	cache       *map[ObjectID][]byte

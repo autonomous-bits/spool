@@ -12,7 +12,7 @@ func NewInitCommand(initialize func() (*repository.Repository, error)) *cobra.Co
 	return &cobra.Command{
 		Use:          "init",
 		Short:        "Initialize a Spool repository",
-		Long:         "Initialize the .spl state directory for the current workspace and create the default main branch.",
+		Long:         "Initialize the resolved Spool state directory and create the default main branch.",
 		Example:      "  spl init",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,

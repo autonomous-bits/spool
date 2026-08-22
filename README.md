@@ -27,22 +27,41 @@ the accompanying `checksums.txt` file.
 
 ## Quick start
 
-Initialize a graph repository in your workspace:
+Create a detached workspace and attach the checkout that will use it:
 
 ```sh
+spl workspace init my-project
+spl workspace attach --workspace my-project .
 spl init
 ```
 
-This creates a `.spl` state directory with a default `main` branch. From a subdirectory, `spl`
-locates the nearest parent `.spl` directory; when initializing, it uses the directory containing
-`go.work`, or the current directory if none is found.
+In this flow, run `spl init` once after attaching the first checkout. It creates the workspace's
+graph state and default `main` branch in detached storage, not in the checkout. Every path
+attached to that workspace uses the same state; attach additional checkouts without running
+`spl init` again:
+
+```sh
+spl workspace attach --workspace my-project ~/repos/my-project-docs
+```
+
+Confirm which workspace owns the current directory with:
+
+```sh
+spl workspace current
+```
+
+To create a local, non-workspace graph repository instead, run `spl init` from the desired
+directory. It creates `.spl` in the nearest directory at or above the current directory that
+already contains `.spl` or `go.work`, or in the current directory if neither is found.
 
 ## Storage and integrity
 
-Spool stores immutable nodes, edges, graph snapshots, schemas, and fixed-fanout
-sorted tree indexes as canonical CBOR loose objects under `.spl/objects/loose`.
+Spool stores immutable nodes, edges, graph snapshots, schemas, and fixed-fanout sorted tree
+indexes as canonical CBOR loose objects under the selected state directory's `objects/loose`.
+For local repositories, the state directory is `.spl`; for attached workspaces, it is detached
+storage outside the checkout.
 Object IDs are BLAKE3 hashes of the typed canonical bytes. Mutable control
-state is separate: `.spl/config.toml`, `HEAD`, branch refs, staging files,
+state is separate: `config.toml`, `HEAD`, branch refs, staging files,
 reflogs, and merge transactions.
 
 `spl gc` retains reachable and reflog-referenced objects, packs retained objects
@@ -53,7 +72,7 @@ not change object IDs or make a committed object unavailable.
 Commit and merge transitions write immutable objects before atomically replacing
 the affected ref. If a process stops during a transition, an unreachable object
 or stale staging file may remain, but a ref never intentionally points to a
-partially written object. Do not edit files inside `.spl` manually.
+partially written object. Do not edit files in the selected Spool state directory manually.
 
 Use `fsck` after an interrupted process, storage failure, or suspected
 corruption:
@@ -173,13 +192,13 @@ until finalization or abort.
 
 ## Multi-repo workspaces
 
-A detached workspace groups several independently checked-out repository paths under one name,
-recorded in a central registry outside any single repository. Registry data lives under the
-platform-appropriate XDG data location (or `%LOCALAPPDATA%` on Windows), not inside `.spl`.
+A detached workspace maps one or more checked-out paths to the same Spool graph state. Create the
+workspace, attach a path, then initialize its state once:
 
 ```sh
 spl workspace init ecommerce-platform
 spl workspace attach --workspace ecommerce-platform ~/repos/order-service
+spl init
 spl workspace attach --workspace ecommerce-platform ~/repos/inventory-service
 spl workspace list
 spl workspace current
@@ -188,7 +207,9 @@ spl workspace detach ~/repos/inventory-service
 
 A repository path can be attached to only one workspace at a time. `spl workspace current`
 resolves the registered workspace that owns the current working directory by longest matching
-attached path. Persist or clear a preferred active workspace for future sessions with:
+attached path. Workspace registry and state data live under the platform-appropriate XDG data
+location (or `%LOCALAPPDATA%` on Windows), outside the attached checkouts. Persist or clear a
+preferred active workspace for future sessions with:
 
 ```sh
 spl workspace use ecommerce-platform
