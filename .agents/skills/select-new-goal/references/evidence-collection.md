@@ -23,8 +23,8 @@ spl filter --branch <branch> --max-rows 200 \
 ```
 
 `filter` is the supported graph inventory command; follow its continuation
-token until complete. The installed CLI has no `graph` export command. Retrieve
-candidate evidence with bounded context, then resolve every referenced node:
+token until complete. While `spl graph` can export a full snapshot, prefer bounded
+queries here, then resolve every referenced node:
 
 ```sh
 spl context --branch <branch> --query <term> --direction both \
