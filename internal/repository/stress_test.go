@@ -75,17 +75,7 @@ func stressNodeID(index int) string {
 }
 
 func stressEdgeID(index int) string {
-	return fmt.Sprintf("stress-edge-%06d", index)
-}
-
-func stressLastEdgeID(edgeCount int) string {
-	last := stressEdgeID(0)
-	for index := 1; index < edgeCount; index++ {
-		if candidate := stressEdgeID(index); candidate > last {
-			last = candidate
-		}
-	}
-	return last
+	return fmt.Sprintf("stress-edge-%020d", index)
 }
 
 func TestStressHarness(t *testing.T) {
@@ -111,8 +101,8 @@ func TestStressHarness(t *testing.T) {
 			t.Fatalf("edge %d = %#v, want stable topology", index, operation)
 		}
 	}
-	if got, want := stressLastEdgeID(1_000_001), stressEdgeID(999_999); got != want {
-		t.Fatalf("lexical last edge ID = %q, want %q", got, want)
+	if stressEdgeID(999_999) >= stressEdgeID(1_000_000) {
+		t.Fatal("edge IDs do not preserve numeric order across the six-digit boundary")
 	}
 }
 
@@ -150,8 +140,8 @@ func TestStressLargeGraphDurableLifecycle(t *testing.T) {
 	if head != committed.Commit {
 		t.Fatalf("head = %q, want committed %q", head, committed.Commit)
 	}
-	if got, want := len(repo.commits), 2; got != want {
-		t.Fatalf("commits = %d, want %d including retained seed", got, want)
+	if result, err := repo.Fsck(); err != nil || !result.Valid || result.Commits != 2 {
+		t.Fatalf("Fsck = %#v, %v; want valid repository with retained seed commit", result, err)
 	}
 	assertStressGraphReadable(t, repo, base, head, config)
 
@@ -170,7 +160,7 @@ func TestStressLargeGraphDurableLifecycle(t *testing.T) {
 	if first, want := diff.Changes[0], stressNodeID(0); first.Entity != "node" || first.Change != "added" || first.ID != want {
 		t.Fatalf("first diff change = %#v, want added node %q", first, want)
 	}
-	if last, want := diff.Changes[len(diff.Changes)-1], stressLastEdgeID(config.edgeCount); last.Entity != "edge" || last.Change != "added" || last.ID != want {
+	if last, want := diff.Changes[len(diff.Changes)-1], stressEdgeID(config.edgeCount-1); last.Entity != "edge" || last.Change != "added" || last.ID != want {
 		t.Fatalf("last diff change = %#v, want added edge %q", last, want)
 	}
 
