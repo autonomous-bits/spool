@@ -24,8 +24,17 @@ make check   # module tidiness, format, vet, static analysis, tests, race tests,
 make build   # run the quality gate and build dist/spl
 make fuzz    # run the bounded persisted-state fuzz target
 make bench   # run benchmarks
+make stress  # run opt-in repository stress tests
 make tidy    # synchronize the workspace and both modules
 ```
+
+`make stress` enables the opt-in `TestStress` tests, disables Go test caching, and uses a
+stress-appropriate timeout. It is not included in `make check` or regular CI. By default, the
+stress tests use 1,000 nodes, 5,000 edges, and 25 commits, as defined in
+[`internal/repository/stress_test.go`](internal/repository/stress_test.go). Override these values
+with the `SPOOL_STRESS_NODES`, `SPOOL_STRESS_EDGES`, and `SPOOL_STRESS_COMMITS` environment
+variables; each override must be a positive integer. `SPOOL_STRESS_TIMEOUT` overrides the
+default 10-minute test timeout for larger profiles.
 
 The full quality gate uses pinned versions of Staticcheck, GolangCI-Lint, and `govulncheck`.
 Install them when needed:

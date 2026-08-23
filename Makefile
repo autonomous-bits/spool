@@ -1,6 +1,8 @@
 MAKEFLAGS += --no-print-directory
 
-.PHONY: bench build check fuzz golangci lint staticcheck test test-race tidy tidy-check fmt fmt-check vet vulncheck clean
+SPOOL_STRESS_TIMEOUT ?= 10m
+
+.PHONY: bench build check fuzz golangci lint staticcheck stress test test-race tidy tidy-check fmt fmt-check vet vulncheck clean
 
 build: check
 	go build ./...
@@ -19,6 +21,9 @@ test-race:
 
 fuzz:
 	go test -run='^$$' -fuzz=FuzzPersistedRepositoryValidation -fuzztime=5s ./internal/repository
+
+stress:
+	SPOOL_STRESS=1 go test -count=1 -timeout=$(SPOOL_STRESS_TIMEOUT) -run='^TestStress' ./internal/repository
 
 bench:
 	go test -run='^$$' -bench=. -benchmem ./...
