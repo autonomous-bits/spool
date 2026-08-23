@@ -23,7 +23,7 @@ fuzz:
 	go test -run='^$$' -fuzz=FuzzPersistedRepositoryValidation -fuzztime=5s ./internal/repository
 
 stress:
-	SPOOL_STRESS=1 go test -count=1 -timeout=$(SPOOL_STRESS_TIMEOUT) -run='^TestStress' ./internal/repository
+	SPOOL_STRESS=1 go test -count=1 -timeout=$(SPOOL_STRESS_TIMEOUT) -run='^TestStress' ./internal/repository ./internal/resolve
 
 bench:
 	go test -run='^$$' -bench=. -benchmem ./...
