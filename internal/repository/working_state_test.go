@@ -493,6 +493,140 @@ func TestCommitStagedMutationsAdvancesBranchAndClearsStaging(t *testing.T) {
 	}
 }
 
+func TestCommitStagedMutationsPublishesNewObjectsInOnePack(t *testing.T) {
+	stateDir := t.TempDir()
+	repo, err := InitializeRepository(stateDir)
+	if err != nil {
+		t.Fatalf("InitializeRepository: %v", err)
+	}
+	if _, err := repo.StageMutationBatch(StageMutationRequest{
+		Branch: "main",
+		Operations: []MutationOperation{
+			{Action: "add", Entity: "node", ID: "packed-node", Title: "Packed node"},
+		},
+	}); err != nil {
+		t.Fatalf("StageMutationBatch: %v", err)
+	}
+
+	result, err := repo.CommitStagedMutations("main")
+	if err != nil {
+		t.Fatalf("CommitStagedMutations: %v", err)
+	}
+	manifest, err := repo.objectStore.readPackManifest()
+	if err != nil {
+		t.Fatalf("read pack manifest: %v", err)
+	}
+	if len(manifest.Packs) != 1 || manifest.Packs[0].ObjectCount == 0 {
+		t.Fatalf("manifest = %#v, want one non-empty commit pack", manifest)
+	}
+	commitPath, err := repo.objectStore.path(result.Commit)
+	if err != nil {
+		t.Fatalf("commit path: %v", err)
+	}
+	if _, err := os.Stat(commitPath); !os.IsNotExist(err) {
+		t.Fatalf("committed object was written loose: %v", err)
+	}
+	snapshot := repo.snapshots[repo.commits[result.Commit].Snapshot]
+	rootPath, err := repo.objectStore.path(snapshot.NodeRoot)
+	if err != nil {
+		t.Fatalf("node tree root path: %v", err)
+	}
+	if _, err := os.Stat(rootPath); !os.IsNotExist(err) {
+		t.Fatalf("new node tree root %s was written loose: %v", snapshot.NodeRoot, err)
+	}
+	if err := repo.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	reopened, err := OpenRepository(stateDir)
+	if err != nil {
+		t.Fatalf("OpenRepository: %v", err)
+	}
+	defer closeTestRepository(t, reopened)
+	if reopened.branches["main"] != result.Commit {
+		t.Fatalf("reopened head = %q, want %q", reopened.branches["main"], result.Commit)
+	}
+	if result, err := reopened.Fsck(); err != nil || !result.Valid {
+		t.Fatalf("Fsck = %#v, %v; want valid repository", result, err)
+	}
+}
+
+func TestCommitStagedMutationsDoesNotAdvanceRefWhenPackPublicationFails(t *testing.T) {
+	stateDir := t.TempDir()
+	repo, err := InitializeRepository(stateDir)
+	if err != nil {
+		t.Fatalf("InitializeRepository: %v", err)
+	}
+	base := repo.branches["main"]
+	if _, err := repo.StageMutationBatch(StageMutationRequest{
+		Branch: "main",
+		Operations: []MutationOperation{
+			{Action: "add", Entity: "node", ID: "unpublished-node", Title: "Unpublished node"},
+		},
+	}); err != nil {
+		t.Fatalf("StageMutationBatch: %v", err)
+	}
+	injected := errors.New("injected pack index failure")
+	repo.objectStore.packIndexes = failingPackIndexStore{err: injected}
+
+	if _, err := repo.CommitStagedMutations("main"); !errors.Is(err, injected) {
+		t.Fatalf("CommitStagedMutations error = %v, want injected failure", err)
+	}
+	if repo.branches["main"] != base {
+		t.Fatalf("branch head = %q, want %q", repo.branches["main"], base)
+	}
+	if _, staged := repo.stagedMutations["main"]; !staged {
+		t.Fatal("failed pack publication cleared staging")
+	}
+	manifest, err := repo.objectStore.readPackManifest()
+	if err != nil {
+		t.Fatalf("read pack manifest: %v", err)
+	}
+	if len(manifest.Packs) != 0 {
+		t.Fatalf("failed publication produced %d active packs", len(manifest.Packs))
+	}
+	if err := repo.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	reopened, err := OpenRepository(stateDir)
+	if err != nil {
+		t.Fatalf("OpenRepository: %v", err)
+	}
+	closeTestRepository(t, reopened)
+	if reopened.branches["main"] != base {
+		t.Fatalf("reopened head = %q, want %q", reopened.branches["main"], base)
+	}
+}
+
+func TestCommitStagedMutationsRemovesPackWhenManifestPublicationFails(t *testing.T) {
+	stateDir := t.TempDir()
+	repo, err := InitializeRepository(stateDir)
+	if err != nil {
+		t.Fatalf("InitializeRepository: %v", err)
+	}
+	if _, err := repo.StageMutationBatch(StageMutationRequest{
+		Branch: "main",
+		Operations: []MutationOperation{
+			{Action: "add", Entity: "node", ID: "unpublished-pack-node", Title: "Unpublished pack node"},
+		},
+	}); err != nil {
+		t.Fatalf("StageMutationBatch: %v", err)
+	}
+	injected := errors.New("injected manifest publication failure")
+	repo.objectStore.writeStateFile = func(string, []byte) error { return injected }
+
+	if _, err := repo.CommitStagedMutations("main"); !errors.Is(err, injected) {
+		t.Fatalf("CommitStagedMutations error = %v, want injected failure", err)
+	}
+	entries, err := os.ReadDir(repo.objectStore.packDirectory())
+	if err != nil {
+		t.Fatalf("read pack directory: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("unpublished pack files remain: %#v", entries)
+	}
+}
+
 func TestCommitStagedMutationsReusesNodeRootProjectionAcrossEdgeOnlySnapshots(t *testing.T) {
 	stateDir := t.TempDir()
 	repo, err := NewSeedRepositoryWithMergeState(stateDir)
@@ -576,7 +710,10 @@ func TestCommitFailureLeavesUnreferencedObjectsAndStagingWithoutAdvancingRef(t *
 	}); err != nil {
 		t.Fatalf("StageMutationBatch: %v", err)
 	}
-	beforeObjects := durableObjectCount(t, stateDir)
+	beforeManifest, err := repo.objectStore.readPackManifest()
+	if err != nil {
+		t.Fatalf("read manifest before commit: %v", err)
+	}
 	repo.persistRepositoryFn = func() error { return errors.New("injected ref write failure") }
 
 	if _, err := repo.CommitStagedMutations("main"); err == nil {
@@ -588,14 +725,18 @@ func TestCommitFailureLeavesUnreferencedObjectsAndStagingWithoutAdvancingRef(t *
 	if _, staged := repo.stagedMutations["main"]; !staged {
 		t.Fatal("failed ref update cleared staging")
 	}
-	if afterObjects := durableObjectCount(t, stateDir); afterObjects <= beforeObjects {
-		t.Fatalf("durable object count = %d, want unreferenced commit objects after %d", afterObjects, beforeObjects)
-	}
 	if data, err := os.ReadFile(filepath.Join(stateDir, "refs", "heads", "main")); err != nil || string(data) != string(base)+"\n" {
 		t.Fatalf("main ref = %q, %v; want %q", data, err, base)
 	}
 	if data, err := os.ReadFile(filepath.Join(stateDir, "logs", "refs", "heads", "main")); err != nil || strings.Contains(string(data), " commit\n") {
 		t.Fatalf("reflog = %q, %v; failed ref update recorded a transition", data, err)
+	}
+	beforeRetry, err := repo.objectStore.readPackManifest()
+	if err != nil {
+		t.Fatalf("read manifest before retry: %v", err)
+	}
+	if len(beforeRetry.Packs) != len(beforeManifest.Packs)+1 {
+		t.Fatalf("active packs = %d, want one unreachable commit pack after %d", len(beforeRetry.Packs), len(beforeManifest.Packs))
 	}
 
 	repo.persistRepositoryFn = nil
@@ -612,6 +753,16 @@ func TestCommitFailureLeavesUnreferencedObjectsAndStagingWithoutAdvancingRef(t *
 	}
 	if _, staged := reopened.stagedMutations["main"]; !staged {
 		t.Fatal("reopened repository lost staging after failed ref update")
+	}
+	if _, err := reopened.CommitStagedMutations("main"); err != nil {
+		t.Fatalf("retry CommitStagedMutations: %v", err)
+	}
+	afterRetry, err := reopened.objectStore.readPackManifest()
+	if err != nil {
+		t.Fatalf("read manifest after retry: %v", err)
+	}
+	if len(afterRetry.Packs) != len(beforeRetry.Packs) {
+		t.Fatalf("retry appended duplicate commit pack: before %d, after %d", len(beforeRetry.Packs), len(afterRetry.Packs))
 	}
 }
 
@@ -660,24 +811,6 @@ func TestCommitClearsStagingAfterRefReplacementWarning(t *testing.T) {
 	if got := reopened.branches["main"]; got != result.Commit {
 		t.Fatalf("reopened main head = %q, want %q", got, result.Commit)
 	}
-}
-
-func durableObjectCount(t *testing.T, stateDir string) int {
-	t.Helper()
-	count := 0
-	err := filepath.Walk(filepath.Join(stateDir, "objects", "loose"), func(_ string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.Mode().IsRegular() {
-			count++
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("walk durable objects: %v", err)
-	}
-	return count
 }
 
 func TestCommitStagedMutationsRejectsStaleBaseWithoutMutation(t *testing.T) {
