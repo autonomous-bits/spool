@@ -202,14 +202,14 @@ func (r *Repository) BranchStagingStatus(branch string) (BranchStagingStatus, er
 // StageMutationBatch atomically replaces a branch's staged mutation set after
 // validating every operation against the branch head and this batch's additions.
 func (r *Repository) StageMutationBatch(request StageMutationRequest) (StageMutationResult, error) {
+	endCandidate := r.performanceRecorder.Measure("mutation_normalization_candidate_construction")
+	defer endCandidate()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := r.ensureOpenLocked(); err != nil {
 		return StageMutationResult{}, err
 	}
 
-	endCandidate := r.performanceRecorder.Measure("mutation_normalization_candidate_construction")
-	defer endCandidate()
 	head, exists := r.branches[request.Branch]
 	if !exists {
 		return StageMutationResult{}, ErrBranchNotFound
