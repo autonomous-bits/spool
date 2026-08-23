@@ -142,6 +142,10 @@ func InitializeRepository(stateDir string) (*Repository, error) {
 
 // OpenRepository opens an initialized repository without creating state for a new target.
 func OpenRepository(stateDir string) (*Repository, error) {
+	return openRepositoryWithPerformanceRecorder(stateDir, nil)
+}
+
+func openRepositoryWithPerformanceRecorder(stateDir string, recorder *PerformanceRecorder) (*Repository, error) {
 	if err := rejectLegacyRepositoryState(stateDir); err != nil {
 		return nil, err
 	}
@@ -150,11 +154,12 @@ func OpenRepository(stateDir string) (*Repository, error) {
 	} else if err != nil {
 		return nil, fmt.Errorf("inspect repository configuration: %w", err)
 	}
-	return openControlRepository(stateDir)
+	return openControlRepository(stateDir, recorder)
 }
 
-func openControlRepository(stateDir string) (*Repository, error) {
+func openControlRepository(stateDir string, recorder *PerformanceRecorder) (*Repository, error) {
 	repo := newRepository()
+	repo.performanceRecorder = recorder
 	repo.mergeStateDir = stateDir
 	repo.objectStore = newLooseObjectStore(stateDir, &repo.objects)
 	repo.stateLock = flock.New(filepath.Join(stateDir, "repository.lock"))
@@ -165,7 +170,9 @@ func openControlRepository(stateDir string) (*Repository, error) {
 	if !locked {
 		return nil, ErrMergeRepositoryLocked
 	}
+	endControlState := recorder.Measure("repository_reopen_control_state_loading")
 	loaded, err := repo.loadControlState()
+	endControlState()
 	if err != nil {
 		return nil, closeAfterFailedOpen(repo, err)
 	}
@@ -175,7 +182,10 @@ func openControlRepository(stateDir string) (*Repository, error) {
 	if err := repo.RecoverMergeTransactions(); err != nil {
 		return nil, closeAfterFailedOpen(repo, err)
 	}
-	if err := repo.ensureStartupProjections(); err != nil {
+	endProjection := recorder.Measure("projection_reconstruction")
+	err = repo.ensureStartupProjections()
+	endProjection()
+	if err != nil {
 		return nil, closeAfterFailedOpen(repo, err)
 	}
 	return repo, nil

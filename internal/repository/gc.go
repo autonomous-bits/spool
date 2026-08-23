@@ -142,7 +142,9 @@ func (r *Repository) GC(options GCOptions) (GCResult, error) {
 	previousManifest := manifest
 	var cleanupErr error
 	if len(replacement) != 0 {
+		endPackPublication := r.performanceRecorder.Measure("gc_packing_publication")
 		metadata, err := r.objectStore.writeAndPublishPack(replacement, manifest, options.Repack)
+		endPackPublication()
 		if err != nil {
 			var closeErr *packGenerationCloseError
 			if !errors.As(err, &closeErr) && !durableWriteCommitted(err) {

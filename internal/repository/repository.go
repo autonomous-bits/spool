@@ -157,6 +157,7 @@ type Repository struct {
 	writeReflogFn                   func(string, []byte) error
 	writeReflogRetentionInventoryFn func([]string) error
 	stateLock                       *flock.Flock
+	performanceRecorder             *PerformanceRecorder
 	closed                          bool
 	now                             func() time.Time
 }

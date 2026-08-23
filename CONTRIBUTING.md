@@ -40,6 +40,20 @@ each override must be a positive integer. Node and edge overrides scale both lif
 retrieval coverage; the commit override scales deep-history coverage. `SPOOL_STRESS_TIMEOUT`
 overrides the default 10-minute test timeout for larger profiles.
 
+Stress output includes JSON phase diagnostics in the test log. Repository phases distinguish
+mutation normalization and candidate construction, immutable object persistence, commit/ref
+publication, control-state reopen, projection reconstruction, GC packing/publication, and packed
+reopen. Retrieval output reports fixture construction separately from search, filter, contextual
+search expansion, and context execution. Each phase reports duration plus Go allocation and heap
+metrics; it intentionally does not estimate non-portable RSS, filesystem-operation, or read-byte
+statistics.
+
+`make bench` includes fixed-fixture lifecycle and retrieval benchmarks. Run it with
+`go test -run='^$' -bench='BenchmarkRepositoryLifecycle|BenchmarkRetrieval' -benchmem
+./internal/repository ./internal/resolve` to focus on these measurements. They are informational
+Go benchmarks: the project does not retain a benchmark baseline, enforce thresholds, or run them
+as a CI gate.
+
 The full quality gate uses pinned versions of Staticcheck, GolangCI-Lint, and `govulncheck`.
 Install them when needed:
 

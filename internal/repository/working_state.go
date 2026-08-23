@@ -208,6 +208,8 @@ func (r *Repository) StageMutationBatch(request StageMutationRequest) (StageMuta
 		return StageMutationResult{}, err
 	}
 
+	endCandidate := r.performanceRecorder.Measure("mutation_normalization_candidate_construction")
+	defer endCandidate()
 	head, exists := r.branches[request.Branch]
 	if !exists {
 		return StageMutationResult{}, ErrBranchNotFound
@@ -230,6 +232,8 @@ func (r *Repository) StageMutationBatch(request StageMutationRequest) (StageMuta
 // StageSchemaMigration atomically replaces a branch's staged set with a parsed
 // canonical target schema and the complete graph mutations needed to conform to it.
 func (r *Repository) StageSchemaMigration(request SchemaMigrationRequest) (StageMutationResult, error) {
+	endDecode := r.performanceRecorder.Measure("mutation_normalization_candidate_construction")
+	defer endDecode()
 	target, err := DecodeSchemaTOML(request.SchemaTOML)
 	if err != nil {
 		return StageMutationResult{}, err
@@ -498,7 +502,9 @@ func (r *Repository) CommitStagedMutationBatch(request CommitStagedMutationReque
 		return CommitStagedMutationResult{}, ErrStaleStagedBase
 	}
 
+	endCandidate := r.performanceRecorder.Measure("mutation_normalization_candidate_construction")
 	nodes, edges, err := r.candidateGraphLocked(head, staged)
+	endCandidate()
 	if err != nil {
 		return CommitStagedMutationResult{}, err
 	}
@@ -512,10 +518,12 @@ func (r *Repository) CommitStagedMutationBatch(request CommitStagedMutationReque
 	r.materializedSnapshots, r.historicalProjectionLRU = cloneMaterializedSnapshots(r.materializedSnapshots), append([]ObjectID(nil), r.historicalProjectionLRU...)
 	r.commits, r.branches, r.stagedMutations = cloneCommits(r.commits), cloneBranches(r.branches), cloneStagedMutations(r.stagedMutations)
 
+	endPersistence := r.performanceRecorder.Measure("immutable_object_encoding_persistence")
 	schemaRoot := r.snapshots[base].SchemaRoot
 	if staged.TargetSchema != nil {
 		schemaRoot, err = r.storeObject("schema-root", *staged.TargetSchema)
 		if err != nil {
+			endPersistence()
 			r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
 			r.materializedSnapshots, r.historicalProjectionLRU = materializedSnapshots, historicalProjectionLRU
 			r.commits, r.branches, r.stagedMutations = commits, branches, stagedMutations
@@ -524,6 +532,7 @@ func (r *Repository) CommitStagedMutationBatch(request CommitStagedMutationReque
 	}
 	snapshot, err := r.materializeSnapshotLocked(nodes, edges, schemaRoot)
 	if err != nil {
+		endPersistence()
 		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
 		r.materializedSnapshots, r.historicalProjectionLRU = materializedSnapshots, historicalProjectionLRU
 		r.commits, r.branches, r.stagedMutations = commits, branches, stagedMutations
@@ -531,51 +540,67 @@ func (r *Repository) CommitStagedMutationBatch(request CommitStagedMutationReque
 	}
 	snapshotID, err := r.storeObject("graph-snapshot", snapshot)
 	if err != nil {
+		endPersistence()
 		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
 		r.materializedSnapshots, r.historicalProjectionLRU = materializedSnapshots, historicalProjectionLRU
 		r.commits, r.branches, r.stagedMutations = commits, branches, stagedMutations
 		return CommitStagedMutationResult{}, fmt.Errorf("store staged snapshot: %w", err)
 	}
 	r.snapshots[snapshotID] = snapshot
+	endPersistence()
+	endProjection := r.performanceRecorder.Measure("projection_reconstruction")
 	if err := r.reconstructSnapshotProjectionsLocked(snapshotID, snapshot); err != nil {
+		endProjection()
 		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
 		r.materializedSnapshots, r.historicalProjectionLRU = materializedSnapshots, historicalProjectionLRU
 		r.commits, r.branches, r.stagedMutations = commits, branches, stagedMutations
 		return CommitStagedMutationResult{}, fmt.Errorf("reconstruct staged snapshot: %w", err)
 	}
+	endProjection()
+	endPersistence = r.performanceRecorder.Measure("immutable_object_encoding_persistence")
 	next := r.newCommit(snapshotID, []ObjectID{head}, request.Author, request.Message)
 	nextID, err := r.storeObject("commit", next)
 	if err != nil {
+		endPersistence()
 		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
 		r.materializedSnapshots, r.historicalProjectionLRU = materializedSnapshots, historicalProjectionLRU
 		r.commits, r.branches, r.stagedMutations = commits, branches, stagedMutations
 		return CommitStagedMutationResult{}, fmt.Errorf("store staged commit: %w", err)
 	}
+	endPersistence()
 	r.commits[nextID], r.branches[request.Branch] = next, nextID
+	endProjection = r.performanceRecorder.Measure("projection_reconstruction")
 	if err := r.ensureBranchHeadProjectionsLocked(); err != nil {
+		endProjection()
 		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
 		r.materializedSnapshots, r.historicalProjectionLRU = materializedSnapshots, historicalProjectionLRU
 		r.commits, r.branches, r.stagedMutations = commits, branches, stagedMutations
 		return CommitStagedMutationResult{}, fmt.Errorf("pin committed snapshot: %w", err)
 	}
+	endProjection()
 	delete(r.stagedMutations, request.Branch)
 	result := CommitStagedMutationResult{Branch: request.Branch, Commit: nextID}
+	endPublication := r.performanceRecorder.Measure("commit_ref_publication")
 	refErr := r.writeRefLocked(request.Branch, head, nextID, "commit")
 	if refErr != nil && !durableWriteCommitted(refErr) {
 		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
 		r.materializedSnapshots, r.historicalProjectionLRU = materializedSnapshots, historicalProjectionLRU
 		r.commits, r.branches, r.stagedMutations = commits, branches, stagedMutations
 		_ = r.ensureBranchHeadProjectionsLocked()
+		endPublication()
 		return CommitStagedMutationResult{}, refErr
 	}
 	cleanupErr := r.writeStagedLocked(request.Branch, nil)
 	projectionErr := r.maintainActiveProjectionLocked(request.Branch)
 	if refErr != nil || cleanupErr != nil {
+		endPublication()
 		return result, &CommittedWithWarningError{Result: result, err: fmt.Errorf("staged mutations committed with durability warning: %w", errors.Join(refErr, cleanupErr, projectionErr))}
 	}
 	if projectionErr != nil {
+		endPublication()
 		return result, fmt.Errorf("commit completed but projection maintenance failed: %w", projectionErr)
 	}
+	endPublication()
 	return result, nil
 }
 
