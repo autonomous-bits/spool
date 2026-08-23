@@ -73,9 +73,12 @@ Every immutable object is encoded with canonical CBOR. Its ID is the BLAKE3
 hash of a type-and-length header plus those bytes, and it is stored as a
 canonical CBOR envelope at `state-dir/objects/loose/<first-two-hex>/<rest>`.
 Equivalent objects therefore have the same ID; a type, hash, envelope, or
-payload mismatch is corruption. Loose objects are the write location and the
-first durable lookup location. If absent there, reads consult the atomically
-published `objects/info/packs` manifest, then the manifest-listed immutable
+payload mismatch is corruption. Commits publish their newly materialized
+objects together in one append-only pack, then atomically move the branch ref.
+Loose objects remain supported for repository initialization, direct object
+storage, and maintenance compatibility, and are the first durable lookup
+location. If absent there, reads consult the atomically published
+`objects/info/packs` manifest, then the manifest-listed immutable
 `objects/pack/<generation>.pack` files and their indexes. Pack entries contain
 the same canonical envelope, compressed with zstd and checked by their CRC,
 envelope, type, and object ID; packing never changes an object's identity.
@@ -116,8 +119,9 @@ migrated implicitly.
    operations and valid edge endpoints, then atomically replaces that branch's
    staged set.
 3. `spl commit` verifies that staging still targets the branch head,
-   writes all node, edge, tree, schema, snapshot, and commit objects, then
-   atomically moves the branch ref and clears staging.
+   batches all node, edge, tree, schema, snapshot, and commit objects into one
+   pack, atomically publishes that pack, then atomically moves the branch ref
+   and clears staging.
 
 ### Schema migration and validation
 

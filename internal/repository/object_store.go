@@ -43,6 +43,13 @@ type looseObjectStore struct {
 	writeStateFile func(string, []byte) error
 }
 
+// objectWriteBatch collects a commit's newly materialized immutable objects so
+// they can be durably published through one pack manifest transition.
+type objectWriteBatch struct {
+	store   *looseObjectStore
+	objects map[ObjectID]verifiedObject
+}
+
 func newLooseObjectStore(stateDir string, cache *map[ObjectID][]byte) *looseObjectStore {
 	store := &looseObjectStore{
 		cache:          cache,
@@ -88,6 +95,101 @@ func (s *looseObjectStore) putEncoded(objectType string, encoded []byte) (Object
 	(*s.cache)[id] = append([]byte(nil), encoded...)
 	s.types[id] = objectType
 	return id, nil
+}
+
+func (s *looseObjectStore) beginWriteBatch() *objectWriteBatch {
+	return &objectWriteBatch{
+		store:   s,
+		objects: make(map[ObjectID]verifiedObject),
+	}
+}
+
+func (b *objectWriteBatch) put(objectType string, value any) (ObjectID, error) {
+	encoded, err := canonicalObjectEncoding(value)
+	if err != nil {
+		return "", fmt.Errorf("encode %s: %w", objectType, err)
+	}
+	return b.putEncoded(objectType, encoded)
+}
+
+func (b *objectWriteBatch) putEncoded(objectType string, encoded []byte) (ObjectID, error) {
+	if objectType == "" {
+		return "", fmt.Errorf("%w: empty type", errLooseObjectCorrupt)
+	}
+	id := objectIDForEncoded(objectType, encoded)
+	b.store.mu.Lock()
+	defer b.store.mu.Unlock()
+	if cached, exists := (*b.store.cache)[id]; exists {
+		if objectIDForEncoded(objectType, cached) != id {
+			return "", fmt.Errorf("%w: cached %s", errLooseObjectCorrupt, id)
+		}
+		return id, nil
+	}
+	actualType, durable, err := b.store.getAnyUncached(id)
+	if err == nil {
+		if actualType != objectType || !bytes.Equal(durable, encoded) {
+			return "", fmt.Errorf("%w: durable payload mismatch for %s", errLooseObjectCorrupt, id)
+		}
+		(*b.store.cache)[id] = append([]byte(nil), durable...)
+		b.store.types[id] = actualType
+		return id, nil
+	}
+	if !errors.Is(err, errLooseObjectNotFound) {
+		return "", err
+	}
+	if existing, exists := b.objects[id]; exists {
+		if existing.objectType != objectType || !bytes.Equal(existing.data, encoded) {
+			return "", fmt.Errorf("%w: batch payload mismatch for %s", errLooseObjectCorrupt, id)
+		}
+		return id, nil
+	}
+	b.objects[id] = verifiedObject{objectType: objectType, data: append([]byte(nil), encoded...)}
+	return id, nil
+}
+
+// publish makes all batch objects durable. A manifest replacement warning means
+// the pack is already reachable and must be treated as committed by the caller.
+func (b *objectWriteBatch) publish() error {
+	if len(b.objects) == 0 {
+		return nil
+	}
+	if b.store.looseDir == "" {
+		b.install()
+		return nil
+	}
+	manifest, err := b.store.readPackManifest()
+	if err != nil {
+		return err
+	}
+	metadata, err := b.store.writeAndPublishPack(b.objects, manifest, false)
+	if err != nil && !packPublicationCommitted(err) {
+		if metadata.ID != "" {
+			_, _, cleanupErr := b.store.retirePacks([]PackMetadata{metadata})
+			if cleanupErr != nil {
+				return errors.Join(err, fmt.Errorf("remove unpublished commit pack: %w", cleanupErr))
+			}
+		}
+		return err
+	}
+	b.install()
+	return err
+}
+
+func (b *objectWriteBatch) install() {
+	b.store.mu.Lock()
+	defer b.store.mu.Unlock()
+	for id, object := range b.objects {
+		(*b.store.cache)[id] = append([]byte(nil), object.data...)
+		b.store.types[id] = object.objectType
+	}
+}
+
+func packPublicationCommitted(err error) bool {
+	if err == nil || durableWriteCommitted(err) {
+		return err != nil
+	}
+	var closeErr *packGenerationCloseError
+	return errors.As(err, &closeErr)
 }
 
 func (s *looseObjectStore) get(id ObjectID, objectType string) ([]byte, error) {

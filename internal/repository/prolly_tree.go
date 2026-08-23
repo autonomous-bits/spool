@@ -60,14 +60,14 @@ func (r *Repository) storeProllyTreeLocked(entries []prollyTreeEntry) (ObjectID,
 		return "", fmt.Errorf("invalid prolly tree entries")
 	}
 	if len(entries) == 0 {
-		return r.objectStore.put(prollyTreeLeafType, prollyTreeLeaf{Entries: []prollyTreeEntry{}})
+		return r.storeObject(prollyTreeLeafType, prollyTreeLeaf{Entries: []prollyTreeEntry{}})
 	}
 
 	children := make([]prollyTreeChild, 0, (len(entries)+prollyTreeFanout-1)/prollyTreeFanout)
 	for start := 0; start < len(entries); start += prollyTreeFanout {
 		end := min(start+prollyTreeFanout, len(entries))
 		leafEntries := append([]prollyTreeEntry(nil), entries[start:end]...)
-		object, err := r.objectStore.put(prollyTreeLeafType, prollyTreeLeaf{Entries: leafEntries})
+		object, err := r.storeObject(prollyTreeLeafType, prollyTreeLeaf{Entries: leafEntries})
 		if err != nil {
 			return "", err
 		}
@@ -78,7 +78,7 @@ func (r *Repository) storeProllyTreeLocked(entries []prollyTreeEntry) (ObjectID,
 		for start := 0; start < len(children); start += prollyTreeFanout {
 			end := min(start+prollyTreeFanout, len(children))
 			internalChildren := append([]prollyTreeChild(nil), children[start:end]...)
-			object, err := r.objectStore.put(prollyTreeInternalType, prollyTreeInternal{Children: internalChildren})
+			object, err := r.storeObject(prollyTreeInternalType, prollyTreeInternal{Children: internalChildren})
 			if err != nil {
 				return "", err
 			}

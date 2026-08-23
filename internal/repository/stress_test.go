@@ -206,7 +206,8 @@ func TestStressLargeGraphDurableLifecycle(t *testing.T) {
 	assertStressGraphReadable(t, packedReopened, base, head, config)
 	assertStressPerformancePhases(t, recorder, []string{
 		"mutation_normalization_candidate_construction",
-		"immutable_object_encoding_persistence",
+		"immutable_object_encoding",
+		"commit_pack_publication",
 		"commit_ref_publication",
 		"repository_reopen_control_state_loading",
 		"projection_reconstruction",
