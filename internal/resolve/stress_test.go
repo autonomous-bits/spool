@@ -48,7 +48,10 @@ func stressPositiveIntEnv(t *testing.T, name string, defaultValue int) int {
 
 func TestStressRetrievalQueries(t *testing.T) {
 	config := retrievalStressConfigForTest(t)
+	recorder := repository.NewPerformanceRecorder()
+	endFixture := recorder.Measure("retrieval_fixture_construction")
 	repo, head := retrievalStressRepository(t, config)
+	endFixture()
 	pageSize := minInt(127, config.nodeCount)
 	budget := QueryBudget{
 		MaxRows:          pageSize,
@@ -63,11 +66,13 @@ func TestStressRetrievalQueries(t *testing.T) {
 	searchIDs := make([]string, 0, config.nodeCount)
 	searchToken := ""
 	for {
+		endQuery := recorder.Measure("retrieval_query_execution_search")
 		result, err := tool.SPLSearch(context.Background(), SearchRequest{
 			Selector:          SnapshotSelector{Branch: "main"},
 			Query:             "querycorpus",
 			ContinuationToken: searchToken,
 		})
+		endQuery()
 		if err != nil {
 			t.Fatalf("SPLSearch page %d: %v", len(searchIDs)/pageSize, err)
 		}
@@ -85,11 +90,13 @@ func TestStressRetrievalQueries(t *testing.T) {
 	filterIDs := make([]string, 0, config.nodeCount)
 	filterToken := ""
 	for {
+		endQuery := recorder.Measure("retrieval_query_execution_filter")
 		result, err := tool.SPLFilter(context.Background(), FilterRequest{
 			Selector:          SnapshotSelector{Branch: "main"},
 			Labels:            []string{"Task"},
 			ContinuationToken: filterToken,
 		})
+		endQuery()
 		if err != nil {
 			t.Fatalf("SPLFilter page %d: %v", len(filterIDs)/pageSize, err)
 		}
@@ -104,24 +111,28 @@ func TestStressRetrievalQueries(t *testing.T) {
 	}
 	assertStressQueryIDs(t, "filter", filterIDs, config.nodeCount)
 
+	endSearchExpand := recorder.Measure("retrieval_query_execution_search_expand")
 	expanded, err := tool.SPLSearchExpand(context.Background(), SearchExpandRequest{
 		Selector:  SnapshotSelector{Branch: "main"},
 		Seeds:     SeedSelector{Query: "queryroot"},
 		Direction: DirectionOut,
 		EdgeTypes: []string{"STRESS_LINK"},
 	})
+	endSearchExpand()
 	if err != nil {
 		t.Fatalf("SPLSearchExpand: %v", err)
 	}
 	assertStressQueryMetadata(t, expanded.Snapshot, expanded.Projection, expanded.Budget, expanded.Completion, expanded)
 	assertStressContextResult(t, "search-expand", expanded, budget, expectCapacityExhausted)
 
+	endContext := recorder.Measure("retrieval_query_execution_context")
 	contextResult, err := tool.SPLContext(context.Background(), ContextRequest{
 		Selector:  SnapshotSelector{Branch: "main"},
 		Seeds:     SeedSelector{Labels: []string{"Seed"}},
 		Direction: DirectionOut,
 		EdgeTypes: []string{"STRESS_LINK"},
 	})
+	endContext()
 	if err != nil {
 		t.Fatalf("SPLContext: %v", err)
 	}
@@ -131,9 +142,42 @@ func TestStressRetrievalQueries(t *testing.T) {
 	if expanded.Snapshot.Commit != string(head) || contextResult.Snapshot.Commit != string(head) {
 		t.Fatalf("retrieval commit provenance = %q/%q, want %q", expanded.Snapshot.Commit, contextResult.Snapshot.Commit, head)
 	}
+	assertRetrievalPerformancePhases(t, recorder, []string{
+		"retrieval_fixture_construction",
+		"retrieval_query_execution_search",
+		"retrieval_query_execution_filter",
+		"retrieval_query_execution_search_expand",
+		"retrieval_query_execution_context",
+	})
+	reportRetrievalPerformance(t, recorder)
 }
 
-func retrievalStressRepository(t *testing.T, config retrievalStressConfig) (*repository.Repository, repository.ObjectID) {
+func assertRetrievalPerformancePhases(t *testing.T, recorder *repository.PerformanceRecorder, expected []string) {
+	t.Helper()
+	actual := make(map[string]repository.PerformancePhase)
+	for _, phase := range recorder.Phases() {
+		actual[phase.Name] = phase
+	}
+	for _, name := range expected {
+		phase, exists := actual[name]
+		if !exists || phase.DurationNanos <= 0 {
+			t.Fatalf("performance phase %q = %#v, want recorded duration", name, phase)
+		}
+	}
+}
+
+func reportRetrievalPerformance(t *testing.T, recorder *repository.PerformanceRecorder) {
+	t.Helper()
+	encoded, err := json.Marshal(struct {
+		Phases []repository.PerformancePhase `json:"phases"`
+	}{Phases: recorder.Phases()})
+	if err != nil {
+		t.Fatalf("marshal performance report: %v", err)
+	}
+	t.Logf("performance diagnostics: %s", encoded)
+}
+
+func retrievalStressRepository(t testing.TB, config retrievalStressConfig) (*repository.Repository, repository.ObjectID) {
 	t.Helper()
 	stateDir := t.TempDir()
 	repo, err := repository.InitializeRepository(stateDir)

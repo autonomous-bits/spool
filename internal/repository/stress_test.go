@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"reflect"
@@ -110,11 +111,13 @@ func TestStressLargeGraphDurableLifecycle(t *testing.T) {
 	config := stressConfigForTest(t)
 	operations := stressGraphOperations(config)
 	stateDir := t.TempDir()
+	recorder := NewPerformanceRecorder()
 
 	repo, err := InitializeRepository(stateDir)
 	if err != nil {
 		t.Fatalf("InitializeRepository: %v", err)
 	}
+	repo.performanceRecorder = recorder
 	base, err := repo.PinBranch("main")
 	if err != nil {
 		t.Fatalf("PinBranch seed: %v", err)
@@ -167,7 +170,7 @@ func TestStressLargeGraphDurableLifecycle(t *testing.T) {
 	if err := repo.Close(); err != nil {
 		t.Fatalf("Close before reopen: %v", err)
 	}
-	reopened, err := OpenRepository(stateDir)
+	reopened, err := openRepositoryWithPerformanceRecorder(stateDir, recorder)
 	if err != nil {
 		t.Fatalf("OpenRepository: %v", err)
 	}
@@ -193,12 +196,49 @@ func TestStressLargeGraphDurableLifecycle(t *testing.T) {
 		t.Fatalf("Close after GC: %v", err)
 	}
 
-	packedReopened, err := OpenRepository(stateDir)
+	endPackedReopen := recorder.Measure("packed_repository_reopen")
+	packedReopened, err := openRepositoryWithPerformanceRecorder(stateDir, recorder)
+	endPackedReopen()
 	if err != nil {
 		t.Fatalf("OpenRepository from packed storage: %v", err)
 	}
 	defer closeTestRepository(t, packedReopened)
 	assertStressGraphReadable(t, packedReopened, base, head, config)
+	assertStressPerformancePhases(t, recorder, []string{
+		"mutation_normalization_candidate_construction",
+		"immutable_object_encoding_persistence",
+		"commit_ref_publication",
+		"repository_reopen_control_state_loading",
+		"projection_reconstruction",
+		"gc_packing_publication",
+		"packed_repository_reopen",
+	})
+	reportStressPerformance(t, recorder)
+}
+
+func assertStressPerformancePhases(t *testing.T, recorder *PerformanceRecorder, expected []string) {
+	t.Helper()
+	actual := make(map[string]PerformancePhase)
+	for _, phase := range recorder.Phases() {
+		actual[phase.Name] = phase
+	}
+	for _, name := range expected {
+		phase, exists := actual[name]
+		if !exists || phase.DurationNanos <= 0 {
+			t.Fatalf("performance phase %q = %#v, want recorded duration", name, phase)
+		}
+	}
+}
+
+func reportStressPerformance(t *testing.T, recorder *PerformanceRecorder) {
+	t.Helper()
+	report, err := json.Marshal(struct {
+		Phases []PerformancePhase `json:"phases"`
+	}{Phases: recorder.Phases()})
+	if err != nil {
+		t.Fatalf("marshal performance report: %v", err)
+	}
+	t.Logf("performance diagnostics: %s", report)
 }
 
 func assertStressGraphReadable(t *testing.T, repo *Repository, base, head ObjectID, config stressConfig) {
