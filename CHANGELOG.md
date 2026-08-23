@@ -8,6 +8,12 @@ generated from commits since the preceding `v*` tag. Commits prefixed with `docs
 
 ## [Unreleased]
 
+## [0.0.4] - 2026-08-23
+
+### Changed
+
+- Improved performance when accessing packed repository objects.
+
 ## [0.0.3] - 2026-08-23
 
 ### Changed
