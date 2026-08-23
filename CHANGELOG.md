@@ -8,6 +8,12 @@ generated from commits since the preceding `v*` tag. Commits prefixed with `docs
 
 ## [Unreleased]
 
+## [0.0.3] - 2026-08-23
+
+### Changed
+
+- Folded `spl init` into `spl workspace init` for unified workspace initialization.
+
 ## [0.0.2] - 2026-08-22
 
 ### Added
