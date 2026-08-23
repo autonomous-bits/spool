@@ -156,26 +156,31 @@ func (r *Repository) applyCleanCandidateLocked(candidate mergeCandidate, transac
 	defer delete(r.mergeLeases, candidate.preview.TargetBranch)
 
 	objects, snapshots, projections, edgeProjections := r.objects, r.snapshots, r.projections, r.edgeProjections
+	materializedSnapshots, historicalProjectionLRU := r.materializedSnapshots, r.historicalProjectionLRU
 	commits, branches := r.commits, r.branches
 	r.objects, r.snapshots = cloneObjects(r.objects), cloneSnapshots(r.snapshots)
 	r.projections, r.edgeProjections = cloneProjectionMap(r.projections), cloneEdgeProjectionMap(r.edgeProjections)
+	r.materializedSnapshots, r.historicalProjectionLRU = cloneMaterializedSnapshots(r.materializedSnapshots), append([]ObjectID(nil), r.historicalProjectionLRU...)
 	r.commits, r.branches = cloneCommits(r.commits), cloneBranches(r.branches)
 
 	snapshot, err := r.materializeSnapshotLocked(candidate.nodes, candidate.edges, candidate.schemaRoot)
 	if err != nil {
 		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
+		r.materializedSnapshots, r.historicalProjectionLRU = materializedSnapshots, historicalProjectionLRU
 		r.commits, r.branches = commits, branches
 		return "", fmt.Errorf("materialize merge result: %w", err)
 	}
 	snapshotID, err := r.storeObject("graph-snapshot", snapshot)
 	if err != nil {
 		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
+		r.materializedSnapshots, r.historicalProjectionLRU = materializedSnapshots, historicalProjectionLRU
 		r.commits, r.branches = commits, branches
 		return "", fmt.Errorf("store merge snapshot: %w", err)
 	}
 	r.snapshots[snapshotID] = snapshot
 	if err := r.reconstructSnapshotProjectionsLocked(snapshotID, snapshot); err != nil {
 		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
+		r.materializedSnapshots, r.historicalProjectionLRU = materializedSnapshots, historicalProjectionLRU
 		r.commits, r.branches = commits, branches
 		return "", fmt.Errorf("reconstruct merge result: %w", err)
 	}
@@ -183,12 +188,14 @@ func (r *Repository) applyCleanCandidateLocked(candidate mergeCandidate, transac
 	mergedID, err := r.storeObject("commit", merged)
 	if err != nil {
 		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
+		r.materializedSnapshots, r.historicalProjectionLRU = materializedSnapshots, historicalProjectionLRU
 		r.commits, r.branches = commits, branches
 		return "", fmt.Errorf("store merge commit: %w", err)
 	}
 	r.commits[mergedID], r.branches[candidate.preview.TargetBranch] = merged, mergedID
 	if err := r.ensureBranchHeadProjectionsLocked(); err != nil {
 		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
+		r.materializedSnapshots, r.historicalProjectionLRU = materializedSnapshots, historicalProjectionLRU
 		r.commits, r.branches = commits, branches
 		return "", fmt.Errorf("pin merged snapshot: %w", err)
 	}
@@ -197,6 +204,7 @@ func (r *Repository) applyCleanCandidateLocked(candidate mergeCandidate, transac
 			return mergedID, fmt.Errorf("clean merge committed but directory sync failed: %w", errors.Join(err, r.maintainActiveProjectionLocked(candidate.preview.TargetBranch)))
 		}
 		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
+		r.materializedSnapshots, r.historicalProjectionLRU = materializedSnapshots, historicalProjectionLRU
 		r.commits, r.branches = commits, branches
 		_ = r.ensureBranchHeadProjectionsLocked()
 		return "", err
@@ -323,27 +331,33 @@ func (r *Repository) ResolveConflictedMerge(request ResolveConflictedMergeReques
 	}
 
 	objects, snapshots, projections, edgeProjections := r.objects, r.snapshots, r.projections, r.edgeProjections
+	materializedSnapshots, historicalProjectionLRU := r.materializedSnapshots, r.historicalProjectionLRU
 	r.objects, r.snapshots = cloneObjects(r.objects), cloneSnapshots(r.snapshots)
 	r.projections, r.edgeProjections = cloneProjectionMap(r.projections), cloneEdgeProjectionMap(r.edgeProjections)
+	r.materializedSnapshots, r.historicalProjectionLRU = cloneMaterializedSnapshots(r.materializedSnapshots), append([]ObjectID(nil), r.historicalProjectionLRU...)
 	snapshot, err := r.materializeSnapshotLocked(candidate.nodes, candidate.edges, candidate.schemaRoot)
 	if err != nil {
 		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
+		r.materializedSnapshots, r.historicalProjectionLRU = materializedSnapshots, historicalProjectionLRU
 		return fmt.Errorf("materialize resolved merge: %w", err)
 	}
 	snapshotID, err := r.storeObject("graph-snapshot", snapshot)
 	if err != nil {
 		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
+		r.materializedSnapshots, r.historicalProjectionLRU = materializedSnapshots, historicalProjectionLRU
 		return fmt.Errorf("store resolved merge snapshot: %w", err)
 	}
 	r.snapshots[snapshotID] = snapshot
 	if err := r.reconstructSnapshotProjectionsLocked(snapshotID, snapshot); err != nil {
 		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
+		r.materializedSnapshots, r.historicalProjectionLRU = materializedSnapshots, historicalProjectionLRU
 		return fmt.Errorf("reconstruct resolved merge: %w", err)
 	}
 	transaction.StagedSnapshot, transaction.Resolved, transaction.Restaged = snapshotID, true, true
 	transactionErr := r.persistMergeTransactionLocked(request.TargetBranch, request.TransactionID, &transaction)
 	if transactionErr != nil && !durableWriteCommitted(transactionErr) {
 		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
+		r.materializedSnapshots, r.historicalProjectionLRU = materializedSnapshots, historicalProjectionLRU
 		return transactionErr
 	}
 	r.mergeTransactions[request.TargetBranch] = transaction

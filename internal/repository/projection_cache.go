@@ -19,28 +19,37 @@ func (r *Repository) ensureSnapshotProjectionLocked(snapshotID ObjectID) error {
 	if !ok {
 		return fmt.Errorf("snapshot %q: %w", snapshotID, ErrCommitNotFound)
 	}
-	if _, materialized := r.materializedSnapshots[snapshotID]; materialized {
+	_, nodes := r.projections[snapshot.NodeRoot]
+	_, edges := r.edgeProjections[snapshotID]
+	if _, materialized := r.materializedSnapshots[snapshotID]; materialized && nodes && edges {
 		r.touchHistoricalProjectionLocked(snapshotID)
 		return nil
 	}
-	_, nodes := r.projections[snapshot.NodeRoot]
-	_, edges := r.edgeProjections[snapshotID]
+	if _, materialized := r.materializedSnapshots[snapshotID]; materialized {
+		delete(r.materializedSnapshots, snapshotID)
+		r.removeHistoricalProjectionLocked(snapshotID)
+	}
 	if nodes && edges {
 		r.materializedSnapshots[snapshotID] = struct{}{}
-	} else if nodes && r.legacyNodeOnlyProjectionLocked(snapshot.NodeRoot) {
-		r.materializedSnapshots[snapshotID] = struct{}{}
 	} else {
-		if err := r.reconstructSnapshotProjectionsLocked(snapshotID, snapshot); err != nil {
-			return err
+		if r.objectStore == nil {
+			return fmt.Errorf("%w: snapshot %q is not materialized", ErrProjectionUnavailable, snapshotID)
 		}
-		schema, err := r.schemaSnapshotLocked(snapshot.SchemaRoot)
-		if err != nil {
-			r.evictSnapshotProjectionLocked(snapshotID)
-			return err
-		}
-		if err := ValidateSchemaSnapshot(schema, r.projections[snapshot.NodeRoot], r.edgeProjections[snapshotID]); err != nil {
-			r.evictSnapshotProjectionLocked(snapshotID)
-			return fmt.Errorf("validate snapshot schema: %w", err)
+		if nodes && r.legacyNodeOnlyProjectionLocked(snapshot.NodeRoot) {
+			r.materializedSnapshots[snapshotID] = struct{}{}
+		} else {
+			if err := r.reconstructSnapshotProjectionsLocked(snapshotID, snapshot); err != nil {
+				return err
+			}
+			schema, err := r.schemaSnapshotLocked(snapshot.SchemaRoot)
+			if err != nil {
+				r.evictSnapshotProjectionLocked(snapshotID)
+				return err
+			}
+			if err := ValidateSchemaSnapshot(schema, r.projections[snapshot.NodeRoot], r.edgeProjections[snapshotID]); err != nil {
+				r.evictSnapshotProjectionLocked(snapshotID)
+				return fmt.Errorf("validate snapshot schema: %w", err)
+			}
 		}
 	}
 	r.touchHistoricalProjectionLocked(snapshotID)
@@ -141,4 +150,12 @@ func (r *Repository) evictSnapshotProjectionLocked(snapshotID ObjectID) {
 		}
 	}
 	delete(r.projections, snapshot.NodeRoot)
+}
+
+func cloneMaterializedSnapshots(source map[ObjectID]struct{}) map[ObjectID]struct{} {
+	result := make(map[ObjectID]struct{}, len(source))
+	for snapshotID := range source {
+		result[snapshotID] = struct{}{}
+	}
+	return result
 }

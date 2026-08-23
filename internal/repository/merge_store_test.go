@@ -53,6 +53,8 @@ func TestCleanMergeRefFailureLeavesDurableTargetUnchanged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AdvanceBranch main: %v", err)
 	}
+	beforeMaterialized := cloneMaterializedSnapshots(repo.materializedSnapshots)
+	beforeHistorical := append([]ObjectID(nil), repo.historicalProjectionLRU...)
 	repo.persistRepositoryFn = func() error { return errors.New("injected merge ref write failure") }
 
 	if _, err := repo.ApplyCleanBoundMerge("feature", "main", "owner", MergePreviewBinding{
@@ -62,6 +64,10 @@ func TestCleanMergeRefFailureLeavesDurableTargetUnchanged(t *testing.T) {
 	}
 	if got := repo.branches["main"]; got != target {
 		t.Fatalf("main head = %q, want unchanged %q", got, target)
+	}
+	if !reflect.DeepEqual(repo.materializedSnapshots, beforeMaterialized) ||
+		!reflect.DeepEqual(append([]ObjectID{}, repo.historicalProjectionLRU...), append([]ObjectID{}, beforeHistorical...)) {
+		t.Fatal("failed merge left projection cache metadata behind")
 	}
 	repo.persistRepositoryFn = nil
 	if err := repo.Close(); err != nil {

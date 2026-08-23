@@ -1,10 +1,44 @@
 package repository
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/autonomous-bits/spool/internal/repository/branch"
 )
+
+func TestEnsureSnapshotProjectionRejectsMissingStoreForStaleCacheMarker(t *testing.T) {
+	source := NewSeedRepository()
+	snapshotID := source.commits[source.branches["main"]].Snapshot
+	validator := &Repository{
+		snapshots:             map[ObjectID]graphSnapshot{snapshotID: source.snapshots[snapshotID]},
+		projections:           make(map[ObjectID]map[string]Node),
+		edgeProjections:       make(map[ObjectID]map[string]Edge),
+		materializedSnapshots: map[ObjectID]struct{}{snapshotID: {}},
+	}
+
+	if err := validator.ensureSnapshotProjectionLocked(snapshotID); !errors.Is(err, ErrProjectionUnavailable) {
+		t.Fatalf("ensure snapshot error = %v, want ErrProjectionUnavailable", err)
+	}
+}
+
+func TestEnsureSnapshotProjectionRebuildsStaleCacheMarker(t *testing.T) {
+	repo := NewSeedRepository()
+	snapshotID := repo.commits[repo.branches["main"]].Snapshot
+	snapshot := repo.snapshots[snapshotID]
+	delete(repo.projections, snapshot.NodeRoot)
+	delete(repo.edgeProjections, snapshotID)
+
+	if err := repo.ensureSnapshotProjectionLocked(snapshotID); err != nil {
+		t.Fatalf("ensure snapshot: %v", err)
+	}
+	if _, exists := repo.projections[snapshot.NodeRoot]; !exists {
+		t.Fatal("stale marker prevented node projection reconstruction")
+	}
+	if _, exists := repo.edgeProjections[snapshotID]; !exists {
+		t.Fatal("stale marker prevented edge projection reconstruction")
+	}
+}
 
 func commitSeedTitle(t *testing.T, repo *Repository, title string) ObjectID {
 	t.Helper()

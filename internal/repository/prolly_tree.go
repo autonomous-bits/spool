@@ -212,7 +212,11 @@ func (r *Repository) reconstructSnapshotProjectionsLocked(snapshotID ObjectID, s
 	}
 	r.projections[snapshot.NodeRoot] = nodes
 	r.edgeProjections[snapshotID] = edges
+	if r.materializedSnapshots == nil {
+		r.materializedSnapshots = make(map[ObjectID]struct{})
+	}
 	r.materializedSnapshots[snapshotID] = struct{}{}
+	r.touchHistoricalProjectionLocked(snapshotID)
 	return nil
 }
 
