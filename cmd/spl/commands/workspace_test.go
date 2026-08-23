@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -133,6 +134,58 @@ func TestWorkspaceInitRejectsDuplicateName(t *testing.T) {
 	}
 	if output.Len() != 0 {
 		t.Fatalf("duplicate init wrote success output: %q", output.String())
+	}
+}
+
+// TestWorkspaceInitSerializesConcurrentSameNameRequests verifies that
+// concurrent "workspace init" calls for the same name cannot both reserve an
+// identity and initialize state: identity reservation, state initialization,
+// and the registry write all happen under one held registry lock, so exactly
+// one call succeeds and the rest fail with an already-exists error rather
+// than racing to initialize orphaned or contended state.
+func TestWorkspaceInitSerializesConcurrentSameNameRequests(t *testing.T) {
+	root := t.TempDir()
+	const attempts = 8
+
+	var wg sync.WaitGroup
+	results := make([]error, attempts)
+	for i := 0; i < attempts; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			results[index] = runWorkspaceCommand(root, []string{"init", "alpha"}, &bytes.Buffer{})
+		}(i)
+	}
+	wg.Wait()
+
+	successes := 0
+	for _, err := range results {
+		if err == nil {
+			successes++
+			continue
+		}
+		if !strings.Contains(err.Error(), `workspace "alpha" already exists`) {
+			t.Fatalf("unexpected concurrent init error: %v", err)
+		}
+	}
+	if successes != 1 {
+		t.Fatalf("successful concurrent inits = %d, want 1", successes)
+	}
+
+	registry, err := workspacepkg.LoadRegistry(root)
+	if err != nil {
+		t.Fatalf("load registry: %v", err)
+	}
+	if len(registry.Workspaces) != 1 {
+		t.Fatalf("registered workspaces = %d, want 1", len(registry.Workspaces))
+	}
+	stored := registry.Workspaces[workspacepkg.Name("alpha")]
+	repo, err := repository.OpenRepository(stored.StateDir)
+	if err != nil {
+		t.Fatalf("open registered workspace state: %v", err)
+	}
+	if err := repo.Close(); err != nil {
+		t.Fatalf("close workspace state: %v", err)
 	}
 }
 
