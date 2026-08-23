@@ -86,22 +86,21 @@ func NewSeedRepositoryWithMergeState(stateDir string) (*Repository, error) {
 	}
 	loaded, err := repo.loadControlState()
 	if err != nil {
-		return nil, unlockAfterFailedOpen(repo.stateLock, err)
+		return nil, closeAfterFailedOpen(repo, err)
 	}
 	if !loaded {
 		if err := repo.seed(); err != nil {
-			return nil, unlockAfterFailedOpen(repo.stateLock, fmt.Errorf("seed repository: %w", err))
+			return nil, closeAfterFailedOpen(repo, fmt.Errorf("seed repository: %w", err))
 		}
 		if err := repo.initializeControlStateLocked(); err != nil {
-			return nil, unlockAfterFailedOpen(repo.stateLock, fmt.Errorf("initialize repository control state: %w", err))
+			return nil, closeAfterFailedOpen(repo, fmt.Errorf("initialize repository control state: %w", err))
 		}
 	}
 	if err := repo.RecoverMergeTransactions(); err != nil {
-		return nil, unlockAfterFailedOpen(repo.stateLock, err)
+		return nil, closeAfterFailedOpen(repo, err)
 	}
 	if err := repo.ensureProjectionForActiveBranchLocked(); err != nil {
-		closeErr := repo.closeProjectionLocked()
-		return nil, unlockAfterFailedOpen(repo.stateLock, errors.Join(err, closeErr))
+		return nil, closeAfterFailedOpen(repo, err)
 	}
 	return repo, nil
 }
@@ -111,6 +110,12 @@ func unlockAfterFailedOpen(lock *flock.Flock, operationErr error) error {
 		return errors.Join(operationErr, fmt.Errorf("unlock merge repository after failed open: %w", err))
 	}
 	return operationErr
+}
+
+func closeAfterFailedOpen(repo *Repository, operationErr error) error {
+	projectionErr := repo.closeProjectionLocked()
+	packErr := repo.objectStore.closePackGeneration()
+	return unlockAfterFailedOpen(repo.stateLock, errors.Join(operationErr, projectionErr, packErr))
 }
 
 // InitializeRepository creates and durably stores a seeded repository.
@@ -153,17 +158,16 @@ func openControlRepository(stateDir string) (*Repository, error) {
 	}
 	loaded, err := repo.loadControlState()
 	if err != nil {
-		return nil, unlockAfterFailedOpen(repo.stateLock, err)
+		return nil, closeAfterFailedOpen(repo, err)
 	}
 	if !loaded {
-		return nil, unlockAfterFailedOpen(repo.stateLock, ErrRepositoryNotInitialized)
+		return nil, closeAfterFailedOpen(repo, ErrRepositoryNotInitialized)
 	}
 	if err := repo.RecoverMergeTransactions(); err != nil {
-		return nil, unlockAfterFailedOpen(repo.stateLock, err)
+		return nil, closeAfterFailedOpen(repo, err)
 	}
 	if err := repo.ensureProjectionForActiveBranchLocked(); err != nil {
-		closeErr := repo.closeProjectionLocked()
-		return nil, unlockAfterFailedOpen(repo.stateLock, errors.Join(err, closeErr))
+		return nil, closeAfterFailedOpen(repo, err)
 	}
 	return repo, nil
 }
@@ -179,13 +183,14 @@ func (r *Repository) Close() error {
 	lock := r.stateLock
 	r.stateLock = nil
 	projectionErr := r.closeProjectionLocked()
+	packErr := r.objectStore.closePackGeneration()
 	r.mu.Unlock()
 	if lock != nil {
 		if err := lock.Unlock(); err != nil {
-			return errors.Join(projectionErr, fmt.Errorf("unlock merge repository: %w", err))
+			return errors.Join(projectionErr, packErr, fmt.Errorf("unlock merge repository: %w", err))
 		}
 	}
-	return projectionErr
+	return errors.Join(projectionErr, packErr)
 }
 
 // RecoverMergeTransactions restores valid durable merge transactions and discards invalid records.

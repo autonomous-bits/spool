@@ -32,6 +32,21 @@ type memoryPackIndex struct {
 	byObject map[ObjectID]PackIndexEntry
 }
 
+// packGeneration owns the validated immutable indexes listed by one manifest.
+// It is valid until that manifest is atomically replaced or the store closes.
+type packGeneration struct {
+	manifest PackManifest
+	indexes  map[PackID]packIndex
+}
+
+type packGenerationCloseError struct{ err error }
+
+func (e *packGenerationCloseError) Error() string {
+	return fmt.Sprintf("close replaced pack generation: %v", e.err)
+}
+
+func (e *packGenerationCloseError) Unwrap() error { return e.err }
+
 func (i *memoryPackIndex) Metadata() packIndexMetadata { return i.metadata }
 
 func (i *memoryPackIndex) Lookup(id ObjectID) (PackIndexEntry, bool, error) {
@@ -341,29 +356,25 @@ func (s *looseObjectStore) writePackManifest(manifest PackManifest) error {
 	if err := writeDurableStateFile(s.packManifestPath(), data); err != nil {
 		return fmt.Errorf("publish pack manifest: %w", err)
 	}
+	if err := s.closePackGeneration(); err != nil {
+		return &packGenerationCloseError{err: err}
+	}
 	return nil
 }
 
 func (s *looseObjectStore) readPackedObject(id ObjectID) (string, []byte, error) {
-	manifest, err := s.readPackManifest()
+	generation, err := s.openPackGeneration()
 	if err != nil {
 		return "", nil, err
 	}
 	var found bool
 	var objectType string
 	var objectData []byte
-	for _, metadata := range manifest.Packs {
-		index, err := s.openPackIndex(metadata)
-		if err != nil {
-			return "", nil, err
-		}
+	for _, metadata := range generation.manifest.Packs {
+		index := generation.indexes[metadata.ID]
 		entry, exists, lookupErr := index.Lookup(id)
-		closeErr := index.Close()
 		if lookupErr != nil {
 			return "", nil, fmt.Errorf("lookup pack index: %w", lookupErr)
-		}
-		if closeErr != nil {
-			return "", nil, fmt.Errorf("close pack index: %w", closeErr)
 		}
 		if !exists {
 			continue
@@ -385,6 +396,52 @@ func (s *looseObjectStore) readPackedObject(id ObjectID) (string, []byte, error)
 		return "", nil, fmt.Errorf("%w: %s", errLooseObjectNotFound, id)
 	}
 	return objectType, objectData, nil
+}
+
+func (s *looseObjectStore) openPackGeneration() (*packGeneration, error) {
+	if s.packGeneration != nil {
+		return s.packGeneration, nil
+	}
+	manifest, err := s.readPackManifest()
+	if err != nil {
+		return nil, err
+	}
+	generation := &packGeneration{
+		manifest: manifest,
+		indexes:  make(map[PackID]packIndex, len(manifest.Packs)),
+	}
+	for _, metadata := range manifest.Packs {
+		index, err := s.openPackIndex(metadata)
+		if err != nil {
+			return nil, errors.Join(err, closePackGeneration(generation))
+		}
+		generation.indexes[metadata.ID] = index
+	}
+	s.packGeneration = generation
+	return generation, nil
+}
+
+func (s *looseObjectStore) closePackGeneration() error {
+	generation := s.packGeneration
+	s.packGeneration = nil
+	return closePackGeneration(generation)
+}
+
+func closePackGeneration(generation *packGeneration) error {
+	if generation == nil {
+		return nil
+	}
+	var result error
+	for _, metadata := range generation.manifest.Packs {
+		index := generation.indexes[metadata.ID]
+		if index == nil {
+			continue
+		}
+		if err := index.Close(); err != nil {
+			result = errors.Join(result, fmt.Errorf("close pack index %q: %w", metadata.ID, err))
+		}
+	}
+	return result
 }
 
 func (s *looseObjectStore) openPackIndex(metadata PackMetadata) (packIndex, error) {

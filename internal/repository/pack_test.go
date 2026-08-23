@@ -336,6 +336,164 @@ func (s failingPackIndexStore) Write(string, packIndexMetadata, []PackIndexEntry
 	return s.err
 }
 
+type countingPackIndexStore struct {
+	base       packIndexStore
+	opens      int
+	closes     int
+	failAt     int
+	closeErrAt int
+	err        error
+}
+
+func (s *countingPackIndexStore) Open(path string) (packIndex, error) {
+	s.opens++
+	if s.failAt == s.opens {
+		return nil, s.err
+	}
+	index, err := s.base.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	closeErr := error(nil)
+	if s.closeErrAt == s.opens {
+		closeErr = s.err
+	}
+	return countingPackIndex{packIndex: index, onClose: func() { s.closes++ }, closeErr: closeErr}, nil
+}
+
+func (s *countingPackIndexStore) Write(path string, metadata packIndexMetadata, entries []PackIndexEntry) error {
+	return s.base.Write(path, metadata, entries)
+}
+
+type countingPackIndex struct {
+	packIndex
+	onClose  func()
+	closeErr error
+}
+
+func (i countingPackIndex) Close() error {
+	i.onClose()
+	return errors.Join(i.packIndex.Close(), i.closeErr)
+}
+
+func TestPackedReadsReuseGenerationIndexesAndCloseThemWithRepository(t *testing.T) {
+	stateDir := t.TempDir()
+	repo, err := InitializeRepository(stateDir)
+	if err != nil {
+		t.Fatalf("InitializeRepository: %v", err)
+	}
+	head := repo.branches["main"]
+	if _, err := repo.GC(GCOptions{}); err != nil {
+		t.Fatalf("GC: %v", err)
+	}
+	indexes := &countingPackIndexStore{base: binaryPackIndexStore{}}
+	repo.objectStore.packIndexes = indexes
+	delete(repo.objects, head)
+	delete(repo.objectStore.types, head)
+
+	if _, err := repo.objectStore.get(head, "commit"); err != nil {
+		t.Fatalf("first packed read: %v", err)
+	}
+	if indexes.opens != 1 {
+		t.Fatalf("first packed read opened %d indexes, want 1", indexes.opens)
+	}
+	delete(repo.objects, head)
+	delete(repo.objectStore.types, head)
+	if _, err := repo.objectStore.get(head, "commit"); err != nil {
+		t.Fatalf("second packed read: %v", err)
+	}
+	if indexes.opens != 1 {
+		t.Fatalf("second packed read opened %d indexes, want 1", indexes.opens)
+	}
+
+	if err := repo.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if indexes.closes != 1 {
+		t.Fatalf("Close closed %d indexes, want 1", indexes.closes)
+	}
+}
+
+func TestFailedPackGenerationInitializationClosesOpenedIndexes(t *testing.T) {
+	stateDir := t.TempDir()
+	repo, err := InitializeRepository(stateDir)
+	if err != nil {
+		t.Fatalf("InitializeRepository: %v", err)
+	}
+	closeTestRepository(t, repo)
+	if _, err := repo.GC(GCOptions{}); err != nil {
+		t.Fatalf("initial GC: %v", err)
+	}
+	if _, err := repo.AdvanceBranch("main"); err != nil {
+		t.Fatalf("AdvanceBranch: %v", err)
+	}
+	head := repo.branches["main"]
+	if _, err := repo.GC(GCOptions{}); err != nil {
+		t.Fatalf("second GC: %v", err)
+	}
+	injected := errors.New("injected index open failure")
+	indexes := &countingPackIndexStore{base: binaryPackIndexStore{}, failAt: 2, err: injected}
+	repo.objectStore.packIndexes = indexes
+	delete(repo.objects, head)
+	delete(repo.objectStore.types, head)
+
+	if _, err := repo.objectStore.get(head, "commit"); !errors.Is(err, injected) {
+		t.Fatalf("packed read error = %v, want injected index open failure", err)
+	}
+	if indexes.opens != 2 {
+		t.Fatalf("generation initialization opened %d indexes, want 2", indexes.opens)
+	}
+	if indexes.closes != 1 {
+		t.Fatalf("failed generation initialization closed %d indexes, want 1", indexes.closes)
+	}
+	if repo.objectStore.packGeneration != nil {
+		t.Fatal("failed generation initialization retained a cache")
+	}
+}
+
+func TestGCReportsCloseFailureAfterPublishingPackGeneration(t *testing.T) {
+	stateDir := t.TempDir()
+	repo, err := InitializeRepository(stateDir)
+	if err != nil {
+		t.Fatalf("InitializeRepository: %v", err)
+	}
+	closeTestRepository(t, repo)
+	head := repo.branches["main"]
+	if _, err := repo.GC(GCOptions{}); err != nil {
+		t.Fatalf("initial GC: %v", err)
+	}
+	injected := errors.New("injected index close failure")
+	indexes := &countingPackIndexStore{base: binaryPackIndexStore{}, closeErrAt: 1, err: injected}
+	repo.objectStore.packIndexes = indexes
+	delete(repo.objects, head)
+	delete(repo.objectStore.types, head)
+	if _, err := repo.objectStore.get(head, "commit"); err != nil {
+		t.Fatalf("read packed head: %v", err)
+	}
+	if _, err := repo.AdvanceBranch("main"); err != nil {
+		t.Fatalf("AdvanceBranch: %v", err)
+	}
+
+	result, err := repo.GC(GCOptions{})
+	var warning *GCCommittedWithWarningError
+	if !errors.As(err, &warning) {
+		t.Fatalf("GC error = %v, want GCCommittedWithWarningError", err)
+	}
+	if !errors.Is(err, injected) {
+		t.Fatalf("GC error = %v, want injected close failure", err)
+	}
+	if result.PackedObjects == 0 || warning.Result != result {
+		t.Fatalf("GC result = %#v, warning result = %#v, want published pack result", result, warning.Result)
+	}
+	manifest, err := repo.objectStore.readPackManifest()
+	if err != nil {
+		t.Fatalf("read published manifest: %v", err)
+	}
+	if len(manifest.Packs) != 2 {
+		t.Fatalf("published manifest packs = %d, want 2", len(manifest.Packs))
+	}
+}
+
 func TestGCPackIndexFailureLeavesOldGenerationReadable(t *testing.T) {
 	stateDir := t.TempDir()
 	repo, err := InitializeRepository(stateDir)

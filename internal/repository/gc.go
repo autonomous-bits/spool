@@ -140,10 +140,15 @@ func (r *Repository) GC(options GCOptions) (GCResult, error) {
 
 	published := false
 	previousManifest := manifest
+	var cleanupErr error
 	if len(replacement) != 0 {
 		metadata, err := r.objectStore.writeAndPublishPack(replacement, manifest, options.Repack)
 		if err != nil {
-			return result, err
+			var closeErr *packGenerationCloseError
+			if !errors.As(err, &closeErr) {
+				return result, err
+			}
+			cleanupErr = errors.Join(cleanupErr, err)
 		}
 		published = true
 		result.PackedObjects = uint64(len(replacement))
@@ -154,7 +159,6 @@ func (r *Repository) GC(options GCOptions) (GCResult, error) {
 		}
 	}
 
-	var cleanupErr error
 	var removedBytes uint64
 	if len(duplicateLoose) != 0 {
 		count, bytes, err := removeLooseObjectFiles(duplicateLoose)
@@ -391,7 +395,7 @@ func (s *looseObjectStore) writeAndPublishPack(
 		next.Packs = append(append([]PackMetadata(nil), previous.Packs...), metadata)
 	}
 	if err := s.writePackManifest(next); err != nil {
-		return PackMetadata{}, err
+		return metadata, err
 	}
 	return metadata, nil
 }

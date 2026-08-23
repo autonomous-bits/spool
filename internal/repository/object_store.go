@@ -33,10 +33,11 @@ const objectIDHexLength = 64
 // looseObjectStore keeps canonical object bytes in memory and, when stateDir is
 // set, durably mirrors them below stateDir/objects/loose.
 type looseObjectStore struct {
-	looseDir    string
-	cache       *map[ObjectID][]byte
-	types       map[ObjectID]string
-	packIndexes packIndexStore
+	looseDir       string
+	cache          *map[ObjectID][]byte
+	types          map[ObjectID]string
+	packIndexes    packIndexStore
+	packGeneration *packGeneration
 }
 
 func newLooseObjectStore(stateDir string, cache *map[ObjectID][]byte) *looseObjectStore {
