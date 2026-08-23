@@ -72,8 +72,8 @@ func (r *Repository) ImpactContext(ctx context.Context, request ImpactRequest) (
 	if err := ctx.Err(); err != nil {
 		return ImpactResult{}, err
 	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if err := r.ensureOpenLocked(); err != nil {
 		return ImpactResult{}, err
 	}
@@ -88,6 +88,9 @@ func (r *Repository) ImpactContext(ctx context.Context, request ImpactRequest) (
 		return ImpactResult{}, err
 	}
 	baseSnapshot := r.commits[commitID].Snapshot
+	if err := r.ensureSnapshotProjectionLocked(baseSnapshot); err != nil {
+		return ImpactResult{}, err
+	}
 	snapshot := r.snapshots[baseSnapshot]
 	nodes, err := cloneImpactNodes(ctx, r.projections[snapshot.NodeRoot])
 	if err != nil {

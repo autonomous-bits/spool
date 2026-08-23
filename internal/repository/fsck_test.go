@@ -74,6 +74,7 @@ func TestFsckChecksProllyOrderingAndMergeBindings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PinBranch: %v", err)
 	}
+
 	badRoot, err := repo.objectStore.put(prollyTreeLeafType, prollyTreeLeaf{Entries: []prollyTreeEntry{
 		{Key: "z", Value: ObjectID("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")},
 		{Key: "a", Value: ObjectID("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")},
@@ -103,6 +104,39 @@ func TestFsckChecksProllyOrderingAndMergeBindings(t *testing.T) {
 	}
 	if !hasFsckDiagnostic(result, "invalid-prolly-leaf") {
 		t.Fatalf("result = %#v, want invalid-prolly-leaf", result)
+	}
+}
+
+func TestFsckReportsInvalidStagedGraphWhenSnapshotProjectionCannotMaterialize(t *testing.T) {
+	stateDir := t.TempDir()
+	repo, err := InitializeRepository(stateDir)
+	if err != nil {
+		t.Fatalf("InitializeRepository: %v", err)
+	}
+	if _, err := repo.StageMutationBatch(StageMutationRequest{
+		Branch:     "main",
+		Operations: []MutationOperation{{Action: "add", Entity: "node", ID: "staged-node", Title: "staged"}},
+	}); err != nil {
+		t.Fatalf("StageMutationBatch: %v", err)
+	}
+	snapshot := repo.snapshots[repo.commits[repo.branches["main"]].Snapshot]
+	nodeRootPath, err := repo.objectStore.path(snapshot.NodeRoot)
+	if err != nil {
+		t.Fatalf("node root path: %v", err)
+	}
+	if err := repo.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if err := os.WriteFile(nodeRootPath, []byte("corrupt"), 0o600); err != nil {
+		t.Fatalf("corrupt node root: %v", err)
+	}
+
+	result, err := FsckRepository(stateDir)
+	if !errors.Is(err, ErrFsckCorrupt) {
+		t.Fatalf("FsckRepository error = %v, want ErrFsckCorrupt", err)
+	}
+	if !hasFsckDiagnostic(result, "invalid-staged-graph") {
+		t.Fatalf("result = %#v, want invalid-staged-graph", result)
 	}
 }
 

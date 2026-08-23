@@ -99,6 +99,7 @@ func TestProllySnapshotReconstructsDurableProjections(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create durable repository: %v", err)
 	}
+
 	if _, err := repo.StageMutationBatch(StageMutationRequest{
 		Branch: "main",
 		Operations: []MutationOperation{{
@@ -125,6 +126,34 @@ func TestProllySnapshotReconstructsDurableProjections(t *testing.T) {
 	}
 	if got := snapshot.NodeCount; got != 2 {
 		t.Fatalf("durably reconstructed NodeCount = %d, want 2", got)
+	}
+}
+
+func TestDirectReconstructionBoundsHistoricalProjectionCache(t *testing.T) {
+	repo := NewSeedRepository()
+	schemaRoot := repo.snapshots[repo.commits[repo.branches["main"]].Snapshot].SchemaRoot
+	snapshotIDs := make([]ObjectID, 0, historicalProjectionCacheCapacity+1)
+	for index := range historicalProjectionCacheCapacity + 1 {
+		nodes := map[string]Node{
+			SeedNodeID: {ID: SeedNodeID, Title: fmt.Sprintf("version %d", index)},
+		}
+		snapshot, err := repo.materializeSnapshotLocked(nodes, map[string]Edge{}, schemaRoot)
+		if err != nil {
+			t.Fatalf("materialize snapshot %d: %v", index, err)
+		}
+		snapshotID := repo.store("graph-snapshot", snapshot)
+		repo.snapshots[snapshotID] = snapshot
+		if err := repo.reconstructSnapshotProjectionsLocked(snapshotID, snapshot); err != nil {
+			t.Fatalf("reconstruct snapshot %d: %v", index, err)
+		}
+		snapshotIDs = append(snapshotIDs, snapshotID)
+	}
+
+	if got := len(repo.historicalProjectionLRU); got != historicalProjectionCacheCapacity {
+		t.Fatalf("historical cache entries = %d, want %d", got, historicalProjectionCacheCapacity)
+	}
+	if _, exists := repo.edgeProjections[snapshotIDs[0]]; exists {
+		t.Fatal("direct reconstruction retained the least-recently-used projection")
 	}
 }
 

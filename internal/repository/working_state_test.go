@@ -542,6 +542,8 @@ func TestCommitStagedMutationsRollsBackNewNodeRootProjectionOnPersistenceFailure
 	repo := NewSeedRepository()
 	beforeSnapshots, beforeProjections := len(repo.snapshots), len(repo.projections)
 	beforeHead := repo.branches["main"]
+	beforeMaterialized := cloneMaterializedSnapshots(repo.materializedSnapshots)
+	beforeHistorical := append([]ObjectID(nil), repo.historicalProjectionLRU...)
 	if _, err := repo.StageMutationBatch(StageMutationRequest{
 		Branch:     "main",
 		Operations: []MutationOperation{{Action: "add", Entity: "node", ID: "node-2", Title: "Second node"}},
@@ -555,6 +557,10 @@ func TestCommitStagedMutationsRollsBackNewNodeRootProjectionOnPersistenceFailure
 	}
 	if len(repo.snapshots) != beforeSnapshots || len(repo.projections) != beforeProjections || repo.branches["main"] != beforeHead {
 		t.Fatal("failed commit left a snapshot, projection, or branch update behind")
+	}
+	if !reflect.DeepEqual(repo.materializedSnapshots, beforeMaterialized) ||
+		!reflect.DeepEqual(append([]ObjectID{}, repo.historicalProjectionLRU...), append([]ObjectID{}, beforeHistorical...)) {
+		t.Fatal("failed commit left projection cache metadata behind")
 	}
 }
 

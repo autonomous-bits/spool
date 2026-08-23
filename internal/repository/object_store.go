@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/fxamacker/cbor/v2"
 	"lukechampine.com/blake3"
@@ -33,14 +34,22 @@ const objectIDHexLength = 64
 // looseObjectStore keeps canonical object bytes in memory and, when stateDir is
 // set, durably mirrors them below stateDir/objects/loose.
 type looseObjectStore struct {
-	looseDir    string
-	cache       *map[ObjectID][]byte
-	types       map[ObjectID]string
-	packIndexes packIndexStore
+	mu             sync.Mutex
+	looseDir       string
+	cache          *map[ObjectID][]byte
+	types          map[ObjectID]string
+	packIndexes    packIndexStore
+	packGeneration *packGeneration
+	writeStateFile func(string, []byte) error
 }
 
 func newLooseObjectStore(stateDir string, cache *map[ObjectID][]byte) *looseObjectStore {
-	store := &looseObjectStore{cache: cache, types: make(map[ObjectID]string), packIndexes: binaryPackIndexStore{}}
+	store := &looseObjectStore{
+		cache:          cache,
+		types:          make(map[ObjectID]string),
+		packIndexes:    binaryPackIndexStore{},
+		writeStateFile: writeDurableStateFile,
+	}
 	if stateDir != "" {
 		store.looseDir = filepath.Join(stateDir, "objects", "loose")
 	}
@@ -56,6 +65,8 @@ func (s *looseObjectStore) put(objectType string, value any) (ObjectID, error) {
 }
 
 func (s *looseObjectStore) putEncoded(objectType string, encoded []byte) (ObjectID, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if objectType == "" {
 		return "", fmt.Errorf("%w: empty type", errLooseObjectCorrupt)
 	}
@@ -80,6 +91,8 @@ func (s *looseObjectStore) putEncoded(objectType string, encoded []byte) (Object
 }
 
 func (s *looseObjectStore) get(id ObjectID, objectType string) ([]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if objectType == "" {
 		return nil, fmt.Errorf("%w: empty expected type", errLooseObjectType)
 	}
@@ -117,6 +130,12 @@ func (s *looseObjectStore) get(id ObjectID, objectType string) ([]byte, error) {
 // type. Callers that interpret the payload must still enforce their expected
 // type; this is shared by graph walking and future alternate object locations.
 func (s *looseObjectStore) getAny(id ObjectID) (string, []byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.getAnyLocked(id)
+}
+
+func (s *looseObjectStore) getAnyLocked(id ObjectID) (string, []byte, error) {
 	if !validLooseObjectID(id) {
 		return "", nil, fmt.Errorf("%w: %q", errInvalidLooseObjectID, id)
 	}
@@ -144,11 +163,13 @@ func (s *looseObjectStore) getAny(id ObjectID) (string, []byte, error) {
 // getAnyDurable bypasses the cache so maintenance can make decisions from the
 // current durable object location rather than an earlier verified read.
 func (s *looseObjectStore) getAnyDurable(id ObjectID) (string, []byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if !validLooseObjectID(id) {
 		return "", nil, fmt.Errorf("%w: %q", errInvalidLooseObjectID, id)
 	}
 	if s.looseDir == "" {
-		return s.getAny(id)
+		return s.getAnyLocked(id)
 	}
 	objectType, encoded, err := s.getAnyUncached(id)
 	if err != nil {

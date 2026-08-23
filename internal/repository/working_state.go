@@ -288,7 +288,11 @@ func (r *Repository) validateMutationBatchLocked(head ObjectID, operations []Mut
 		return ErrInvalidMutationBatch
 	}
 
-	snapshot := r.snapshots[r.commits[head].Snapshot]
+	snapshotID := r.commits[head].Snapshot
+	if err := r.ensureSnapshotProjectionLocked(snapshotID); err != nil {
+		return err
+	}
+	snapshot := r.snapshots[snapshotID]
 	existingNodes := r.projections[snapshot.NodeRoot]
 	if existingNodes == nil {
 		return ErrInvalidMutationBatch
@@ -417,6 +421,9 @@ func (r *Repository) candidateGraphLocked(head ObjectID, staged StagedMutationSe
 	if !ok {
 		return nil, nil, ErrInvalidMutationBatch
 	}
+	if err := r.ensureSnapshotProjectionLocked(base.Snapshot); err != nil {
+		return nil, nil, err
+	}
 	nodes, edges := cloneNodes(r.projections[snapshot.NodeRoot]), cloneEdges(r.edgeProjections[base.Snapshot])
 	applyMutationOperations(nodes, edges, staged.Operations)
 	if err := validateCandidateValues(nodes, edges); err != nil {
@@ -498,9 +505,11 @@ func (r *Repository) CommitStagedMutationBatch(request CommitStagedMutationReque
 	base := r.commits[head].Snapshot
 
 	objects, snapshots, projections, edgeProjections := r.objects, r.snapshots, r.projections, r.edgeProjections
+	materializedSnapshots, historicalProjectionLRU := r.materializedSnapshots, r.historicalProjectionLRU
 	commits, branches, stagedMutations := r.commits, r.branches, r.stagedMutations
 	r.objects, r.snapshots = cloneObjects(r.objects), cloneSnapshots(r.snapshots)
 	r.projections, r.edgeProjections = cloneProjectionMap(r.projections), cloneEdgeProjectionMap(r.edgeProjections)
+	r.materializedSnapshots, r.historicalProjectionLRU = cloneMaterializedSnapshots(r.materializedSnapshots), append([]ObjectID(nil), r.historicalProjectionLRU...)
 	r.commits, r.branches, r.stagedMutations = cloneCommits(r.commits), cloneBranches(r.branches), cloneStagedMutations(r.stagedMutations)
 
 	schemaRoot := r.snapshots[base].SchemaRoot
@@ -508,6 +517,7 @@ func (r *Repository) CommitStagedMutationBatch(request CommitStagedMutationReque
 		schemaRoot, err = r.storeObject("schema-root", *staged.TargetSchema)
 		if err != nil {
 			r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
+			r.materializedSnapshots, r.historicalProjectionLRU = materializedSnapshots, historicalProjectionLRU
 			r.commits, r.branches, r.stagedMutations = commits, branches, stagedMutations
 			return CommitStagedMutationResult{}, fmt.Errorf("store staged schema: %w", err)
 		}
@@ -515,18 +525,21 @@ func (r *Repository) CommitStagedMutationBatch(request CommitStagedMutationReque
 	snapshot, err := r.materializeSnapshotLocked(nodes, edges, schemaRoot)
 	if err != nil {
 		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
+		r.materializedSnapshots, r.historicalProjectionLRU = materializedSnapshots, historicalProjectionLRU
 		r.commits, r.branches, r.stagedMutations = commits, branches, stagedMutations
 		return CommitStagedMutationResult{}, fmt.Errorf("materialize staged mutations: %w", err)
 	}
 	snapshotID, err := r.storeObject("graph-snapshot", snapshot)
 	if err != nil {
 		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
+		r.materializedSnapshots, r.historicalProjectionLRU = materializedSnapshots, historicalProjectionLRU
 		r.commits, r.branches, r.stagedMutations = commits, branches, stagedMutations
 		return CommitStagedMutationResult{}, fmt.Errorf("store staged snapshot: %w", err)
 	}
 	r.snapshots[snapshotID] = snapshot
 	if err := r.reconstructSnapshotProjectionsLocked(snapshotID, snapshot); err != nil {
 		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
+		r.materializedSnapshots, r.historicalProjectionLRU = materializedSnapshots, historicalProjectionLRU
 		r.commits, r.branches, r.stagedMutations = commits, branches, stagedMutations
 		return CommitStagedMutationResult{}, fmt.Errorf("reconstruct staged snapshot: %w", err)
 	}
@@ -534,16 +547,25 @@ func (r *Repository) CommitStagedMutationBatch(request CommitStagedMutationReque
 	nextID, err := r.storeObject("commit", next)
 	if err != nil {
 		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
+		r.materializedSnapshots, r.historicalProjectionLRU = materializedSnapshots, historicalProjectionLRU
 		r.commits, r.branches, r.stagedMutations = commits, branches, stagedMutations
 		return CommitStagedMutationResult{}, fmt.Errorf("store staged commit: %w", err)
 	}
 	r.commits[nextID], r.branches[request.Branch] = next, nextID
+	if err := r.ensureBranchHeadProjectionsLocked(); err != nil {
+		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
+		r.materializedSnapshots, r.historicalProjectionLRU = materializedSnapshots, historicalProjectionLRU
+		r.commits, r.branches, r.stagedMutations = commits, branches, stagedMutations
+		return CommitStagedMutationResult{}, fmt.Errorf("pin committed snapshot: %w", err)
+	}
 	delete(r.stagedMutations, request.Branch)
 	result := CommitStagedMutationResult{Branch: request.Branch, Commit: nextID}
 	refErr := r.writeRefLocked(request.Branch, head, nextID, "commit")
 	if refErr != nil && !durableWriteCommitted(refErr) {
 		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
+		r.materializedSnapshots, r.historicalProjectionLRU = materializedSnapshots, historicalProjectionLRU
 		r.commits, r.branches, r.stagedMutations = commits, branches, stagedMutations
+		_ = r.ensureBranchHeadProjectionsLocked()
 		return CommitStagedMutationResult{}, refErr
 	}
 	cleanupErr := r.writeStagedLocked(request.Branch, nil)

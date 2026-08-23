@@ -19,11 +19,12 @@ import (
 )
 
 const (
-	packIndexMagic      = "IDGI"
-	packIndexHeaderSize = 14
-	packIndexEntrySize  = 60
-	packHeaderSize      = 12
-	maxPackIDLength     = 64
+	packIndexMagic       = "IDGI"
+	packIndexHeaderSize  = 14
+	packIndexEntrySize   = 60
+	packHeaderSize       = 12
+	maxPackIDLength      = 64
+	maxGenerationReaders = 32
 )
 
 type memoryPackIndex struct {
@@ -31,6 +32,34 @@ type memoryPackIndex struct {
 	entries  []PackIndexEntry
 	byObject map[ObjectID]PackIndexEntry
 }
+
+// packGeneration owns the validated immutable indexes listed by one manifest.
+// It is valid until that manifest is atomically replaced or the store closes.
+type packGeneration struct {
+	manifest  PackManifest
+	indexes   map[PackID]packIndex
+	objects   map[ObjectID][]packedObjectLocation
+	readers   map[PackID]*packReader
+	readerLRU []PackID
+}
+
+type packedObjectLocation struct {
+	metadata PackMetadata
+	entry    PackIndexEntry
+}
+
+type packReader struct {
+	file *os.File
+	size uint64
+}
+
+type packGenerationCloseError struct{ err error }
+
+func (e *packGenerationCloseError) Error() string {
+	return fmt.Sprintf("close replaced pack generation: %v", e.err)
+}
+
+func (e *packGenerationCloseError) Unwrap() error { return e.err }
 
 func (i *memoryPackIndex) Metadata() packIndexMetadata { return i.metadata }
 
@@ -338,53 +367,158 @@ func (s *looseObjectStore) writePackManifest(manifest PackManifest) error {
 	if err != nil {
 		return fmt.Errorf("encode pack manifest: %w", err)
 	}
-	if err := writeDurableStateFile(s.packManifestPath(), data); err != nil {
-		return fmt.Errorf("publish pack manifest: %w", err)
+	writeErr := s.writeStateFile(s.packManifestPath(), data)
+	if writeErr != nil && !durableWriteCommitted(writeErr) {
+		return fmt.Errorf("publish pack manifest: %w", writeErr)
+	}
+	s.mu.Lock()
+	closeErr := s.closePackGenerationLocked()
+	s.mu.Unlock()
+	if writeErr != nil {
+		return fmt.Errorf("publish pack manifest: %w", errors.Join(writeErr, closeErr))
+	}
+	if closeErr != nil {
+		return &packGenerationCloseError{err: closeErr}
 	}
 	return nil
 }
 
 func (s *looseObjectStore) readPackedObject(id ObjectID) (string, []byte, error) {
-	manifest, err := s.readPackManifest()
+	generation, err := s.openPackGeneration()
 	if err != nil {
 		return "", nil, err
+	}
+	locations, ok := generation.objects[id]
+	if !ok {
+		return "", nil, fmt.Errorf("%w: %s", errLooseObjectNotFound, id)
 	}
 	var found bool
 	var objectType string
 	var objectData []byte
-	for _, metadata := range manifest.Packs {
-		index, err := s.openPackIndex(metadata)
+	for _, location := range locations {
+		reader, err := generation.reader(s, location.metadata)
 		if err != nil {
 			return "", nil, err
 		}
-		entry, exists, lookupErr := index.Lookup(id)
-		closeErr := index.Close()
-		if lookupErr != nil {
-			return "", nil, fmt.Errorf("lookup pack index: %w", lookupErr)
-		}
-		if closeErr != nil {
-			return "", nil, fmt.Errorf("close pack index: %w", closeErr)
-		}
-		if !exists {
-			continue
-		}
-		packPath, err := s.packPath(metadata.ID)
-		if err != nil {
-			return "", nil, err
-		}
-		nextType, nextData, err := readPackedObjectFile(metadata.ID, packPath, entry, metadata.ObjectCount)
+		nextType, nextData, err := readPackedObjectReader(location.metadata.ID, reader, location.entry)
 		if err != nil {
 			return "", nil, err
 		}
 		if found && (objectType != nextType || !bytes.Equal(objectData, nextData)) {
-			return "", nil, &PackCorruptionError{Pack: metadata.ID, Object: id, Offset: entry.Offset, Detail: "duplicate object has different payload or type"}
+			return "", nil, &PackCorruptionError{
+				Pack: location.metadata.ID, Object: id, Offset: location.entry.Offset,
+				Detail: "duplicate object has different payload or type",
+			}
 		}
 		found, objectType, objectData = true, nextType, nextData
 	}
-	if !found {
-		return "", nil, fmt.Errorf("%w: %s", errLooseObjectNotFound, id)
-	}
 	return objectType, objectData, nil
+}
+
+func (s *looseObjectStore) openPackGeneration() (*packGeneration, error) {
+	if s.packGeneration != nil {
+		return s.packGeneration, nil
+	}
+	manifest, err := s.readPackManifest()
+	if err != nil {
+		return nil, err
+	}
+	generation := &packGeneration{
+		manifest: manifest,
+		indexes:  make(map[PackID]packIndex, len(manifest.Packs)),
+		objects:  make(map[ObjectID][]packedObjectLocation),
+		readers:  make(map[PackID]*packReader, len(manifest.Packs)),
+	}
+	for _, metadata := range manifest.Packs {
+		index, err := s.openPackIndex(metadata)
+		if err != nil {
+			return nil, errors.Join(err, closePackGeneration(generation))
+		}
+		generation.indexes[metadata.ID] = index
+		if err := index.ForEach(func(entry PackIndexEntry) error {
+			generation.objects[entry.Object] = append(generation.objects[entry.Object], packedObjectLocation{
+				metadata: metadata,
+				entry:    entry,
+			})
+			return nil
+		}); err != nil {
+			return nil, errors.Join(fmt.Errorf("enumerate pack index: %w", err), closePackGeneration(generation))
+		}
+	}
+	s.packGeneration = generation
+	return generation, nil
+}
+
+func (g *packGeneration) reader(store *looseObjectStore, metadata PackMetadata) (*packReader, error) {
+	if reader := g.readers[metadata.ID]; reader != nil {
+		g.touchReader(metadata.ID)
+		return reader, nil
+	}
+	if len(g.readerLRU) == maxGenerationReaders {
+		evicted := g.readerLRU[0]
+		reader := g.readers[evicted]
+		delete(g.readers, evicted)
+		g.readerLRU = g.readerLRU[1:]
+		if err := reader.file.Close(); err != nil {
+			return nil, fmt.Errorf("close evicted pack %q: %w", evicted, err)
+		}
+	}
+	path, err := store.packPath(metadata.ID)
+	if err != nil {
+		return nil, err
+	}
+	reader, err := openPackReader(metadata.ID, path, metadata.ObjectCount)
+	if err != nil {
+		return nil, err
+	}
+	g.readers[metadata.ID] = reader
+	g.readerLRU = append(g.readerLRU, metadata.ID)
+	return reader, nil
+}
+
+func (g *packGeneration) touchReader(id PackID) {
+	for index, current := range g.readerLRU {
+		if current == id {
+			copy(g.readerLRU[index:], g.readerLRU[index+1:])
+			g.readerLRU[len(g.readerLRU)-1] = id
+			return
+		}
+	}
+}
+
+func (s *looseObjectStore) closePackGeneration() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closePackGenerationLocked()
+}
+
+func (s *looseObjectStore) closePackGenerationLocked() error {
+	generation := s.packGeneration
+	s.packGeneration = nil
+	return closePackGeneration(generation)
+}
+
+func closePackGeneration(generation *packGeneration) error {
+	if generation == nil {
+		return nil
+	}
+	var result error
+	for _, metadata := range generation.manifest.Packs {
+		reader := generation.readers[metadata.ID]
+		if reader != nil {
+			if err := reader.file.Close(); err != nil {
+				result = errors.Join(result, fmt.Errorf("close pack %q: %w", metadata.ID, err))
+			}
+		}
+		index := generation.indexes[metadata.ID]
+		if index == nil {
+			continue
+		}
+		if err := index.Close(); err != nil {
+			result = errors.Join(result, fmt.Errorf("close pack index %q: %w", metadata.ID, err))
+		}
+	}
+	return result
 }
 
 func (s *looseObjectStore) openPackIndex(metadata PackMetadata) (packIndex, error) {
@@ -406,47 +540,68 @@ func (s *looseObjectStore) openPackIndex(metadata PackMetadata) (packIndex, erro
 }
 
 func readPackedObjectFile(packID PackID, path string, entry PackIndexEntry, objectCount uint32) (objectType string, objectData []byte, err error) {
-	if err := validatePackIndexEntry(packID, entry); err != nil {
+	reader, err := openPackReader(packID, path, objectCount)
+	if err != nil {
 		return "", nil, err
 	}
-	pathInfo, err := os.Lstat(path)
-	if err != nil {
-		return "", nil, fmt.Errorf("inspect pack %q: %w", packID, err)
-	}
-	if !pathInfo.Mode().IsRegular() {
-		return "", nil, &PackCorruptionError{Pack: packID, Detail: "pack is not a regular file"}
-	}
-	file, err := os.Open(path)
-	if err != nil {
-		return "", nil, fmt.Errorf("open pack %q: %w", packID, err)
-	}
 	defer func() {
-		if closeErr := file.Close(); closeErr != nil && err == nil {
+		if closeErr := reader.file.Close(); closeErr != nil && err == nil {
 			err = fmt.Errorf("close pack %q: %w", packID, closeErr)
 		}
 	}()
+	return readPackedObjectReader(packID, reader, entry)
+}
+
+func openPackReader(packID PackID, path string, objectCount uint32) (*packReader, error) {
+	pathInfo, err := os.Lstat(path)
+	if err != nil {
+		return nil, fmt.Errorf("inspect pack %q: %w", packID, err)
+	}
+	if !pathInfo.Mode().IsRegular() {
+		return nil, &PackCorruptionError{Pack: packID, Detail: "pack is not a regular file"}
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open pack %q: %w", packID, err)
+	}
+	closeWithError := func(operationErr error) (*packReader, error) {
+		if closeErr := file.Close(); closeErr != nil {
+			return nil, errors.Join(operationErr, fmt.Errorf("close pack %q: %w", packID, closeErr))
+		}
+		return nil, operationErr
+	}
 	info, err := file.Stat()
 	if err != nil {
-		return "", nil, fmt.Errorf("inspect pack %q: %w", packID, err)
+		return closeWithError(fmt.Errorf("inspect pack %q: %w", packID, err))
 	}
 	if !info.Mode().IsRegular() {
-		return "", nil, &PackCorruptionError{Pack: packID, Detail: "pack is not a regular file"}
+		return closeWithError(&PackCorruptionError{Pack: packID, Detail: "pack is not a regular file"})
 	}
-	if entry.Offset > uint64(info.Size()) || entry.CompressedSize > uint64(info.Size())-entry.Offset {
-		return "", nil, &PackCorruptionError{Pack: packID, Object: entry.Object, Offset: entry.Offset, Detail: "entry exceeds pack length"}
+	if info.Size() < packHeaderSize {
+		return closeWithError(&PackCorruptionError{Pack: packID, Detail: "pack is shorter than its header"})
 	}
-	header, err := readPackHeader(file)
+	header, err := readPackHeaderAt(file)
 	if err != nil {
-		return "", nil, &PackCorruptionError{Pack: packID, Object: entry.Object, Offset: entry.Offset, Detail: err.Error()}
+		return closeWithError(&PackCorruptionError{Pack: packID, Detail: err.Error()})
 	}
 	if err := validatePackHeader(header); err != nil {
-		return "", nil, err
+		return closeWithError(err)
 	}
 	if header.ObjectCount != objectCount {
-		return "", nil, &PackCorruptionError{Pack: packID, Object: entry.Object, Offset: entry.Offset, Detail: "pack and index object counts differ"}
+		return closeWithError(&PackCorruptionError{Pack: packID, Detail: "pack and index object counts differ"})
+	}
+	return &packReader{file: file, size: uint64(info.Size())}, nil
+}
+
+func readPackedObjectReader(packID PackID, reader *packReader, entry PackIndexEntry) (string, []byte, error) {
+	if err := validatePackIndexEntry(packID, entry); err != nil {
+		return "", nil, err
+	}
+	if entry.Offset > reader.size || entry.CompressedSize > reader.size-entry.Offset {
+		return "", nil, &PackCorruptionError{Pack: packID, Object: entry.Object, Offset: entry.Offset, Detail: "entry exceeds pack length"}
 	}
 	compressed := make([]byte, int(entry.CompressedSize))
-	if _, err := file.ReadAt(compressed, int64(entry.Offset)); err != nil {
+	if _, err := reader.file.ReadAt(compressed, int64(entry.Offset)); err != nil {
 		return "", nil, &PackCorruptionError{Pack: packID, Object: entry.Object, Offset: entry.Offset, Detail: "read compressed entry: " + err.Error()}
 	}
 	if crc32.ChecksumIEEE(compressed) != entry.CRC32 {
@@ -464,11 +619,23 @@ func readPackedObjectFile(packID PackID, path string, entry PackIndexEntry, obje
 	if uint64(len(envelope)) != entry.UncompressedSize {
 		return "", nil, &PackCorruptionError{Pack: packID, Object: entry.Object, Offset: entry.Offset, Detail: "uncompressed entry size does not match"}
 	}
-	objectType, objectData, err = decodeObjectEnvelope(envelope, entry.Object)
+	objectType, objectData, err := decodeObjectEnvelope(envelope, entry.Object)
 	if err != nil {
 		return "", nil, &PackCorruptionError{Pack: packID, Object: entry.Object, Offset: entry.Offset, Detail: err.Error()}
 	}
 	return objectType, objectData, nil
+}
+
+func readPackHeaderAt(reader io.ReaderAt) (packHeader, error) {
+	var raw [packHeaderSize]byte
+	if _, err := reader.ReadAt(raw[:], 0); err != nil {
+		return packHeader{}, fmt.Errorf("read pack header: %w", err)
+	}
+	var header packHeader
+	copy(header.Magic[:], raw[:4])
+	header.Version = binary.BigEndian.Uint32(raw[4:8])
+	header.ObjectCount = binary.BigEndian.Uint32(raw[8:12])
+	return header, nil
 }
 
 func readPackHeader(reader io.Reader) (packHeader, error) {

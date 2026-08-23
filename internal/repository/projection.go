@@ -237,7 +237,11 @@ func (r *Repository) ensureProjectionForBranchLocked(branch string, commitID Obj
 			return err
 		}
 	}
-	snapshot := r.snapshots[r.commits[commitID].Snapshot]
+	snapshotID := r.commits[commitID].Snapshot
+	if err := r.ensureSnapshotProjectionLocked(snapshotID); err != nil {
+		return err
+	}
+	snapshot := r.snapshots[snapshotID]
 	status, err := r.projectionStatusLocked()
 	if err != nil && !errors.Is(err, ErrProjectionUnavailable) {
 		if closeErr := r.closeProjectionLocked(); closeErr != nil {
@@ -336,6 +340,9 @@ func (r *Repository) projectCommitHistoryLocked(tx *sql.Tx, head ObjectID) error
 			}
 		}
 		snapshot := r.snapshots[value.Snapshot]
+		if err := r.ensureSnapshotProjectionLocked(value.Snapshot); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(`INSERT INTO commits(commit_oid, graph_root_oid, schema_root_oid, author, committed_at_us, message) VALUES (?, ?, ?, ?, ?, ?)`,
 			id, value.Snapshot, snapshot.SchemaRoot, value.Author, value.Time.UTC().UnixMicro(), value.Message); err != nil {
 			return fmt.Errorf("insert commit %s: %w", id, err)
@@ -358,6 +365,12 @@ func (r *Repository) projectCommitHistoryLocked(tx *sql.Tx, head ObjectID) error
 func (r *Repository) projectEntityChangesLocked(tx *sql.Tx, commitID, parentID ObjectID) error {
 	current := r.snapshots[r.commits[commitID].Snapshot]
 	parent := r.snapshots[r.commits[parentID].Snapshot]
+	if err := r.ensureSnapshotProjectionLocked(r.commits[parentID].Snapshot); err != nil {
+		return err
+	}
+	if err := r.ensureSnapshotProjectionLocked(r.commits[commitID].Snapshot); err != nil {
+		return err
+	}
 	if err := projectEntityChangeSet(tx, "node", commitID, r.projections[parent.NodeRoot], r.projections[current.NodeRoot],
 		func(node Node) ObjectID { return r.objectID("node", canonicalNodeCollections(node)) },
 		func(left, right Node) bool { return left.Equal(right) }); err != nil {
@@ -439,6 +452,9 @@ func (r *Repository) entityLifecycleLocked(head ObjectID) (map[string]entityLife
 			}
 		}
 		current := r.snapshots[value.Snapshot]
+		if err := r.ensureSnapshotProjectionLocked(value.Snapshot); err != nil {
+			return err
+		}
 		if len(value.Parents) == 0 {
 			for nodeID := range r.projections[current.NodeRoot] {
 				nodes[nodeID] = entityLifecycle{CreatedCommit: id, UpdatedCommit: id}
@@ -449,6 +465,9 @@ func (r *Repository) entityLifecycleLocked(head ObjectID) (map[string]entityLife
 			return nil
 		}
 		parent := r.snapshots[r.commits[value.Parents[0]].Snapshot]
+		if err := r.ensureSnapshotProjectionLocked(r.commits[value.Parents[0]].Snapshot); err != nil {
+			return err
+		}
 		updateEntityLifecycle(nodes, r.projections[parent.NodeRoot], r.projections[current.NodeRoot], func(left, right Node) bool { return left.Equal(right) }, id)
 		updateEntityLifecycle(edges, r.edgeProjections[r.commits[value.Parents[0]].Snapshot], r.edgeProjections[value.Snapshot], func(left, right Edge) bool { return left.Equal(right) }, id)
 		return nil
@@ -484,6 +503,9 @@ func updateEntityLifecycle[T any](lifecycle map[string]entityLifecycle, before, 
 }
 
 func (r *Repository) projectSnapshotLocked(tx *sql.Tx, commitID ObjectID, snapshot graphSnapshot, nodeLifecycle, edgeLifecycle map[string]entityLifecycle) error {
+	if err := r.ensureSnapshotProjectionLocked(r.commits[commitID].Snapshot); err != nil {
+		return err
+	}
 	nodes := r.projections[snapshot.NodeRoot]
 	edges := r.edgeProjections[r.commits[commitID].Snapshot]
 	schema, err := r.schemaSnapshotLocked(snapshot.SchemaRoot)

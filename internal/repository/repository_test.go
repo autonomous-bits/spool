@@ -77,7 +77,7 @@ func TestObjectIDsPreserveImmutableContentVersions(t *testing.T) {
 	}
 }
 
-func TestResolvePinnedDoesNotRepairMissingProjection(t *testing.T) {
+func TestResolvePinnedRepairsMissingProjection(t *testing.T) {
 	repo := NewSeedRepository()
 	commit, err := repo.PinBranch("main")
 	if err != nil {
@@ -86,11 +86,11 @@ func TestResolvePinnedDoesNotRepairMissingProjection(t *testing.T) {
 	snapshot := repo.snapshots[repo.commits[commit].Snapshot]
 	delete(repo.projections, snapshot.NodeRoot)
 
-	if _, err := repo.ResolvePinned(commit, SeedNodeID); !errors.Is(err, ErrNodeNotFound) {
-		t.Fatalf("ResolvePinned error = %v, want ErrNodeNotFound", err)
+	if _, err := repo.ResolvePinned(commit, SeedNodeID); err != nil {
+		t.Fatalf("ResolvePinned: %v", err)
 	}
-	if _, exists := repo.projections[snapshot.NodeRoot]; exists {
-		t.Fatal("ResolvePinned rebuilt or repaired a missing projection")
+	if _, exists := repo.projections[snapshot.NodeRoot]; !exists {
+		t.Fatal("ResolvePinned did not rebuild the missing projection")
 	}
 }
 

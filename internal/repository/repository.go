@@ -142,6 +142,8 @@ type Repository struct {
 	snapshots                       map[ObjectID]graphSnapshot
 	projections                     map[ObjectID]map[string]Node
 	edgeProjections                 map[ObjectID]map[string]Edge
+	materializedSnapshots           map[ObjectID]struct{}
+	historicalProjectionLRU         []ObjectID
 	objects                         map[ObjectID][]byte
 	objectStore                     *looseObjectStore
 	projectionDB                    *sql.DB
@@ -178,18 +180,19 @@ func NewSeedRepository() *Repository {
 
 func newRepository() *Repository {
 	repo := &Repository{
-		defaultBranch:     defaultBranchName,
-		activeBranch:      defaultBranchName,
-		branches:          make(map[string]ObjectID),
-		commits:           make(map[ObjectID]commit),
-		snapshots:         make(map[ObjectID]graphSnapshot),
-		projections:       make(map[ObjectID]map[string]Node),
-		edgeProjections:   make(map[ObjectID]map[string]Edge),
-		objects:           make(map[ObjectID][]byte),
-		stagedMutations:   make(map[string]StagedMutationSet),
-		mergeLeases:       make(map[string]string),
-		mergeTransactions: make(map[string]mergeTransaction),
-		now:               time.Now,
+		defaultBranch:         defaultBranchName,
+		activeBranch:          defaultBranchName,
+		branches:              make(map[string]ObjectID),
+		commits:               make(map[ObjectID]commit),
+		snapshots:             make(map[ObjectID]graphSnapshot),
+		projections:           make(map[ObjectID]map[string]Node),
+		edgeProjections:       make(map[ObjectID]map[string]Edge),
+		materializedSnapshots: make(map[ObjectID]struct{}),
+		objects:               make(map[ObjectID][]byte),
+		stagedMutations:       make(map[string]StagedMutationSet),
+		mergeLeases:           make(map[string]string),
+		mergeTransactions:     make(map[string]mergeTransaction),
+		now:                   time.Now,
 	}
 	repo.objectStore = newLooseObjectStore("", &repo.objects)
 	return repo
@@ -221,6 +224,7 @@ func (r *Repository) seed() error {
 	}
 	r.commits[commitID] = seedCommit
 	r.branches[defaultBranchName] = commitID
+	r.reconcileSnapshotProjectionCacheLocked()
 	return nil
 }
 
@@ -293,11 +297,16 @@ func (r *Repository) CreateBranch(name string, source branch.Source) (branch.Cre
 	}
 
 	r.branches[name] = sourceCommit
+	if err := r.ensureBranchHeadProjectionsLocked(); err != nil {
+		delete(r.branches, name)
+		return branch.CreateResult{}, err
+	}
 	if err := r.writeRefLocked(name, "", sourceCommit, "create"); err != nil {
 		if durableWriteCommitted(err) {
 			return branch.CreateResult{Name: name, Commit: string(sourceCommit)}, fmt.Errorf("branch creation committed but directory sync failed: %w", err)
 		}
 		delete(r.branches, name)
+		_ = r.ensureBranchHeadProjectionsLocked()
 		return branch.CreateResult{}, err
 	}
 	return branch.CreateResult{Name: name, Commit: string(sourceCommit)}, nil
@@ -340,12 +349,14 @@ func (r *Repository) DeleteBranch(name string) (branch.DeleteResult, error) {
 	staged, hadStaged := r.stagedMutations[name]
 	delete(r.branches, name)
 	delete(r.stagedMutations, name)
+	r.reconcileSnapshotProjectionCacheLocked()
 	refErr := r.deleteRefLocked(name, commitID, "delete")
 	if refErr != nil && !durableWriteCommitted(refErr) {
 		r.branches[name] = commitID
 		if hadStaged {
 			r.stagedMutations[name] = staged
 		}
+		_ = r.ensureBranchHeadProjectionsLocked()
 		return branch.DeleteResult{}, refErr
 	}
 	cleanupErr := r.writeStagedLocked(name, nil)
@@ -525,8 +536,8 @@ func (r *Repository) ResolvePinnedContext(ctx context.Context, commitID ObjectID
 	if err := ctx.Err(); err != nil {
 		return Resolution{}, err
 	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return Resolution{}, err
 	}
@@ -538,6 +549,9 @@ func (r *Repository) ResolvePinnedContext(ctx context.Context, commitID ObjectID
 		return Resolution{}, ErrCommitNotFound
 	}
 	snapshot := r.snapshots[commit.Snapshot]
+	if err := r.ensureSnapshotProjectionLocked(commit.Snapshot); err != nil {
+		return Resolution{}, err
+	}
 	node, ok := r.projections[snapshot.NodeRoot][nodeID]
 	if !ok {
 		return Resolution{}, ErrNodeNotFound
@@ -565,8 +579,8 @@ func (r *Repository) ResolvePinnedContext(ctx context.Context, commitID ObjectID
 // ValidatePinnedSchema validates the complete immutable graph at a previously
 // pinned commit against that snapshot's schema.
 func (r *Repository) ValidatePinnedSchema(commitID ObjectID) (SchemaValidationResolution, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if err := r.ensureOpenLocked(); err != nil {
 		return SchemaValidationResolution{}, err
 	}
@@ -577,6 +591,9 @@ func (r *Repository) ValidatePinnedSchema(commitID ObjectID) (SchemaValidationRe
 	snapshot, ok := r.snapshots[commit.Snapshot]
 	if !ok {
 		return SchemaValidationResolution{}, fmt.Errorf("snapshot %q: %w", commit.Snapshot, ErrCommitNotFound)
+	}
+	if err := r.ensureSnapshotProjectionLocked(commit.Snapshot); err != nil {
+		return SchemaValidationResolution{}, err
 	}
 	schema, err := r.schemaSnapshotLocked(snapshot.SchemaRoot)
 	if err != nil {
