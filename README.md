@@ -32,13 +32,12 @@ Create a detached workspace and attach the checkout that will use it:
 ```sh
 spl workspace init my-project
 spl workspace attach --workspace my-project .
-spl init
 ```
 
-In this flow, run `spl init` once after attaching the first checkout. It creates the workspace's
-graph state and default `main` branch in detached storage, not in the checkout. Every path
-attached to that workspace uses the same state; attach additional checkouts without running
-`spl init` again:
+`spl workspace init` creates the workspace's graph state and default `main` branch in detached
+storage immediately, not in the checkout, so the workspace is usable as soon as a checkout is
+attached. Every path attached to that workspace uses the same state; attach additional checkouts
+directly:
 
 ```sh
 spl workspace attach --workspace my-project ~/repos/my-project-docs
@@ -193,12 +192,11 @@ until finalization or abort.
 ## Multi-repo workspaces
 
 A detached workspace maps one or more checked-out paths to the same Spool graph state. Create the
-workspace, attach a path, then initialize its state once:
+workspace and attach a path; the workspace's state is initialized immediately:
 
 ```sh
 spl workspace init ecommerce-platform
 spl workspace attach --workspace ecommerce-platform ~/repos/order-service
-spl init
 spl workspace attach --workspace ecommerce-platform ~/repos/inventory-service
 spl workspace list
 spl workspace current

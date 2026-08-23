@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/autonomous-bits/spool/internal/repository"
 	workspacepkg "github.com/autonomous-bits/spool/internal/workspace"
 )
 
@@ -51,6 +52,68 @@ func TestWorkspaceInitCreatesWorkspaceAndRegistry(t *testing.T) {
 	}
 	if stored.ID != created.ID {
 		t.Fatalf("stored ID = %q, want %q", stored.ID, created.ID)
+	}
+}
+
+// TestWorkspaceInitInitializesRepositoryState verifies that "workspace init"
+// eagerly creates the workspace's backing repository state, so a separate
+// "spl init" step is no longer required before the workspace is usable.
+func TestWorkspaceInitInitializesRepositoryState(t *testing.T) {
+	root := t.TempDir()
+
+	var output bytes.Buffer
+	if err := runWorkspaceCommand(root, []string{"init", "alpha"}, &output); err != nil {
+		t.Fatalf("run workspace init: %v", err)
+	}
+	var created workspacepkg.Workspace
+	if err := json.Unmarshal(output.Bytes(), &created); err != nil {
+		t.Fatalf("decode init output: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(created.StateDir, "config.toml")); err != nil {
+		t.Fatalf("stat initialized state config: %v", err)
+	}
+	repo, err := repository.OpenRepository(created.StateDir)
+	if err != nil {
+		t.Fatalf("open initialized workspace state: %v", err)
+	}
+	init, err := repo.Initialization()
+	if err != nil {
+		t.Fatalf("read initialization: %v", err)
+	}
+	if init.DefaultBranch != "main" {
+		t.Fatalf("default branch = %q, want main", init.DefaultBranch)
+	}
+	if err := repo.Close(); err != nil {
+		t.Fatalf("close repository: %v", err)
+	}
+}
+
+// TestWorkspaceInitDoesNotRegisterOnInitializationFailure verifies that a
+// failure to initialize the workspace's state directory does not leave a
+// dangling workspace registered with no backing repository state: the
+// registry entry is only written after initialization succeeds.
+func TestWorkspaceInitDoesNotRegisterOnInitializationFailure(t *testing.T) {
+	root := t.TempDir()
+	// Block directory creation under root/repos so that initializing the
+	// new workspace's state directory fails deterministically.
+	if err := os.WriteFile(filepath.Join(root, "repos"), []byte("blocked"), 0o600); err != nil {
+		t.Fatalf("create blocking file: %v", err)
+	}
+
+	var output bytes.Buffer
+	err := runWorkspaceCommand(root, []string{"init", "alpha"}, &output)
+	if err == nil {
+		t.Fatal("workspace init error = nil, want error")
+	}
+	if output.Len() != 0 {
+		t.Fatalf("failed init wrote success output: %q", output.String())
+	}
+	registry, loadErr := workspacepkg.LoadRegistry(root)
+	if loadErr != nil {
+		t.Fatalf("load registry: %v", loadErr)
+	}
+	if _, exists := registry.Workspaces[workspacepkg.Name("alpha")]; exists {
+		t.Fatal("registry contains workspace alpha despite initialization failure")
 	}
 }
 

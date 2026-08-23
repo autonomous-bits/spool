@@ -8,6 +8,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/autonomous-bits/spool/internal/repository/initialization"
 	workspacepkg "github.com/autonomous-bits/spool/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -109,14 +110,35 @@ func newWorkspaceInitCommand(registryRoot func() (string, error)) *cobra.Command
 			if err != nil {
 				return err
 			}
-			var created workspacepkg.Workspace
+			// Reserve a unique ID/state directory under the registry lock
+			// without writing the workspace entry yet: the entry must not
+			// become durable until its backing state is actually
+			// initialized, otherwise a crash between reserving the entry
+			// and initializing state would leave a workspace registered
+			// with no backing repository state -- the exact problem this
+			// eager-initialization feature exists to avoid.
+			var id workspacepkg.ID
+			var stateDir string
 			if err := workspacepkg.UpdateRegistry(root, func(registry *workspacepkg.Registry) error {
 				if _, exists := registry.Workspaces[name]; exists {
 					return fmt.Errorf("workspace %q already exists", name)
 				}
-				id, stateDir, err := uniqueWorkspaceIdentity(registry, root)
-				if err != nil {
-					return err
+				id, stateDir, err = uniqueWorkspaceIdentity(registry, root)
+				return err
+			}); err != nil {
+				return err
+			}
+			repo, err := initialization.Initialize(stateDir)
+			if err != nil {
+				return fmt.Errorf("initialize workspace state: %w", err)
+			}
+			if err := repo.Close(); err != nil {
+				return fmt.Errorf("close initialized workspace state: %w", err)
+			}
+			var created workspacepkg.Workspace
+			if err := workspacepkg.UpdateRegistry(root, func(registry *workspacepkg.Registry) error {
+				if _, exists := registry.Workspaces[name]; exists {
+					return fmt.Errorf("workspace %q already exists", name)
 				}
 				created = workspacepkg.Workspace{
 					ID:        id,
