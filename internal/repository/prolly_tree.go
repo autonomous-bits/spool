@@ -212,6 +212,7 @@ func (r *Repository) reconstructSnapshotProjectionsLocked(snapshotID ObjectID, s
 	}
 	r.projections[snapshot.NodeRoot] = nodes
 	r.edgeProjections[snapshotID] = edges
+	r.materializedSnapshots[snapshotID] = struct{}{}
 	return nil
 }
 

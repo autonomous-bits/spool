@@ -288,7 +288,11 @@ func (r *Repository) validateMutationBatchLocked(head ObjectID, operations []Mut
 		return ErrInvalidMutationBatch
 	}
 
-	snapshot := r.snapshots[r.commits[head].Snapshot]
+	snapshotID := r.commits[head].Snapshot
+	if err := r.ensureSnapshotProjectionLocked(snapshotID); err != nil {
+		return err
+	}
+	snapshot := r.snapshots[snapshotID]
 	existingNodes := r.projections[snapshot.NodeRoot]
 	if existingNodes == nil {
 		return ErrInvalidMutationBatch
@@ -417,6 +421,9 @@ func (r *Repository) candidateGraphLocked(head ObjectID, staged StagedMutationSe
 	if !ok {
 		return nil, nil, ErrInvalidMutationBatch
 	}
+	if err := r.ensureSnapshotProjectionLocked(base.Snapshot); err != nil {
+		return nil, nil, err
+	}
 	nodes, edges := cloneNodes(r.projections[snapshot.NodeRoot]), cloneEdges(r.edgeProjections[base.Snapshot])
 	applyMutationOperations(nodes, edges, staged.Operations)
 	if err := validateCandidateValues(nodes, edges); err != nil {
@@ -538,12 +545,18 @@ func (r *Repository) CommitStagedMutationBatch(request CommitStagedMutationReque
 		return CommitStagedMutationResult{}, fmt.Errorf("store staged commit: %w", err)
 	}
 	r.commits[nextID], r.branches[request.Branch] = next, nextID
+	if err := r.ensureBranchHeadProjectionsLocked(); err != nil {
+		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
+		r.commits, r.branches, r.stagedMutations = commits, branches, stagedMutations
+		return CommitStagedMutationResult{}, fmt.Errorf("pin committed snapshot: %w", err)
+	}
 	delete(r.stagedMutations, request.Branch)
 	result := CommitStagedMutationResult{Branch: request.Branch, Commit: nextID}
 	refErr := r.writeRefLocked(request.Branch, head, nextID, "commit")
 	if refErr != nil && !durableWriteCommitted(refErr) {
 		r.objects, r.snapshots, r.projections, r.edgeProjections = objects, snapshots, projections, edgeProjections
 		r.commits, r.branches, r.stagedMutations = commits, branches, stagedMutations
+		_ = r.ensureBranchHeadProjectionsLocked()
 		return CommitStagedMutationResult{}, refErr
 	}
 	cleanupErr := r.writeStagedLocked(request.Branch, nil)

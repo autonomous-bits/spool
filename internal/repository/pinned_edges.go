@@ -12,8 +12,8 @@ func (r *Repository) PinnedEdgesContext(ctx context.Context, commitID ObjectID) 
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -23,6 +23,9 @@ func (r *Repository) PinnedEdgesContext(ctx context.Context, commitID ObjectID) 
 	commit, ok := r.commits[commitID]
 	if !ok {
 		return nil, ErrCommitNotFound
+	}
+	if err := r.ensureSnapshotProjectionLocked(commit.Snapshot); err != nil {
+		return nil, err
 	}
 	edges := r.edgeProjections[commit.Snapshot]
 	result := make([]Edge, 0, len(edges))

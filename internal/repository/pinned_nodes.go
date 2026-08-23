@@ -11,8 +11,8 @@ func (r *Repository) PinnedNodesContext(ctx context.Context, commitID ObjectID) 
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -26,6 +26,9 @@ func (r *Repository) PinnedNodesContext(ctx context.Context, commitID ObjectID) 
 	snapshot, ok := r.snapshots[commit.Snapshot]
 	if !ok {
 		return nil, ErrCommitNotFound
+	}
+	if err := r.ensureSnapshotProjectionLocked(commit.Snapshot); err != nil {
+		return nil, err
 	}
 	nodes, ok := r.projections[snapshot.NodeRoot]
 	if !ok {

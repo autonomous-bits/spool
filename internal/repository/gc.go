@@ -145,7 +145,7 @@ func (r *Repository) GC(options GCOptions) (GCResult, error) {
 		metadata, err := r.objectStore.writeAndPublishPack(replacement, manifest, options.Repack)
 		if err != nil {
 			var closeErr *packGenerationCloseError
-			if !errors.As(err, &closeErr) {
+			if !errors.As(err, &closeErr) && !durableWriteCommitted(err) {
 				return result, err
 			}
 			cleanupErr = errors.Join(cleanupErr, err)

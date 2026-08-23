@@ -105,8 +105,8 @@ func (r *Repository) HistoryContext(ctx context.Context, request HistoryRequest)
 	if err := ctx.Err(); err != nil {
 		return HistoryResult{}, err
 	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if err := r.ensureOpenLocked(); err != nil {
 		return HistoryResult{}, err
 	}
@@ -222,8 +222,8 @@ func (r *Repository) branchesContainingContext(ctx context.Context, selector Con
 	if err := ctx.Err(); err != nil {
 		return BranchContainmentResult{}, err
 	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if err := r.ensureOpenLocked(); err != nil {
 		return BranchContainmentResult{}, err
 	}
@@ -406,11 +406,17 @@ func (r *Repository) historyEntriesContextLocked(ctx context.Context, start Obje
 
 func (r *Repository) historyEntryContextLocked(ctx context.Context, id ObjectID, entityID string) (HistoryEntry, bool, error) {
 	current := r.commits[id]
+	if err := r.ensureSnapshotProjectionLocked(current.Snapshot); err != nil {
+		return HistoryEntry{}, false, err
+	}
 	after := r.snapshots[current.Snapshot]
 	entry := HistoryEntry{Commit: id, AfterSnapshot: current.Snapshot, Author: current.Author, Time: current.Time, Message: current.Message}
 	var before graphSnapshot
 	if len(current.Parents) > 0 {
 		entry.BeforeSnapshot = r.commits[current.Parents[0]].Snapshot
+		if err := r.ensureSnapshotProjectionLocked(entry.BeforeSnapshot); err != nil {
+			return HistoryEntry{}, false, err
+		}
 		before = r.snapshots[entry.BeforeSnapshot]
 	}
 	beforeNodes, afterNodes := r.projections[before.NodeRoot], r.projections[after.NodeRoot]

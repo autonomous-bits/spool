@@ -57,8 +57,8 @@ type mergeCandidate struct {
 
 // PreviewMerge computes a three-way graph merge without changing repository state.
 func (r *Repository) PreviewMerge(sourceBranch, targetBranch string) (MergePreview, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if err := r.ensureOpenLocked(); err != nil {
 		return MergePreview{}, err
 	}
@@ -85,6 +85,11 @@ func (r *Repository) previewMergeLocked(sourceBranch, targetBranch string) (merg
 	baseSnapshot := r.snapshots[r.commits[base].Snapshot]
 	sourceSnapshot := r.snapshots[r.commits[source].Snapshot]
 	targetSnapshot := r.snapshots[r.commits[target].Snapshot]
+	for _, snapshotID := range []ObjectID{r.commits[base].Snapshot, r.commits[source].Snapshot, r.commits[target].Snapshot} {
+		if err := r.ensureSnapshotProjectionLocked(snapshotID); err != nil {
+			return mergeCandidate{}, err
+		}
+	}
 	conflicts := make([]MergeConflict, 0)
 	nodes := mergeNodeMaps(
 		r.projections[baseSnapshot.NodeRoot],

@@ -99,7 +99,7 @@ func NewSeedRepositoryWithMergeState(stateDir string) (*Repository, error) {
 	if err := repo.RecoverMergeTransactions(); err != nil {
 		return nil, closeAfterFailedOpen(repo, err)
 	}
-	if err := repo.ensureProjectionForActiveBranchLocked(); err != nil {
+	if err := repo.ensureStartupProjections(); err != nil {
 		return nil, closeAfterFailedOpen(repo, err)
 	}
 	return repo, nil
@@ -116,6 +116,15 @@ func closeAfterFailedOpen(repo *Repository, operationErr error) error {
 	projectionErr := repo.closeProjectionLocked()
 	packErr := repo.objectStore.closePackGeneration()
 	return unlockAfterFailedOpen(repo.stateLock, errors.Join(operationErr, projectionErr, packErr))
+}
+
+func (r *Repository) ensureStartupProjections() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.ensureBranchHeadProjectionsLocked(); err != nil {
+		return err
+	}
+	return r.ensureProjectionForActiveBranchLocked()
 }
 
 // InitializeRepository creates and durably stores a seeded repository.
@@ -166,7 +175,7 @@ func openControlRepository(stateDir string) (*Repository, error) {
 	if err := repo.RecoverMergeTransactions(); err != nil {
 		return nil, closeAfterFailedOpen(repo, err)
 	}
-	if err := repo.ensureProjectionForActiveBranchLocked(); err != nil {
+	if err := repo.ensureStartupProjections(); err != nil {
 		return nil, closeAfterFailedOpen(repo, err)
 	}
 	return repo, nil
@@ -244,7 +253,8 @@ func (r *Repository) loadMergeTransactionSnapshotLocked(state persistedMergeTran
 	if transaction.StagedSnapshot == "" || !validLooseObjectID(transaction.StagedSnapshot) {
 		return false
 	}
-	return r.loadSnapshotLocked(transaction.StagedSnapshot) == nil
+	return r.loadSnapshotLocked(transaction.StagedSnapshot) == nil &&
+		r.ensureSnapshotProjectionLocked(transaction.StagedSnapshot) == nil
 }
 
 func (r *Repository) validPersistedMergeTransactionLocked(state persistedMergeTransaction) bool {
@@ -387,6 +397,7 @@ func (r *Repository) loadControlState() (bool, error) {
 	r.defaultBranch, r.activeBranch, r.branches = config.DefaultBranch, head, branches
 	r.commits, r.snapshots = make(map[ObjectID]commit), make(map[ObjectID]graphSnapshot)
 	r.projections, r.edgeProjections = make(map[ObjectID]map[string]Node), make(map[ObjectID]map[string]Edge)
+	r.materializedSnapshots = make(map[ObjectID]struct{})
 	for _, commitID := range branches {
 		if err := r.loadCommitLocked(commitID, make(map[ObjectID]bool)); err != nil {
 			return false, fmt.Errorf("load repository objects: %w", err)
@@ -464,17 +475,6 @@ func (r *Repository) loadSnapshotLocked(id ObjectID) error {
 		return errors.New("invalid snapshot schema")
 	}
 	r.snapshots[id] = snapshot
-	if err := r.reconstructSnapshotProjectionsLocked(id, snapshot); err != nil {
-		delete(r.snapshots, id)
-		return err
-	}
-	nodes, edges := r.projections[snapshot.NodeRoot], r.edgeProjections[id]
-	if err := ValidateSchemaSnapshot(schema, nodes, edges); err != nil {
-		delete(r.snapshots, id)
-		delete(r.projections, snapshot.NodeRoot)
-		delete(r.edgeProjections, id)
-		return fmt.Errorf("validate snapshot schema: %w", err)
-	}
 	return nil
 }
 

@@ -94,8 +94,8 @@ func (r *Repository) DiffContext(ctx context.Context, request DiffRequest) (Diff
 	if err := ctx.Err(); err != nil {
 		return DiffResult{}, err
 	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if err := r.ensureOpenLocked(); err != nil {
 		return DiffResult{}, err
 	}
@@ -226,6 +226,12 @@ func (r *Repository) requirePinnedCommitLocked(commit ObjectID) (ObjectID, error
 
 func (r *Repository) diffChangesContextLocked(ctx context.Context, base, target ObjectID, filter DiffFilter) ([]DiffEntry, error) {
 	baseSnapshot, targetSnapshot := r.commits[base].Snapshot, r.commits[target].Snapshot
+	if err := r.ensureSnapshotProjectionLocked(baseSnapshot); err != nil {
+		return nil, err
+	}
+	if err := r.ensureSnapshotProjectionLocked(targetSnapshot); err != nil {
+		return nil, err
+	}
 	baseNodes, targetNodes := r.projections[r.snapshots[baseSnapshot].NodeRoot], r.projections[r.snapshots[targetSnapshot].NodeRoot]
 	baseEdges, targetEdges := r.edgeProjections[baseSnapshot], r.edgeProjections[targetSnapshot]
 	nodes, err := diffNodeChangesContext(ctx, baseNodes, targetNodes, filter)
@@ -348,6 +354,9 @@ func (r *Repository) diffContextContextLocked(ctx context.Context, base, target 
 	nodes := make(map[string]Node)
 	edges := make(map[string]Edge)
 	for _, snapshot := range []ObjectID{baseSnapshot, targetSnapshot} {
+		if err := r.ensureSnapshotProjectionLocked(snapshot); err != nil {
+			return nil, err
+		}
 		for id, node := range r.projections[r.snapshots[snapshot].NodeRoot] {
 			if err := ctx.Err(); err != nil {
 				return nil, err
