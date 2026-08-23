@@ -271,9 +271,11 @@ func (r *Repository) store(objectType string, value any) ObjectID {
 	return id
 }
 
-// storeObject persists an immutable object before making it reachable from a
-// mutable control file. Callers handling a user-visible transition must return
-// its error rather than using store, which exists for legacy in-memory helpers.
+// storeObject records an immutable object for durable publication before it can
+// become reachable from a mutable control file. During a commit batch, the
+// object is buffered until the batch's pack publication succeeds. Callers
+// handling a user-visible transition must return its error rather than using
+// store, which exists for legacy in-memory helpers.
 func (r *Repository) storeObject(objectType string, value any) (ObjectID, error) {
 	if r.objectBatch != nil {
 		return r.objectBatch.put(objectType, value)
