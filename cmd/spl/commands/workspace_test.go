@@ -7,9 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/autonomous-bits/spool/internal/repository"
 	workspacepkg "github.com/autonomous-bits/spool/internal/workspace"
 )
 
@@ -54,6 +56,68 @@ func TestWorkspaceInitCreatesWorkspaceAndRegistry(t *testing.T) {
 	}
 }
 
+// TestWorkspaceInitInitializesRepositoryState verifies that "workspace init"
+// eagerly creates the workspace's backing repository state, so a separate
+// "spl init" step is no longer required before the workspace is usable.
+func TestWorkspaceInitInitializesRepositoryState(t *testing.T) {
+	root := t.TempDir()
+
+	var output bytes.Buffer
+	if err := runWorkspaceCommand(root, []string{"init", "alpha"}, &output); err != nil {
+		t.Fatalf("run workspace init: %v", err)
+	}
+	var created workspacepkg.Workspace
+	if err := json.Unmarshal(output.Bytes(), &created); err != nil {
+		t.Fatalf("decode init output: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(created.StateDir, "config.toml")); err != nil {
+		t.Fatalf("stat initialized state config: %v", err)
+	}
+	repo, err := repository.OpenRepository(created.StateDir)
+	if err != nil {
+		t.Fatalf("open initialized workspace state: %v", err)
+	}
+	init, err := repo.Initialization()
+	if err != nil {
+		t.Fatalf("read initialization: %v", err)
+	}
+	if init.DefaultBranch != "main" {
+		t.Fatalf("default branch = %q, want main", init.DefaultBranch)
+	}
+	if err := repo.Close(); err != nil {
+		t.Fatalf("close repository: %v", err)
+	}
+}
+
+// TestWorkspaceInitDoesNotRegisterOnInitializationFailure verifies that a
+// failure to initialize the workspace's state directory does not leave a
+// dangling workspace registered with no backing repository state: the
+// registry entry is only written after initialization succeeds.
+func TestWorkspaceInitDoesNotRegisterOnInitializationFailure(t *testing.T) {
+	root := t.TempDir()
+	// Block directory creation under root/repos so that initializing the
+	// new workspace's state directory fails deterministically.
+	if err := os.WriteFile(filepath.Join(root, "repos"), []byte("blocked"), 0o600); err != nil {
+		t.Fatalf("create blocking file: %v", err)
+	}
+
+	var output bytes.Buffer
+	err := runWorkspaceCommand(root, []string{"init", "alpha"}, &output)
+	if err == nil {
+		t.Fatal("workspace init error = nil, want error")
+	}
+	if output.Len() != 0 {
+		t.Fatalf("failed init wrote success output: %q", output.String())
+	}
+	registry, loadErr := workspacepkg.LoadRegistry(root)
+	if loadErr != nil {
+		t.Fatalf("load registry: %v", loadErr)
+	}
+	if _, exists := registry.Workspaces[workspacepkg.Name("alpha")]; exists {
+		t.Fatal("registry contains workspace alpha despite initialization failure")
+	}
+}
+
 func TestWorkspaceInitRejectsDuplicateName(t *testing.T) {
 	root := t.TempDir()
 
@@ -70,6 +134,58 @@ func TestWorkspaceInitRejectsDuplicateName(t *testing.T) {
 	}
 	if output.Len() != 0 {
 		t.Fatalf("duplicate init wrote success output: %q", output.String())
+	}
+}
+
+// TestWorkspaceInitSerializesConcurrentSameNameRequests verifies that
+// concurrent "workspace init" calls for the same name cannot both reserve an
+// identity and initialize state: identity reservation, state initialization,
+// and the registry write all happen under one held registry lock, so exactly
+// one call succeeds and the rest fail with an already-exists error rather
+// than racing to initialize orphaned or contended state.
+func TestWorkspaceInitSerializesConcurrentSameNameRequests(t *testing.T) {
+	root := t.TempDir()
+	const attempts = 8
+
+	var wg sync.WaitGroup
+	results := make([]error, attempts)
+	for i := 0; i < attempts; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			results[index] = runWorkspaceCommand(root, []string{"init", "alpha"}, &bytes.Buffer{})
+		}(i)
+	}
+	wg.Wait()
+
+	successes := 0
+	for _, err := range results {
+		if err == nil {
+			successes++
+			continue
+		}
+		if !strings.Contains(err.Error(), `workspace "alpha" already exists`) {
+			t.Fatalf("unexpected concurrent init error: %v", err)
+		}
+	}
+	if successes != 1 {
+		t.Fatalf("successful concurrent inits = %d, want 1", successes)
+	}
+
+	registry, err := workspacepkg.LoadRegistry(root)
+	if err != nil {
+		t.Fatalf("load registry: %v", err)
+	}
+	if len(registry.Workspaces) != 1 {
+		t.Fatalf("registered workspaces = %d, want 1", len(registry.Workspaces))
+	}
+	stored := registry.Workspaces[workspacepkg.Name("alpha")]
+	repo, err := repository.OpenRepository(stored.StateDir)
+	if err != nil {
+		t.Fatalf("open registered workspace state: %v", err)
+	}
+	if err := repo.Close(); err != nil {
+		t.Fatalf("close workspace state: %v", err)
 	}
 }
 

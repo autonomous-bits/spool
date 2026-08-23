@@ -275,12 +275,12 @@ root, alongside a `current.toml` persisted-preference file. Workspace state live
 the same durable temp-file-plus-rename write path the repository package uses for its own control
 files.
 
-`spl workspace init` registers a workspace but does not initialize its state. After attaching the
-first path with `spl workspace attach --workspace <name> <path>`, run `spl init` once from that
-path to initialize the workspace state. `attach`/`detach` then associate or remove paths (one
-workspace per path); `list` and `current` inspect the registry; `use`/`unset` persist or clear
-which workspace future sessions treat as active. A path attached to a workspace resolves to its
-detached state instead of a local `.spl` directory.
+`spl workspace init` initializes a workspace's backing state (config, seed snapshot, default `main`
+branch) before registering it, so a failed or interrupted initialization never leaves a workspace
+registered with no backing state. `attach`/`detach` then associate or remove paths (one workspace
+per path); `list` and `current` inspect the registry; `use`/`unset` persist or clear which
+workspace future sessions treat as active. A path attached to a workspace resolves to its detached
+state instead of a local `.spl` directory.
 
 ## Extension points and current scope
 

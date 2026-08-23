@@ -6,9 +6,10 @@ Initialize the resolved Spool state directory once:
 spl init
 ```
 
-For an attached workspace, initialize it after the first `spl workspace attach`; later attachments
-share the same state and do not need another `spl init`. Without a workspace, this creates local
-`.spl` state at the nearest parent `.spl` or `go.work` directory, or the current directory.
+For a workspace-backed repository, `spl workspace init` already initializes the workspace's state
+when it is created, so no separate `spl init` step is needed after `spl workspace attach`. Without
+a workspace, run `spl init` to create local `.spl` state at the nearest parent `.spl` or `go.work`
+directory, or the current directory.
 
 Stage a JSON array of graph-mutation operations, inspect the staged delta, then create an immutable
 commit:

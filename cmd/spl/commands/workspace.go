@@ -8,6 +8,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/autonomous-bits/spool/internal/repository/initialization"
 	workspacepkg "github.com/autonomous-bits/spool/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -109,6 +110,16 @@ func newWorkspaceInitCommand(registryRoot func() (string, error)) *cobra.Command
 			if err != nil {
 				return err
 			}
+			// Reserve the identity, initialize the backing repository state,
+			// and write the registry entry all under a single held registry
+			// lock (UpdateRegistry blocks for the duration of mutate). This
+			// prevents a concurrent "workspace init" from claiming the same
+			// name or colliding on the generated ID/state directory between
+			// separate lock acquisitions, while still ensuring the registry
+			// entry only becomes durable after its state is initialized: a
+			// crash mid-initialization leaves at most an orphaned, unlisted
+			// state directory rather than a workspace registered with no
+			// backing repository state.
 			var created workspacepkg.Workspace
 			if err := workspacepkg.UpdateRegistry(root, func(registry *workspacepkg.Registry) error {
 				if _, exists := registry.Workspaces[name]; exists {
@@ -117,6 +128,13 @@ func newWorkspaceInitCommand(registryRoot func() (string, error)) *cobra.Command
 				id, stateDir, err := uniqueWorkspaceIdentity(registry, root)
 				if err != nil {
 					return err
+				}
+				repo, err := initialization.Initialize(stateDir)
+				if err != nil {
+					return fmt.Errorf("initialize workspace state: %w", err)
+				}
+				if err := repo.Close(); err != nil {
+					return fmt.Errorf("close initialized workspace state: %w", err)
 				}
 				created = workspacepkg.Workspace{
 					ID:        id,
