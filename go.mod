@@ -6,7 +6,7 @@ require (
 	github.com/fxamacker/cbor/v2 v2.9.3
 	github.com/gofrs/flock v0.13.0
 	github.com/klauspost/compress v1.19.2
-	github.com/pelletier/go-toml/v2 v2.2.4
+	github.com/pelletier/go-toml/v2 v2.4.3
 	golang.org/x/sys v0.47.0
 	lukechampine.com/blake3 v1.4.1
 	modernc.org/sqlite v1.57.0
