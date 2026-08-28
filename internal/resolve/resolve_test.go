@@ -1420,3 +1420,28 @@ func TestSPLGCRejectsCanceledContext(t *testing.T) {
 		t.Fatalf("SPLGC error = %v, want context.Canceled", err)
 	}
 }
+
+func TestSPLPruneRejectsCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := NewResolveTool(repository.NewSeedRepository()).SPLPrune(ctx, repository.PruneRequest{Branch: "main"})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("SPLPrune error = %v, want context.Canceled", err)
+	}
+}
+
+func TestSPLPruneExecutesOnRepository(t *testing.T) {
+	repo := repository.NewSeedRepository()
+	tool := NewResolveTool(repo)
+	res, err := tool.SPLPrune(context.Background(), repository.PruneRequest{
+		Branch: "main",
+		Force:  true,
+	})
+	if err != nil {
+		t.Fatalf("SPLPrune error = %v", err)
+	}
+	if res.PrunedNodesCount != 0 {
+		t.Fatalf("PrunedNodesCount = %d, want 0", res.PrunedNodesCount)
+	}
+}
