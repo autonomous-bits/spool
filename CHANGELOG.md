@@ -8,6 +8,13 @@ generated from commits since the preceding `v*` tag. Commits prefixed with `docs
 
 ## [Unreleased]
 
+## [0.0.6] - 2026-08-28
+
+### Added
+
+- `spl prune` removes ephemeral entities and their cascading edges to simplify
+  repository maintenance.
+
 ## [0.0.5] - 2026-08-23
 
 ### Changed
