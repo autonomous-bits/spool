@@ -12,6 +12,7 @@ import (
 	"github.com/autonomous-bits/spool/internal/repository/branch"
 	"github.com/autonomous-bits/spool/internal/repository/integrity"
 	"github.com/autonomous-bits/spool/internal/repository/merge"
+	"github.com/autonomous-bits/spool/internal/repository/prune"
 )
 
 var (
@@ -394,6 +395,7 @@ type ResolveTool struct {
 	resolver    *Resolver
 	branches    branch.Service
 	merges      merge.Service
+	prunes      prune.Service
 	queryBudget *QueryBudget
 	repository  *repository.Repository
 }
@@ -443,6 +445,7 @@ func NewResolveToolWithOptions(repo *repository.Repository, options Options) *Re
 		resolver:    NewResolverWithOptions(repo, options),
 		branches:    branch.NewService(repo),
 		merges:      merge.NewService(repo),
+		prunes:      prune.NewService(repo),
 		queryBudget: options.QueryBudget,
 		repository:  repo,
 	}
@@ -861,4 +864,12 @@ func (t *ResolveTool) SPLCommitStagedMutationBatch(ctx context.Context, request 
 		return repository.CommitStagedMutationResult{}, err
 	}
 	return t.resolver.repo.CommitStagedMutationBatch(request)
+}
+
+// SPLPrune honors cancellation and executes a branch pruning operation.
+func (t *ResolveTool) SPLPrune(ctx context.Context, request repository.PruneRequest) (repository.PruneResult, error) {
+	if err := ctx.Err(); err != nil {
+		return repository.PruneResult{}, err
+	}
+	return t.prunes.Prune(ctx, request)
 }

@@ -171,12 +171,18 @@ func (v *schemaValidator) validateEndpoints() {
 	}
 }
 
+// UniversalModifierLabel identifies the intrinsic cross-cutting modifier label.
+const UniversalModifierLabel = "Ephemeral"
+
 func (v *schemaValidator) validateNodeRules() {
 	for _, id := range sortedNodeIDs(v.nodesByID) {
 		node := v.nodesByID[id]
 		for _, label := range node.Labels {
 			rule, exists := v.nodeRules[label]
 			if !exists {
+				if label == UniversalModifierLabel {
+					continue
+				}
 				v.add(SchemaViolation{Code: SchemaViolationNodeLabel, Entity: "node", EntityID: id, Rule: label, Expected: "declared node label", Actual: label})
 				continue
 			}
