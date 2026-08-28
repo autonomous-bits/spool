@@ -867,9 +867,9 @@ func (t *ResolveTool) SPLCommitStagedMutationBatch(ctx context.Context, request 
 }
 
 // SPLPrune honors cancellation and executes a branch pruning operation.
-func (t *ResolveTool) SPLPrune(ctx context.Context, request prune.Request) (prune.Result, error) {
+func (t *ResolveTool) SPLPrune(ctx context.Context, request repository.PruneRequest) (repository.PruneResult, error) {
 	if err := ctx.Err(); err != nil {
-		return prune.Result{}, err
+		return repository.PruneResult{}, err
 	}
 	return t.prunes.Prune(ctx, request)
 }

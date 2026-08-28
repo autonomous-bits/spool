@@ -5,7 +5,6 @@ import (
 	"errors"
 
 	"github.com/autonomous-bits/spool/internal/repository"
-	"github.com/autonomous-bits/spool/internal/repository/prune"
 	"github.com/autonomous-bits/spool/internal/resolve"
 	"github.com/spf13/cobra"
 )
@@ -34,7 +33,7 @@ func NewPruneCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra.C
 			if err != nil {
 				return err
 			}
-			result, pruneErr := tool.SPLPrune(command.Context(), prune.Request{
+			result, pruneErr := tool.SPLPrune(command.Context(), repository.PruneRequest{
 				Branch:  branch,
 				DryRun:  dryRun,
 				Force:   force,

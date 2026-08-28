@@ -4,8 +4,6 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
-
-	"github.com/autonomous-bits/spool/internal/repository/prune"
 )
 
 func TestPruneProtectedDefaultBranchWithoutForceFails(t *testing.T) {
@@ -25,7 +23,7 @@ func TestPruneProtectedDefaultBranchWithoutForceFails(t *testing.T) {
 	}
 }
 
-func TestPruneMissingBranchReturnsPruneErrBranchNotFound(t *testing.T) {
+func TestPruneMissingBranchReturnsErrBranchNotFound(t *testing.T) {
 	stateDir := filepath.Join(t.TempDir(), "repo")
 	repo, err := NewSeedRepositoryWithMergeState(stateDir)
 	if err != nil {
@@ -37,8 +35,8 @@ func TestPruneMissingBranchReturnsPruneErrBranchNotFound(t *testing.T) {
 		Branch: "non-existent-branch",
 		Force:  true,
 	})
-	if !errors.Is(err, prune.ErrBranchNotFound) {
-		t.Fatalf("expected prune.ErrBranchNotFound, got %v", err)
+	if !errors.Is(err, ErrBranchNotFound) {
+		t.Fatalf("expected ErrBranchNotFound, got %v", err)
 	}
 }
 

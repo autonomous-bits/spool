@@ -47,7 +47,7 @@ func (r *Repository) Prune(request PruneRequest) (PruneResult, error) {
 	}
 	head, exists := r.branches[request.Branch]
 	if !exists {
-		return PruneResult{}, prune.ErrBranchNotFound
+		return PruneResult{}, ErrBranchNotFound
 	}
 	if staged, exists := r.stagedMutations[request.Branch]; exists && (len(staged.Operations) > 0 || staged.TargetSchema != nil) {
 		return PruneResult{}, ErrUncommittedStagedChanges

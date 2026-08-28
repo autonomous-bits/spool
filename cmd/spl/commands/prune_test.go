@@ -8,7 +8,6 @@ import (
 
 	"github.com/autonomous-bits/spool/internal/repository"
 	"github.com/autonomous-bits/spool/internal/repository/branch"
-	"github.com/autonomous-bits/spool/internal/repository/prune"
 	"github.com/autonomous-bits/spool/internal/resolve"
 )
 
@@ -59,7 +58,7 @@ func TestPruneCLIDryRunEmitsJSON(t *testing.T) {
 		t.Fatalf("execute prune --dry-run: %v", err)
 	}
 
-	var result prune.Result
+	var result repository.PruneResult
 	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
 		t.Fatalf("decode prune JSON: %v", err)
 	}
@@ -112,7 +111,7 @@ func TestPruneCLIExecutionEmitsJSONAndAdvancesBranch(t *testing.T) {
 		t.Fatalf("execute prune: %v", err)
 	}
 
-	var result prune.Result
+	var result repository.PruneResult
 	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
 		t.Fatalf("decode prune JSON: %v", err)
 	}
