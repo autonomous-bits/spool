@@ -22,6 +22,11 @@ Before staging or committing changes with `spl add`:
    spl switch <new-branch>
    ```
 
+Before merging a feature branch containing transient planning data, preview its cleanup with
+`spl prune --branch <branch> --dry-run`. After reviewing the JSON result, run `spl prune` to
+commit removal of nodes labeled `Ephemeral` and their incident edges. `prune` refuses branches
+with staged changes and requires `--force` for the protected default branch.
+
 ## Common CLI Invocation Rules & Pitfalls
 
 1. **Native `spl` Queries Only**: Always use built-in `spl` commands (`filter`, `search`, `resolve`, `graph`, `context`, `diff`) directly. Do not pipe JSON outputs to Python, awk, or ad-hoc shell parsing scripts.
@@ -45,6 +50,6 @@ Before staging or committing changes with `spl add`:
 | `schema`, `schema migrate`, `validate` | [Schemas](references/schemas.md) |
 | `resolve`, `search`, `filter`, `search-expand`, `context` | [Reading graphs](references/reading-graphs.md) |
 | `merge`, `merge preview`, `merge apply`, `merge conflicts`, `merge resolve`, `merge finalize`, `merge abort` | [Merges](references/merges.md) |
-| `fsck`, `gc` | [Maintenance](references/maintenance.md) |
+| `fsck`, `gc`, `prune` | [Maintenance](references/maintenance.md) |
 | `workspace`, `workspace init`, `workspace attach`, `workspace detach`, `workspace list`, `workspace current`, `workspace use`, `workspace unset` | [Multi-repo workspaces](references/workspaces.md) |
 | `completion`, `help` | [CLI help](references/cli-help.md) |

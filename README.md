@@ -128,6 +128,21 @@ spl switch feature
 spl branch list
 ```
 
+Remove temporary planning data before merging a feature branch:
+
+```sh
+# Inspect the affected nodes, incident edges, and durable nodes left disconnected.
+spl prune --branch feature --dry-run
+
+# Remove nodes labeled Ephemeral and commit the resulting graph snapshot.
+spl prune --branch feature --author alice --message "Prune transient plan"
+```
+
+`prune` emits a JSON summary containing the removed node and cascading-edge counts, node IDs, and
+any durable nodes left without connected edges. It refuses to run when the branch has staged
+changes; commit or clear them first. The default branch is protected from pruning unless
+`--force` is explicitly supplied.
+
 Query, retrieve, and compare graph snapshots:
 
 ```sh

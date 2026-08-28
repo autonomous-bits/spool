@@ -99,6 +99,20 @@ If the implementation uncovered a new architectural invariant or reusable standa
 - Create a permanent `Standard` / `SecurityPolicy` node with `spool-engineering-standards`.
 - Leave transient implementation steps marked as `Ephemeral`.
 
+### Step 5: Prune Transient Knowledge Before Merge
+Before merging the implementation branch into a baseline, review the removal of transient
+implementation nodes and their incident edges:
+
+```sh
+spl prune --branch <implementation-branch> --dry-run
+spl prune --branch <implementation-branch> --author "<author>" \
+  --message "Prune transient implementation knowledge"
+```
+
+The JSON preview reports every removed `Ephemeral` node, cascading edge, and durable node left
+without connections. Commit or clear staged graph changes before pruning; do not use `--force` on
+the protected default branch unless that cleanup is intentional.
+
 ---
 
 ## 4. Batch Authoring Example
