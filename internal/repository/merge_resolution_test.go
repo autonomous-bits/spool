@@ -8,7 +8,7 @@ import (
 )
 
 func TestResolveConflictedMergeAppliesSelectedSourceAndFinalizes(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	if _, err := repo.CreateBranch("feature", branch.Source{Branch: "main"}); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
 	}

@@ -10,7 +10,7 @@ import (
 )
 
 func TestPruneCLIRequiresBranchFlag(t *testing.T) {
-	repo := repository.NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	var output bytes.Buffer
 	command := NewPruneCommand(func() (*repository.Repository, error) {
 		return repo, nil

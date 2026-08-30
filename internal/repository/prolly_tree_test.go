@@ -130,7 +130,7 @@ func TestProllySnapshotReconstructsDurableProjections(t *testing.T) {
 }
 
 func TestDirectReconstructionBoundsHistoricalProjectionCache(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	schemaRoot := repo.snapshots[repo.commits[repo.branches["main"]].Snapshot].SchemaRoot
 	snapshotIDs := make([]ObjectID, 0, historicalProjectionCacheCapacity+1)
 	for index := range historicalProjectionCacheCapacity + 1 {

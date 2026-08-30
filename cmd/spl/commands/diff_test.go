@@ -15,7 +15,7 @@ import (
 )
 
 func TestDiffCLIAndMCPReturnEquivalentPayloads(t *testing.T) {
-	repo := repository.NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	base, err := repo.PinBranch("main")
 	if err != nil {
 		t.Fatalf("pin base: %v", err)
@@ -105,7 +105,7 @@ func comparableDiffResult(result resolve.DiffResult) resolve.DiffResult {
 }
 
 func TestDiffCLIAndMCPReturnEquivalentErrors(t *testing.T) {
-	tool := resolve.NewResolveTool(repository.NewSeedRepository())
+	tool := resolve.NewResolveTool(newTestSeedRepository(t))
 	for _, testCase := range []struct {
 		name    string
 		args    []string
@@ -154,7 +154,7 @@ func TestDiffCLIAndMCPReturnEquivalentErrors(t *testing.T) {
 
 func TestDiffCLIRequiresBothBranchSelectors(t *testing.T) {
 	command := NewDiffCommand(func() (*resolve.ResolveTool, error) {
-		return resolve.NewResolveTool(repository.NewSeedRepository()), nil
+		return resolve.NewResolveTool(newTestSeedRepository(t)), nil
 	})
 	command.SetArgs([]string{"--base-branch", "main"})
 
@@ -165,7 +165,7 @@ func TestDiffCLIRequiresBothBranchSelectors(t *testing.T) {
 }
 
 func TestDiffCLIAndMCPRejectUnreachableCommitWithSameCategory(t *testing.T) {
-	repo := repository.NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	if _, err := repo.CreateBranch("feature", repository.BranchSource{Branch: "main"}); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
 	}

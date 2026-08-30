@@ -14,7 +14,7 @@ import (
 )
 
 func TestValidateCLIReturnsToolSchemaReport(t *testing.T) {
-	repo := repository.NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	tool := resolve.NewResolveTool(repo)
 	var output bytes.Buffer
 	if err := runValidateCommand([]string{"--branch", "main"}, &output, func() (*resolve.ResolveTool, error) {
@@ -42,7 +42,7 @@ func TestValidateCLIReturnsToolSchemaReport(t *testing.T) {
 }
 
 func TestValidateCLIUsesOnlyReachableExplicitCommit(t *testing.T) {
-	repo := repository.NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	olderCommit, err := repo.PinBranch("main")
 	if err != nil {
 		t.Fatalf("pin main: %v", err)
@@ -119,7 +119,7 @@ func TestValidateCLIRequiresBranchAndPropagatesToolError(t *testing.T) {
 		{
 			name: "missing branch",
 			provider: func() (*resolve.ResolveTool, error) {
-				return resolve.NewResolveTool(repository.NewSeedRepository()), nil
+				return resolve.NewResolveTool(newTestSeedRepository(t)), nil
 			},
 		},
 		{
@@ -149,7 +149,7 @@ func TestValidateCLIRequiresBranchAndPropagatesToolError(t *testing.T) {
 func TestValidateCLIHelpDescribesSnapshotSelection(t *testing.T) {
 	var output bytes.Buffer
 	if err := runValidateCommand([]string{"--help"}, &output, func() (*resolve.ResolveTool, error) {
-		return resolve.NewResolveTool(repository.NewSeedRepository()), nil
+		return resolve.NewResolveTool(newTestSeedRepository(t)), nil
 	}); err != nil {
 		t.Fatalf("execute validate help: %v", err)
 	}

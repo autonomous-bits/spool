@@ -197,23 +197,18 @@ type Initialization struct {
 	ActiveBranch string `json:"activeBranch"`
 }
 
-// NewSeedRepository returns an in-memory repository initialized with the seed graph.
-// It panics if the seed graph cannot be initialized.
-func NewSeedRepository() *Repository {
-	repo, err := NewSeedRepositoryErr()
-	if err != nil {
-		panic(fmt.Sprintf("NewSeedRepository: %v", err))
-	}
-	return repo
-}
-
-// NewSeedRepositoryErr returns an in-memory repository initialized with the seed graph, or an error.
-func NewSeedRepositoryErr() (*Repository, error) {
+// NewSeedRepository returns an in-memory repository initialized with the seed graph, or an error.
+func NewSeedRepository() (*Repository, error) {
 	repo := newRepository()
 	if err := repo.seed(); err != nil {
 		return nil, fmt.Errorf("seed repository: %w", err)
 	}
 	return repo, nil
+}
+
+// NewSeedRepositoryErr returns an in-memory repository initialized with the seed graph, or an error.
+func NewSeedRepositoryErr() (*Repository, error) {
+	return NewSeedRepository()
 }
 
 func newRepository() *Repository {

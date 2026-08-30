@@ -8,7 +8,7 @@ import (
 )
 
 func TestEnsureSnapshotProjectionRejectsMissingStoreForStaleCacheMarker(t *testing.T) {
-	source := NewSeedRepository()
+	source := newTestSeedRepository(t)
 	snapshotID := source.commits[source.branches["main"]].Snapshot
 	validator := &Repository{
 		snapshots:             map[ObjectID]graphSnapshot{snapshotID: source.snapshots[snapshotID]},
@@ -23,7 +23,7 @@ func TestEnsureSnapshotProjectionRejectsMissingStoreForStaleCacheMarker(t *testi
 }
 
 func TestEnsureSnapshotProjectionRebuildsStaleCacheMarker(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	snapshotID := repo.commits[repo.branches["main"]].Snapshot
 	snapshot := repo.snapshots[snapshotID]
 	delete(repo.projections, snapshot.NodeRoot)
@@ -93,7 +93,7 @@ func TestOpenRepositoryDefersHistoricalProjectionMaterialization(t *testing.T) {
 }
 
 func TestHistoricalProjectionLRUEvictsAfterEightWhileBranchHeadsRemainPinned(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	if _, err := repo.CreateBranch("pinned", branch.Source{Branch: "main"}); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
 	}

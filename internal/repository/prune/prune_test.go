@@ -76,3 +76,21 @@ func TestServicePruneDelegatesToStore(t *testing.T) {
 		t.Fatalf("result = %+v, want %+v", res, expectedResult)
 	}
 }
+
+func TestPruneSentinelErrors(t *testing.T) {
+	if ErrBranchRequired == nil || ErrBranchNotFound == nil || ErrProtectedBranch == nil || ErrUncommittedStagedChanges == nil {
+		t.Fatal("expected non-nil sentinel errors")
+	}
+	if ErrBranchRequired.Error() != "branch is required" {
+		t.Fatalf("unexpected ErrBranchRequired message: %s", ErrBranchRequired.Error())
+	}
+	if ErrBranchNotFound.Error() != "branch not found" {
+		t.Fatalf("unexpected ErrBranchNotFound message: %s", ErrBranchNotFound.Error())
+	}
+	if ErrProtectedBranch.Error() != "cannot prune protected branch without force" {
+		t.Fatalf("unexpected ErrProtectedBranch message: %s", ErrProtectedBranch.Error())
+	}
+	if ErrUncommittedStagedChanges.Error() != "branch has uncommitted staged changes" {
+		t.Fatalf("unexpected ErrUncommittedStagedChanges message: %s", ErrUncommittedStagedChanges.Error())
+	}
+}

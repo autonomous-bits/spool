@@ -13,7 +13,7 @@ import (
 )
 
 func TestBranchesContainingCLIAndToolReturnEquivalentContracts(t *testing.T) {
-	repo := repository.NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	for _, name := range []string{"feature", "review"} {
 		if _, err := repo.CreateBranch(name, repository.BranchSource{Branch: "main"}); err != nil {
 			t.Fatalf("create %s branch: %v", name, err)

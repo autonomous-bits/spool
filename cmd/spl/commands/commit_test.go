@@ -13,7 +13,7 @@ import (
 
 func TestCommitCLIAdvancesBranchAndClearsStaging(t *testing.T) {
 	operations := []repository.MutationOperation{{Action: "add", Entity: "node", ID: "node-2", Title: "Second node"}}
-	cliRepo := repository.NewSeedRepository()
+	cliRepo := newTestSeedRepository(t)
 	if _, err := cliRepo.StageMutationBatch(repository.StageMutationRequest{Branch: "main", Operations: operations}); err != nil {
 		t.Fatalf("stage CLI batch: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestCommitCLIAdvancesBranchAndClearsStaging(t *testing.T) {
 }
 
 func TestCommitCLIPersistsCallerMetadataForHistory(t *testing.T) {
-	repo := repository.NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	if _, err := repo.StageMutationBatch(repository.StageMutationRequest{
 		Branch: "main", Operations: []repository.MutationOperation{{Action: "update", Entity: "node", ID: repository.SeedNodeID, Title: "Updated"}},
 	}); err != nil {
@@ -65,9 +65,7 @@ func TestCommitCLIPersistsCallerMetadataForHistory(t *testing.T) {
 }
 
 func TestCommitCLIRejectsUnstagedBranch(t *testing.T) {
-	command := NewCommitCommand(func() (*repository.Repository, error) {
-		return repository.NewSeedRepository(), nil
-	})
+	command := NewCommitCommand(repository.NewSeedRepository)
 	command.SetArgs([]string{"--branch", "main"})
 	if err := command.Execute(); !errors.Is(err, repository.ErrNoStagedMutations) {
 		t.Fatalf("commit command error = %v, want ErrNoStagedMutations", err)
@@ -75,7 +73,7 @@ func TestCommitCLIRejectsUnstagedBranch(t *testing.T) {
 }
 
 func TestCommitCLIRejectsStaleStagedBaseWithoutChangingBranchOrStaging(t *testing.T) {
-	repo := repository.NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	if _, err := repo.StageMutationBatch(repository.StageMutationRequest{
 		Branch:     "main",
 		Operations: []repository.MutationOperation{{Action: "add", Entity: "node", ID: "node-2", Title: "Second node"}},

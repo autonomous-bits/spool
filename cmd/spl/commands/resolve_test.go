@@ -15,7 +15,7 @@ import (
 )
 
 func TestResolveCLIAndMCPReturnEquivalentPayloads(t *testing.T) {
-	repo := repository.NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	tool := resolve.NewResolveTool(repo)
 
 	var output bytes.Buffer
@@ -43,7 +43,7 @@ func TestResolveCLIAndMCPReturnEquivalentPayloads(t *testing.T) {
 }
 
 func TestResolveCLIRequiresBranch(t *testing.T) {
-	repo := repository.NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	tool := resolve.NewResolveTool(repo)
 
 	var output bytes.Buffer
@@ -57,7 +57,7 @@ func TestResolveCLIRequiresBranch(t *testing.T) {
 }
 
 func TestResolveCLIAndMCPUseExplicitOlderCommit(t *testing.T) {
-	repo := repository.NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	olderCommit, err := repo.PinBranch("main")
 	if err != nil {
 		t.Fatalf("PinBranch: %v", err)
@@ -97,7 +97,7 @@ func TestResolveCLIHONorsLowerBudgetAndCapsOverLimitRequests(t *testing.T) {
 		MaxVisited:       500,
 		Timeout:          time.Second,
 	}
-	tool := resolve.NewResolveToolWithOptions(repository.NewSeedRepository(), resolve.Options{QueryBudget: &configured})
+	tool := resolve.NewResolveToolWithOptions(newTestSeedRepository(t), resolve.Options{QueryBudget: &configured})
 
 	var output bytes.Buffer
 	if err := runResolveCommand([]string{
@@ -164,7 +164,7 @@ func TestResolveCLIHONorsLowerBudgetAndCapsOverLimitRequests(t *testing.T) {
 }
 
 func TestResolveCLIRejectsDisallowedOrEmptyExplicitCommitWithoutOutput(t *testing.T) {
-	repo := repository.NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	if _, err := repo.CreateBranch("feature", repository.BranchSource{Branch: "main"}); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
 	}

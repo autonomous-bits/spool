@@ -29,7 +29,7 @@ func TestAddCLIAndMCPStageEquivalentBatch(t *testing.T) {
 		t.Fatalf("write batch: %v", err)
 	}
 
-	cliRepo := repository.NewSeedRepository()
+	cliRepo := newTestSeedRepository(t)
 	var output bytes.Buffer
 	command := NewAddCommand(func() (*repository.Repository, error) {
 		return cliRepo, nil
@@ -44,7 +44,7 @@ func TestAddCLIAndMCPStageEquivalentBatch(t *testing.T) {
 		t.Fatalf("decode CLI result: %v", err)
 	}
 
-	mcpRepo := repository.NewSeedRepository()
+	mcpRepo := newTestSeedRepository(t)
 	mcpResult, err := mcpRepo.StageMutationBatch(repository.StageMutationRequest{
 		Branch: "main", Operations: operations,
 	})
@@ -58,9 +58,7 @@ func TestAddCLIAndMCPStageEquivalentBatch(t *testing.T) {
 
 func TestAddCLIHelpDescribesEnrichedMutations(t *testing.T) {
 	var output bytes.Buffer
-	command := NewAddCommand(func() (*repository.Repository, error) {
-		return repository.NewSeedRepository(), nil
-	})
+	command := NewAddCommand(repository.NewSeedRepository)
 	command.SetOut(&output)
 	command.SetArgs([]string{"--help"})
 	if err := command.Execute(); err != nil {
@@ -78,8 +76,19 @@ func TestAddCLIHelpDescribesEnrichedMutations(t *testing.T) {
 	}
 }
 
+func TestAddCLIRejectsMissingFlags(t *testing.T) {
+	repo := newTestSeedRepository(t)
+	var output bytes.Buffer
+	command := NewAddCommand(func() (*repository.Repository, error) { return repo, nil })
+	command.SetOut(&output)
+	command.SetArgs([]string{"--branch", "main"})
+	if err := command.Execute(); err == nil {
+		t.Fatal("expected error executing add without flags, got nil")
+	}
+}
+
 func TestCLIEnrichedMutationBatchReturnsTypedNodeAndEdgeFields(t *testing.T) {
-	repo := repository.NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	tool := resolve.NewResolveTool(repo)
 	base, err := repo.PinBranch("main")
 	if err != nil {
@@ -213,9 +222,7 @@ func TestAddCLIAcceptsExistingNodeUpdatesAndDeletes(t *testing.T) {
 			if err := os.WriteFile(batchPath, data, 0o600); err != nil {
 				t.Fatalf("write batch: %v", err)
 			}
-			command := NewAddCommand(func() (*repository.Repository, error) {
-				return repository.NewSeedRepository(), nil
-			})
+			command := NewAddCommand(repository.NewSeedRepository)
 			command.SetOut(&bytes.Buffer{})
 			command.SetArgs([]string{"--branch", "main", "--batch", batchPath})
 			if err := command.Execute(); err != nil {

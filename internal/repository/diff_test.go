@@ -11,7 +11,7 @@ import (
 )
 
 func TestDiffReturnsCanonicalDirectionalChangesFiltersAndContext(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	base, err := repo.PinBranch("main")
 	if err != nil {
 		t.Fatalf("pin base: %v", err)
@@ -67,7 +67,7 @@ func TestDiffReturnsCanonicalDirectionalChangesFiltersAndContext(t *testing.T) {
 }
 
 func TestDiffRequiresExistingPinnedCommits(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	if _, err := repo.CreateBranch("feature", branchSource("main")); err != nil {
 		t.Fatalf("create branch: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestDiffRequiresExistingPinnedCommits(t *testing.T) {
 }
 
 func TestDiffPaginatesWithinRowsAndBudgetAndBindsContinuation(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	base, _ := repo.PinBranch("main")
 	if _, err := repo.StageMutationBatch(StageMutationRequest{Branch: "main", Operations: validMutationBatch()}); err != nil {
 		t.Fatalf("stage: %v", err)
@@ -146,7 +146,7 @@ func TestDiffPaginatesWithinRowsAndBudgetAndBindsContinuation(t *testing.T) {
 }
 
 func TestDiffContextStopsAtOneHop(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	operations := []MutationOperation{
 		{Action: "add", Entity: "node", ID: "node-2", Title: "Second"},
 		{Action: "add", Entity: "node", ID: "node-3", Title: "Third"},
@@ -189,7 +189,7 @@ func TestDiffContextStopsAtOneHop(t *testing.T) {
 }
 
 func TestDiffContextHonorsCanceledContext(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err := repo.DiffContext(ctx, DiffRequest{
@@ -201,7 +201,7 @@ func TestDiffContextHonorsCanceledContext(t *testing.T) {
 }
 
 func TestDiffContextReturnsDeterministicPrefixWhenDeadlineFiresDuringPaging(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	base, err := repo.PinBranch("main")
 	if err != nil {
 		t.Fatalf("PinBranch base: %v", err)
@@ -231,7 +231,7 @@ func TestDiffContextReturnsDeterministicPrefixWhenDeadlineFiresDuringPaging(t *t
 
 func TestDiffContextReturnsPrefixWhenDeadlineFiresDuringChangeScan(t *testing.T) {
 	const additions = 32
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	base, err := repo.PinBranch("main")
 	if err != nil {
 		t.Fatalf("PinBranch base: %v", err)
@@ -281,7 +281,7 @@ func (c *deadlineAfterChecks) Err() error {
 func (c *deadlineAfterChecks) Value(any) any { return nil }
 
 func TestDiffTitleFilterIncludesMatchingRemovedNodes(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	base, _ := repo.PinBranch("main")
 	if _, err := repo.StageMutationBatch(StageMutationRequest{Branch: "main", Operations: []MutationOperation{
 		{Action: "delete", Entity: "node", ID: SeedNodeID},

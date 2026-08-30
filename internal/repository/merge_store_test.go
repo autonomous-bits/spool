@@ -9,7 +9,7 @@ import (
 )
 
 func TestConflictedMergeRetainsLeaseAfterCommittedStateWriteError(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	repo.mergeStateDir = t.TempDir()
 	base, source, target := createDivergedBranchHeads(repo)
 	repo.persistStateFn = func(string, string, *mergeTransaction) error {
@@ -87,7 +87,7 @@ func TestCleanMergeRefFailureLeavesDurableTargetUnchanged(t *testing.T) {
 }
 
 func TestApplyCleanBoundMergeMovesTargetToReachableMergeCommit(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	baseCommit, sourceCommit, targetCommit := createDivergedBranchHeads(repo)
 
 	mergedCommit, err := repo.ApplyCleanBoundMerge("feature", "main", "test-transaction", MergePreviewBinding{
@@ -120,7 +120,7 @@ func TestApplyCleanBoundMergeMovesTargetToReachableMergeCommit(t *testing.T) {
 }
 
 func TestApplyCleanBoundMergeRejectsDifferentMergeBase(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	_, sourceCommit, targetCommit := createDivergedBranchHeads(repo)
 
 	_, err := repo.ApplyCleanBoundMerge("feature", "main", "test-transaction", MergePreviewBinding{
@@ -163,7 +163,7 @@ func TestMergeApplyRejectsStaleSourceOrTargetWithoutMutation(t *testing.T) {
 	for _, operation := range operations {
 		for _, staleBranch := range staleBranches {
 			t.Run(operation.name+"/"+staleBranch, func(t *testing.T) {
-				repo := NewSeedRepository()
+				repo := newTestSeedRepository(t)
 				baseCommit, sourceCommit, targetCommit := createDivergedBranchHeads(repo)
 				binding := MergePreviewBinding{
 					MergeBase:    baseCommit,
@@ -253,7 +253,7 @@ func TestMergeApplyRejectsMissingPreviewBindingWithoutMutation(t *testing.T) {
 	for _, operation := range operations {
 		for _, missingBinding := range missingBindings {
 			t.Run(operation.name+"/"+missingBinding.name, func(t *testing.T) {
-				repo := NewSeedRepository()
+				repo := newTestSeedRepository(t)
 				baseCommit, sourceCommit, targetCommit := createDivergedBranchHeads(repo)
 				binding := MergePreviewBinding{
 					MergeBase:    baseCommit,
@@ -288,7 +288,7 @@ func TestMergeApplyRejectsMissingPreviewBindingWithoutMutation(t *testing.T) {
 }
 
 func TestApplyConflictedBoundMergeRefusesWithoutMutation(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	baseCommit, sourceCommit, targetCommit := createDivergedBranchHeads(repo)
 
 	repo.mu.RLock()
@@ -318,7 +318,7 @@ func TestApplyConflictedBoundMergeRefusesWithoutMutation(t *testing.T) {
 }
 
 func TestMergeApplyRejectsLeaseHeldByOtherTransactionWithoutMutation(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	baseCommit, sourceCommit, targetCommit := createDivergedBranchHeads(repo)
 	binding := MergePreviewBinding{
 		MergeBase:    baseCommit,
@@ -362,7 +362,7 @@ func TestMergeApplyRejectsLeaseHeldByOtherTransactionWithoutMutation(t *testing.
 }
 
 func TestApplyCleanBoundMergeClearsTransactionLease(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	baseCommit, sourceCommit, targetCommit := createDivergedBranchHeads(repo)
 	binding := MergePreviewBinding{
 		MergeBase:    baseCommit,
@@ -393,7 +393,7 @@ func TestApplyCleanBoundMergeClearsTransactionLease(t *testing.T) {
 }
 
 func TestMergeApplyRejectsMissingTransactionID(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	baseCommit, sourceCommit, targetCommit := createDivergedBranchHeads(repo)
 
 	_, err := repo.ApplyCleanBoundMerge("feature", "main", "", MergePreviewBinding{
@@ -440,7 +440,7 @@ func TestMergeTransactionOperationsRejectNonOwnerWithoutMutation(t *testing.T) {
 
 	for _, operation := range operations {
 		t.Run(operation.name, func(t *testing.T) {
-			repo := NewSeedRepository()
+			repo := newTestSeedRepository(t)
 			base, source, target := createDivergedBranchHeads(repo)
 			binding := MergePreviewBinding{MergeBase: base, SourceCommit: source, TargetCommit: target}
 			if err := repo.ApplyConflictedBoundMerge("feature", "main", "owner", binding); !errors.Is(err, ErrMergeConflicted) {
@@ -483,7 +483,7 @@ func TestMergeTransactionOperationsRejectNonOwnerWithoutMutation(t *testing.T) {
 }
 
 func TestMergeTransactionOwnerCanResolveRestageAndFinalize(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	base, source, target := createDivergedBranchHeads(repo)
 	binding := MergePreviewBinding{MergeBase: base, SourceCommit: source, TargetCommit: target}
 	if err := repo.ApplyConflictedBoundMerge("feature", "main", "owner", binding); !errors.Is(err, ErrMergeConflicted) {
@@ -521,7 +521,7 @@ func TestMergeTransactionOwnerCanResolveRestageAndFinalize(t *testing.T) {
 }
 
 func TestMergeTransactionRequiresResolutionAndRestage(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	base, source, target := createDivergedBranchHeads(repo)
 	binding := MergePreviewBinding{MergeBase: base, SourceCommit: source, TargetCommit: target}
 	if err := repo.ApplyConflictedBoundMerge("feature", "main", "owner", binding); !errors.Is(err, ErrMergeConflicted) {
@@ -543,7 +543,7 @@ func TestMergeTransactionRequiresResolutionAndRestage(t *testing.T) {
 }
 
 func TestMergeTransactionAbortAndTargetLeaseProtection(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	base, source, target := createDivergedBranchHeads(repo)
 	binding := MergePreviewBinding{MergeBase: base, SourceCommit: source, TargetCommit: target}
 	if err := repo.ApplyConflictedBoundMerge("feature", "main", "owner", binding); !errors.Is(err, ErrMergeConflicted) {
@@ -567,7 +567,7 @@ func TestMergeTransactionAbortAndTargetLeaseProtection(t *testing.T) {
 }
 
 func TestCleanRetryCannotReleaseConflictedTransactionLease(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	base, source, target := createDivergedBranchHeads(repo)
 	binding := MergePreviewBinding{MergeBase: base, SourceCommit: source, TargetCommit: target}
 	if err := repo.ApplyConflictedBoundMerge("feature", "main", "owner", binding); !errors.Is(err, ErrMergeConflicted) {
@@ -590,7 +590,7 @@ func TestCleanRetryCannotReleaseConflictedTransactionLease(t *testing.T) {
 }
 
 func TestFinalizeMergeTransactionRejectsMovedTarget(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	base, source, target := createDivergedBranchHeads(repo)
 	binding := MergePreviewBinding{MergeBase: base, SourceCommit: source, TargetCommit: target}
 	if err := repo.ApplyConflictedBoundMerge("feature", "main", "owner", binding); !errors.Is(err, ErrMergeConflicted) {

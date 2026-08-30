@@ -38,7 +38,7 @@ func schemaMigratePeopleOperations() []repository.MutationOperation {
 func TestSchemaMigrateCLIStagesSchemaAndMutationsTogether(t *testing.T) {
 	schemaPath, batchPath := writeSchemaMigrationInputs(t, schemaMigratePeopleTOML, schemaMigratePeopleOperations())
 
-	cliRepo := repository.NewSeedRepository()
+	cliRepo := newTestSeedRepository(t)
 	var output bytes.Buffer
 	if err := runSchemaCommand([]string{
 		"migrate", "--branch", "main", "--schema", schemaPath, "--batch", batchPath,
@@ -52,7 +52,7 @@ func TestSchemaMigrateCLIStagesSchemaAndMutationsTogether(t *testing.T) {
 		t.Fatalf("decode schema migrate result: %v", err)
 	}
 
-	mcpRepo := repository.NewSeedRepository()
+	mcpRepo := newTestSeedRepository(t)
 	schemaTOML, err := os.ReadFile(schemaPath)
 	if err != nil {
 		t.Fatalf("read schema: %v", err)
@@ -86,16 +86,12 @@ func TestSchemaMigrateCLIRejectsInvalidInputAndPropagatesErrors(t *testing.T) {
 	}{
 		{
 			name: "invalid TOML", schema: invalidSchema, batch: validBatch,
-			provider: func() (*repository.Repository, error) {
-				return repository.NewSeedRepository(), nil
-			},
-			want: repository.ErrInvalidSchemaTOML,
+			provider: repository.NewSeedRepository,
+			want:     repository.ErrInvalidSchemaTOML,
 		},
 		{
 			name: "invalid batch JSON", schema: validSchema, batch: invalidBatch,
-			provider: func() (*repository.Repository, error) {
-				return repository.NewSeedRepository(), nil
-			},
+			provider: repository.NewSeedRepository,
 		},
 		{
 			name: "provider error", schema: validSchema, batch: validBatch,
@@ -123,9 +119,7 @@ func TestSchemaMigrateCLIRejectsInvalidInputAndPropagatesErrors(t *testing.T) {
 
 func TestSchemaMigrateCLIHelpDescribesAtomicStaging(t *testing.T) {
 	var output bytes.Buffer
-	if err := runSchemaCommand([]string{"migrate", "--help"}, &output, func() (*repository.Repository, error) {
-		return repository.NewSeedRepository(), nil
-	}); err != nil {
+	if err := runSchemaCommand([]string{"migrate", "--help"}, &output, repository.NewSeedRepository); err != nil {
 		t.Fatalf("execute schema migrate help: %v", err)
 	}
 	for _, text := range []string{

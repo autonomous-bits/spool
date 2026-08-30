@@ -41,14 +41,14 @@ func TestCanonicalObjectIdentityUsesContentTypeAndEncoding(t *testing.T) {
 		t.Fatal("same content with a distinct type tag produced the same ID")
 	}
 
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	if stored := repo.store("fixture", second); stored != got {
 		t.Fatalf("stored ID = %q, want canonical ID %q", stored, got)
 	}
 }
 
 func BenchmarkResolvePinned(b *testing.B) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(b)
 	commit, err := repo.PinBranch("main")
 	if err != nil {
 		b.Fatalf("PinBranch: %v", err)
@@ -62,7 +62,7 @@ func BenchmarkResolvePinned(b *testing.B) {
 }
 
 func TestObjectIDsPreserveImmutableContentVersions(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	original := Node{ID: SeedNodeID, Title: "first title"}
 	updated := Node{ID: SeedNodeID, Title: "updated title"}
 
@@ -89,7 +89,7 @@ func TestObjectIDsPreserveImmutableContentVersions(t *testing.T) {
 }
 
 func TestResolvePinnedRepairsMissingProjection(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	commit, err := repo.PinBranch("main")
 	if err != nil {
 		t.Fatalf("PinBranch: %v", err)
@@ -106,7 +106,7 @@ func TestResolvePinnedRepairsMissingProjection(t *testing.T) {
 }
 
 func TestEntityIDRemainsStableAcrossCommits(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	const entityID = SeedNodeID
 	original := Node{ID: entityID, Title: "original title"}
 	updated := Node{ID: entityID, Title: "updated title"}
@@ -180,7 +180,7 @@ func TestEntityIDRemainsStableAcrossCommits(t *testing.T) {
 }
 
 func TestCreateBranchUsesExplicitBranchOrCommitSource(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	mainHead := repo.branches["main"]
 
 	branchHead, err := repo.CreateBranch("from-main", branch.Source{Branch: "main"})
@@ -208,7 +208,7 @@ func TestCreateBranchUsesExplicitBranchOrCommitSource(t *testing.T) {
 }
 
 func TestCreateBranchRejectsInvalidOrUnresolvedSource(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 
 	if _, err := repo.CreateBranch("empty", branch.Source{}); !errors.Is(err, branch.ErrMissingSource) {
 		t.Fatalf("empty source error = %v, want ErrMissingSource", err)
@@ -233,7 +233,7 @@ func TestCreateBranchRejectsWhitespaceAndControlCharactersInNames(t *testing.T) 
 		"feature\x1fone",
 	} {
 		t.Run(name, func(t *testing.T) {
-			repo := NewSeedRepository()
+			repo := newTestSeedRepository(t)
 			if _, err := repo.CreateBranch(name, branch.Source{Branch: "main"}); err == nil {
 				t.Fatalf("CreateBranch(%q) succeeded", name)
 			}
@@ -245,7 +245,7 @@ func TestCreateBranchRejectsWhitespaceAndControlCharactersInNames(t *testing.T) 
 }
 
 func TestCreateBranchRejectsMissingSourceBeforeDuplicateName(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	originalMain := repo.branches["main"]
 
 	if _, err := repo.CreateBranch("main", branch.Source{Branch: "missing"}); !errors.Is(err, branch.ErrSourceNotFound) {
@@ -257,7 +257,7 @@ func TestCreateBranchRejectsMissingSourceBeforeDuplicateName(t *testing.T) {
 }
 
 func TestCreateBranchRejectsDuplicateNameAfterSourceResolves(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	originalMain := repo.branches["main"]
 
 	if _, err := repo.CreateBranch("main", branch.Source{Branch: "main"}); !errors.Is(err, branch.ErrAlreadyExists) {
@@ -270,7 +270,7 @@ func TestCreateBranchRejectsDuplicateNameAfterSourceResolves(t *testing.T) {
 }
 
 func TestListBranchesReturnsSortedLocalBranchNames(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	if _, err := repo.CreateBranch("zebra", branch.Source{Branch: "main"}); err != nil {
 		t.Fatalf("CreateBranch zebra: %v", err)
 	}
@@ -290,7 +290,7 @@ func TestListBranchesReturnsSortedLocalBranchNames(t *testing.T) {
 }
 
 func TestDeleteBranchDeletesExistingNonDefaultBranch(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	if _, err := repo.CreateBranch("feature", branch.Source{Branch: defaultBranchName}); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
 	}
@@ -315,7 +315,7 @@ func TestDeleteBranchDeletesExistingNonDefaultBranch(t *testing.T) {
 }
 
 func TestDeleteBranchDiscardsStagingBeforeRecreation(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	if _, err := repo.CreateBranch("feature", branch.Source{Branch: defaultBranchName}); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
 	}
@@ -347,7 +347,7 @@ func TestDeleteBranchDiscardsStagingBeforeRecreation(t *testing.T) {
 }
 
 func TestDeleteBranchRejectsDefaultBeforeExistenceCheck(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	delete(repo.branches, defaultBranchName)
 
 	if _, err := repo.DeleteBranch(defaultBranchName); !errors.Is(err, branch.ErrDefaultProtected) {
@@ -356,7 +356,7 @@ func TestDeleteBranchRejectsDefaultBeforeExistenceCheck(t *testing.T) {
 }
 
 func TestDeleteBranchRejectsMissingNonDefaultBranch(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	originalMain := repo.branches[defaultBranchName]
 
 	if _, err := repo.DeleteBranch("missing"); !errors.Is(err, branch.ErrNotFound) {
@@ -369,7 +369,7 @@ func TestDeleteBranchRejectsMissingNonDefaultBranch(t *testing.T) {
 }
 
 func TestSwitchBranchMakesExistingInactiveBranchActive(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	if _, err := repo.CreateBranch("feature", branch.Source{Branch: defaultBranchName}); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
 	}
@@ -387,7 +387,7 @@ func TestSwitchBranchMakesExistingInactiveBranchActive(t *testing.T) {
 }
 
 func TestSwitchBranchRejectsMissingBranchWithoutChangingActiveBranch(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	originalActiveBranch := repo.activeBranch
 	originalBranches := make(map[string]ObjectID, len(repo.branches))
 	for name, commitID := range repo.branches {
@@ -406,7 +406,7 @@ func TestSwitchBranchRejectsMissingBranchWithoutChangingActiveBranch(t *testing.
 }
 
 func TestDeleteBranchRejectsActiveNonDefaultBranch(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	if _, err := repo.CreateBranch("feature", branch.Source{Branch: defaultBranchName}); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
 	}

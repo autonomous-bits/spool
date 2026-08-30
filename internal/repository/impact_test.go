@@ -82,7 +82,7 @@ func TestImpactUsesCanonicalPathsAndBoundsTraversal(t *testing.T) {
 }
 
 func TestImpactRejectsMissingDeltaAndInvalidBudget(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	for _, request := range []ImpactRequest{
 		{Commit: repo.branches["main"], MaxDepth: 1, MaxVisited: 1},
 		{Commit: repo.branches["main"], Delta: []MutationOperation{{Action: "update", Entity: "node", ID: SeedNodeID, Title: "Changed"}}, MaxDepth: -1, MaxVisited: 1},
@@ -95,7 +95,7 @@ func TestImpactRejectsMissingDeltaAndInvalidBudget(t *testing.T) {
 }
 
 func TestImpactRejectsInvalidTypedProperties(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	head, err := repo.PinBranch("main")
 	if err != nil {
 		t.Fatalf("PinBranch: %v", err)
@@ -183,7 +183,7 @@ func TestImpactPagesResponsesAndReportsVisitedCapacity(t *testing.T) {
 
 func TestImpactContextReturnsPrefixWhenDeadlineFiresDuringTraversal(t *testing.T) {
 	const length = 32
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	operations := make([]MutationOperation, 0, 2*length)
 	previous := SeedNodeID
 	for i := 0; i < length; i++ {
@@ -228,7 +228,7 @@ func TestImpactContextReturnsPrefixWhenDeadlineFiresDuringTraversal(t *testing.T
 
 func impactRepository(t *testing.T) *Repository {
 	t.Helper()
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	operations := []MutationOperation{
 		{Action: "add", Entity: "node", ID: "node-2", Title: "Second"},
 		{Action: "add", Entity: "node", ID: "node-3", Title: "Third"},

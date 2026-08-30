@@ -69,7 +69,7 @@ func TestFsckRepositoryReportsCorruptLooseObjectFixture(t *testing.T) {
 }
 
 func TestFsckChecksProllyOrderingAndMergeBindings(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	head, err := repo.PinBranch("main")
 	if err != nil {
 		t.Fatalf("PinBranch: %v", err)

@@ -13,7 +13,7 @@ func TestInitCommandReturnsActiveMainBranch(t *testing.T) {
 	initialized := false
 	command := NewInitCommand(func() (*repository.Repository, error) {
 		initialized = true
-		return repository.NewSeedRepository(), nil
+		return repository.NewSeedRepository()
 	})
 	command.SetOut(&output)
 
