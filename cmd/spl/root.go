@@ -18,7 +18,10 @@ func newRootCommand(stdout io.Writer, repo *repository.Repository) *cobra.Comman
 		return tool, nil
 	}, func() (*repository.Repository, error) {
 		return repository.NewSeedRepository(), nil
-	}, func(context.Context) (repository.FsckResult, error) {
+	}, func(ctx context.Context) (repository.FsckResult, error) {
+		if err := ctx.Err(); err != nil {
+			return repository.FsckResult{}, err
+		}
 		return repo.Fsck()
 	})
 }
@@ -31,8 +34,14 @@ func newRootCommandWithLifecycle(
 	fsckProviders ...func(context.Context) (repository.FsckResult, error),
 ) *cobra.Command {
 	fsckProvider := func(ctx context.Context) (repository.FsckResult, error) {
+		if err := ctx.Err(); err != nil {
+			return repository.FsckResult{}, err
+		}
 		repo, err := repoProvider()
 		if err != nil {
+			return repository.FsckResult{}, err
+		}
+		if err := ctx.Err(); err != nil {
 			return repository.FsckResult{}, err
 		}
 		return repo.Fsck()
