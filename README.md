@@ -276,6 +276,7 @@ The command and flag inventory is:
 | `prune` | `--branch` (required), `--dry-run`, `--force`, `--author`, `--message` |
 | `workspace init <name>` | positional name |
 | `workspace attach [path]` | `--workspace` and `--repository-id` (required); path defaults to current directory |
+| `version` | none |
 | `completion` | shell subcommand: `bash`, `zsh`, `fish`, or `powershell` |
 | `help [command path]` | optional command path |
 
