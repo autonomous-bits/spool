@@ -10,7 +10,7 @@ import (
 )
 
 func TestCreateBranchCLIWithBranchSource(t *testing.T) {
-	repo := repository.NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	var output bytes.Buffer
 	if err := runBranchCommand([]string{"create", "from-branch", "--from-branch", "main"}, &output, repo); err != nil {
 		t.Fatalf("run branch CLI: %v", err)
@@ -25,7 +25,7 @@ func TestCreateBranchCLIWithBranchSource(t *testing.T) {
 }
 
 func TestCreateBranchCLIWithCommitSource(t *testing.T) {
-	repo := repository.NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	mainHead, err := repo.PinBranch("main")
 	if err != nil {
 		t.Fatalf("pin main branch: %v", err)
@@ -56,7 +56,7 @@ func TestCreateBranchCLIRejectsInvalidOrUnresolvedSources(t *testing.T) {
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
 			var output bytes.Buffer
-			err := runBranchCommand(testCase.args, &output, repository.NewSeedRepository())
+			err := runBranchCommand(testCase.args, &output, newTestSeedRepository(t))
 			if !errors.Is(err, testCase.want) {
 				t.Fatalf("run branch CLI error = %v, want %v", err, testCase.want)
 			}
@@ -72,7 +72,7 @@ func TestCreateBranchCLIRejectsMissingSourceBeforeDuplicateName(t *testing.T) {
 	err := runBranchCommand(
 		[]string{"create", "main", "--from-branch", "missing"},
 		&output,
-		repository.NewSeedRepository(),
+		newTestSeedRepository(t),
 	)
 	if !errors.Is(err, repository.ErrBranchSourceNotFound) {
 		t.Fatalf("run branch CLI error = %v, want ErrBranchSourceNotFound", err)
@@ -84,7 +84,7 @@ func TestCreateBranchCLIRejectsDuplicateName(t *testing.T) {
 	err := runBranchCommand(
 		[]string{"create", "main", "--from-branch", "main"},
 		&output,
-		repository.NewSeedRepository(),
+		newTestSeedRepository(t),
 	)
 	if !errors.Is(err, repository.ErrBranchAlreadyExists) {
 		t.Fatalf("run branch CLI error = %v, want ErrBranchAlreadyExists", err)
@@ -92,7 +92,7 @@ func TestCreateBranchCLIRejectsDuplicateName(t *testing.T) {
 }
 
 func TestListBranchesCLIReturnsSortedBranchNames(t *testing.T) {
-	repo := repository.NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	if _, err := repo.CreateBranch("zebra", repository.BranchSource{Branch: "main"}); err != nil {
 		t.Fatalf("CreateBranch zebra: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestListBranchesCLIReturnsSortedBranchNames(t *testing.T) {
 }
 
 func TestDeleteBranchCLIDeletesExistingBranch(t *testing.T) {
-	repo := repository.NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	if _, err := repo.CreateBranch("feature", repository.BranchSource{Branch: "main"}); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestDeleteBranchCLIRejectsDefaultAndMissingBranches(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			var output bytes.Buffer
 			err := runBranchCommand(
-				[]string{"delete", testCase.name}, &output, repository.NewSeedRepository(),
+				[]string{"delete", testCase.name}, &output, newTestSeedRepository(t),
 			)
 			if !errors.Is(err, testCase.want) {
 				t.Fatalf("run branch CLI error = %v, want %v", err, testCase.want)

@@ -99,7 +99,7 @@ key="project"
 	if !bytes.Equal(leftEncoding, rightEncoding) {
 		t.Fatal("equivalent schema TOML produced different canonical objects")
 	}
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	if leftID, rightID := repo.store("schema-root", left), repo.store("schema-root", right); leftID != rightID {
 		t.Fatalf("equivalent schemas have distinct object IDs: %q != %q", leftID, rightID)
 	}
@@ -183,7 +183,7 @@ func TestBuiltinAndLegacySchemaCompatibility(t *testing.T) {
 		t.Fatalf("normalized builtin = %#v, want %#v", normalized, builtin)
 	}
 
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	legacy := map[string]string{"version": "v1"}
 	legacyRoot := repo.store("schema-root", legacy)
 	if got, err := repo.schemaSnapshotLocked(legacyRoot); err != nil || !reflect.DeepEqual(got, builtin) {

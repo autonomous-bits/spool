@@ -8,7 +8,10 @@ import (
 )
 
 func TestServiceAppliesCleanMergeThroughRepositoryContract(t *testing.T) {
-	repo := repository.NewSeedRepository()
+	repo, err := repository.NewSeedRepository()
+	if err != nil {
+		t.Fatalf("NewSeedRepository: %v", err)
+	}
 	if _, err := repo.CreateBranch("feature", branch.Source{Branch: "main"}); err != nil {
 		t.Fatalf("CreateBranch feature: %v", err)
 	}

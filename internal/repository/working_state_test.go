@@ -20,7 +20,7 @@ func validMutationBatch() []MutationOperation {
 }
 
 func TestStageMutationBatchStagesValidBatchAtomically(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 
 	result, err := repo.StageMutationBatch(StageMutationRequest{Branch: "main", Operations: validMutationBatch()})
 	if err != nil {
@@ -182,7 +182,7 @@ func TestStagedEnrichedMutationsNormalizeCommitAndPersist(t *testing.T) {
 }
 
 func TestStageMutationBatchRejectsInvalidEnrichedPropertyBeforeStaging(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	_, err := repo.StageMutationBatch(StageMutationRequest{
 		Branch: "main",
 		Operations: []MutationOperation{{
@@ -199,7 +199,7 @@ func TestStageMutationBatchRejectsInvalidEnrichedPropertyBeforeStaging(t *testin
 }
 
 func TestStageMutationBatchPreservesExplicitEmptyEnrichedFields(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	if _, err := repo.StageMutationBatch(StageMutationRequest{
 		Branch: "main",
 		Operations: []MutationOperation{{
@@ -225,7 +225,7 @@ func TestStageMutationBatchPreservesExplicitEmptyEnrichedFields(t *testing.T) {
 }
 
 func TestCommitStagedMutationsReturnsInvalidPropertyErrorWithoutPanicking(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	if _, err := repo.StageMutationBatch(StageMutationRequest{
 		Branch:     "main",
 		Operations: []MutationOperation{{Action: "update", Entity: "node", ID: SeedNodeID, Title: "Updated"}},
@@ -247,7 +247,7 @@ func TestCommitStagedMutationsReturnsInvalidPropertyErrorWithoutPanicking(t *tes
 }
 
 func TestBranchStagingStatusReportsSharedBranchDelta(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	if _, err := repo.StageMutationBatch(StageMutationRequest{Branch: "main", Operations: validMutationBatch()}); err != nil {
 		t.Fatalf("StageMutationBatch: %v", err)
 	}
@@ -262,7 +262,7 @@ func TestBranchStagingStatusReportsSharedBranchDelta(t *testing.T) {
 }
 
 func TestBranchStagingStatusReportsEmptyAndRejectsMissingBranch(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 
 	status, err := repo.BranchStagingStatus("main")
 	if err != nil {
@@ -277,7 +277,7 @@ func TestBranchStagingStatusReportsEmptyAndRejectsMissingBranch(t *testing.T) {
 }
 
 func TestStageMutationBatchRejectsInvalidBatchesWithoutReplacingStagedSet(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	if _, err := repo.StageMutationBatch(StageMutationRequest{Branch: "main", Operations: validMutationBatch()}); err != nil {
 		t.Fatalf("stage valid batch: %v", err)
 	}
@@ -319,7 +319,7 @@ func TestStageMutationBatchRejectsInvalidBatchesWithoutReplacingStagedSet(t *tes
 }
 
 func TestStageMutationBatchAcceptsEdgeEndpointAddedLaterInSameBatch(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	operations := []MutationOperation{
 		{Action: "add", Entity: "edge", ID: "edge-1", Source: SeedNodeID, Target: "node-2"},
 		{Action: "add", Entity: "node", ID: "node-2", Title: "Second node"},
@@ -331,7 +331,7 @@ func TestStageMutationBatchAcceptsEdgeEndpointAddedLaterInSameBatch(t *testing.T
 }
 
 func TestStageMutationBatchValidatesExistingEdgeUpdatesAndDeletes(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	snapshotID := repo.commits[repo.branches["main"]].Snapshot
 	repo.edgeProjections[snapshotID]["edge-1"] = Edge{ID: "edge-1", Source: SeedNodeID, Target: SeedNodeID}
 
@@ -346,7 +346,7 @@ func TestStageMutationBatchValidatesExistingEdgeUpdatesAndDeletes(t *testing.T) 
 }
 
 func TestStageMutationBatchRejectsEdgesReferencingDeletedNodes(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	operations := []MutationOperation{
 		{Action: "delete", Entity: "node", ID: SeedNodeID},
 		{Action: "add", Entity: "node", ID: "node-2", Title: "Second node"},
@@ -359,7 +359,7 @@ func TestStageMutationBatchRejectsEdgesReferencingDeletedNodes(t *testing.T) {
 }
 
 func TestStageMutationBatchRejectsDeletingNodeReferencedByUnchangedEdge(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	snapshotID := repo.commits[repo.branches["main"]].Snapshot
 	repo.edgeProjections[snapshotID]["edge-1"] = Edge{ID: "edge-1", Source: SeedNodeID, Target: SeedNodeID}
 
@@ -467,7 +467,7 @@ func TestOpenRepositoryAcceptsHistoricalStagingOutsideNewIngestionLimits(t *test
 }
 
 func TestCommitStagedMutationsAdvancesBranchAndClearsStaging(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	base := repo.branches["main"]
 	if _, err := repo.StageMutationBatch(StageMutationRequest{Branch: "main", Operations: validMutationBatch()}); err != nil {
 		t.Fatalf("StageMutationBatch: %v", err)
@@ -674,7 +674,7 @@ func TestCommitStagedMutationsReusesNodeRootProjectionAcrossEdgeOnlySnapshots(t 
 }
 
 func TestCommitStagedMutationsRollsBackNewNodeRootProjectionOnPersistenceFailure(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	beforeSnapshots, beforeProjections := len(repo.snapshots), len(repo.projections)
 	beforeHead := repo.branches["main"]
 	beforeMaterialized := cloneMaterializedSnapshots(repo.materializedSnapshots)
@@ -818,7 +818,7 @@ func TestCommitClearsStagingAfterRefReplacementWarning(t *testing.T) {
 }
 
 func TestCommitStagedMutationsRejectsStaleBaseWithoutMutation(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	if _, err := repo.StageMutationBatch(StageMutationRequest{Branch: "main", Operations: validMutationBatch()}); err != nil {
 		t.Fatalf("StageMutationBatch: %v", err)
 	}

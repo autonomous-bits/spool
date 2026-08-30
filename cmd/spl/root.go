@@ -16,9 +16,7 @@ func newRootCommand(stdout io.Writer, repo *repository.Repository) *cobra.Comman
 		return repo, nil
 	}, func() (*resolve.ResolveTool, error) {
 		return tool, nil
-	}, func() (*repository.Repository, error) {
-		return repository.NewSeedRepository(), nil
-	}, func(ctx context.Context) (repository.FsckResult, error) {
+	}, repository.NewSeedRepository, func(ctx context.Context) (repository.FsckResult, error) {
 		if err := ctx.Err(); err != nil {
 			return repository.FsckResult{}, err
 		}

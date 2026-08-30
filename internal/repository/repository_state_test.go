@@ -571,7 +571,7 @@ func TestMergeStatePersistenceFailureLeavesLiveStateUnchanged(t *testing.T) {
 }
 
 func TestMergeStatePathsDoNotCollideForCaseVariantBranches(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	repo.mergeStateDir = t.TempDir()
 	if got, want := repo.mergeStatePath("Feature"), repo.mergeStatePath("feature"); got == want {
 		t.Fatalf("case-variant state paths collide: %q", got)
@@ -621,7 +621,7 @@ func TestClosedStateBackedRepositoryRejectsMutations(t *testing.T) {
 }
 
 func TestCanonicalRootsReconstructIndependentlyOfDerivedProjection(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	snapshotID := repo.commits[repo.branches["main"]].Snapshot
 	snapshot := repo.snapshots[snapshotID]
 	state := repo.persistedRepositoryLocked()
@@ -705,7 +705,7 @@ func TestStateBackedRepositoryRejectsPersistedDerivedProjectionMutation(t *testi
 }
 
 func TestLegacyStateReconstructsCanonicalEdgeProjection(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	originalCommit := repo.branches["main"]
 	originalSnapshot := repo.commits[originalCommit].Snapshot
 	edge := Edge{ID: "edge-1", Source: SeedNodeID, Target: SeedNodeID}

@@ -163,7 +163,7 @@ func TestMergeRecordsUseDedicatedDirectoryAcrossRestart(t *testing.T) {
 
 func TestInMemoryRepositoryNeverWritesControlFiles(t *testing.T) {
 	t.Chdir(t.TempDir())
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	t.Cleanup(func() {
 		if err := repo.Close(); err != nil {
 			t.Errorf("close in-memory repository: %v", err)

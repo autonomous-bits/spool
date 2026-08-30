@@ -10,7 +10,7 @@ import (
 )
 
 func TestSwitchCLISelectsExistingInactiveBranch(t *testing.T) {
-	repo := repository.NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	if _, err := repo.CreateBranch("feature", repository.BranchSource{Branch: "main"}); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestSwitchCLISelectsExistingInactiveBranch(t *testing.T) {
 }
 
 func TestSwitchCLIRejectsMissingBranchWithoutWritingSuccessOutput(t *testing.T) {
-	repo := repository.NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	var output bytes.Buffer
 
 	command := NewSwitchCommand(func() (*repository.Repository, error) {
@@ -66,7 +66,7 @@ func TestSwitchCLIRejectsMissingBranchWithoutWritingSuccessOutput(t *testing.T) 
 }
 
 func TestSwitchCLISucceedsWhenBranchIsAlreadyActive(t *testing.T) {
-	repo := repository.NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	var output bytes.Buffer
 
 	command := NewSwitchCommand(func() (*repository.Repository, error) {

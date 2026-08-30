@@ -127,7 +127,7 @@ func TestSQLiteProjectionRecoversFromCorruptDatabase(t *testing.T) {
 }
 
 func TestSQLiteProjectionRejectsHistoricalCommit(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	other := ObjectID("different")
 	if _, err := repo.EnsureBranchHeadProjection("main", &other); !errors.Is(err, ErrHistoricalProjectionUnsupported) {
 		t.Fatalf("EnsureBranchHeadProjection error = %v, want ErrHistoricalProjectionUnsupported", err)

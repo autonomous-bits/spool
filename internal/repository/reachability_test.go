@@ -10,7 +10,7 @@ import (
 )
 
 func TestScanRetentionTraversesSeedGraph(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 
 	scan, err := repo.ScanRetention()
 	if err != nil {
@@ -31,7 +31,7 @@ func TestScanRetentionTraversesSeedGraph(t *testing.T) {
 }
 
 func TestScanRetentionTraversesProllyEntityObjects(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	if _, err := repo.StageMutationBatch(StageMutationRequest{
 		Branch: "main",
 		Operations: []MutationOperation{
@@ -121,7 +121,7 @@ func TestScanRetentionRejectsMalformedReflogAndMissingObjects(t *testing.T) {
 	})
 
 	t.Run("missing graph object", func(t *testing.T) {
-		repo := NewSeedRepository()
+		repo := newTestSeedRepository(t)
 		missing := ObjectID("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 		id, err := repo.objectStore.put("commit", commit{Snapshot: missing})
 		if err != nil {
@@ -134,7 +134,7 @@ func TestScanRetentionRejectsMalformedReflogAndMissingObjects(t *testing.T) {
 	})
 
 	t.Run("unknown object content", func(t *testing.T) {
-		repo := NewSeedRepository()
+		repo := newTestSeedRepository(t)
 		id, err := repo.objectStore.put("unknown-content", map[string]string{"key": "value"})
 		if err != nil {
 			t.Fatalf("store unknown object: %v", err)

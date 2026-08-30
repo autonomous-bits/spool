@@ -4,12 +4,10 @@ import (
 	"bytes"
 	"strings"
 	"testing"
-
-	"github.com/autonomous-bits/spool/internal/repository"
 )
 
 func TestRootCommandIncludesResolveSubcommand(t *testing.T) {
-	command := newRootCommand(&bytes.Buffer{}, repository.NewSeedRepository())
+	command := newRootCommand(&bytes.Buffer{}, newTestSeedRepository(t))
 
 	found, _, err := command.Find([]string{"resolve"})
 	if err != nil {
@@ -51,7 +49,7 @@ func TestCommandHelpIncludesExamples(t *testing.T) {
 	for _, testCase := range testCases {
 		t.Run(strings.Join(testCase.path, " "), func(t *testing.T) {
 			var output bytes.Buffer
-			command := newRootCommand(&output, repository.NewSeedRepository())
+			command := newRootCommand(&output, newTestSeedRepository(t))
 			command.SetArgs(testCase.path)
 
 			if err := command.Execute(); err != nil {
@@ -65,7 +63,7 @@ func TestCommandHelpIncludesExamples(t *testing.T) {
 }
 
 func TestRootCommandIncludesSchemaAndValidateSubcommands(t *testing.T) {
-	command := newRootCommand(&bytes.Buffer{}, repository.NewSeedRepository())
+	command := newRootCommand(&bytes.Buffer{}, newTestSeedRepository(t))
 	for _, path := range [][]string{{"schema", "migrate"}, {"validate"}} {
 		found, _, err := command.Find(path)
 		if err != nil {
@@ -78,7 +76,7 @@ func TestRootCommandIncludesSchemaAndValidateSubcommands(t *testing.T) {
 }
 
 func TestRootCommandIncludesDiffSubcommand(t *testing.T) {
-	command := newRootCommand(&bytes.Buffer{}, repository.NewSeedRepository())
+	command := newRootCommand(&bytes.Buffer{}, newTestSeedRepository(t))
 	found, _, err := command.Find([]string{"diff"})
 	if err != nil {
 		t.Fatalf("find diff command: %v", err)
@@ -90,7 +88,7 @@ func TestRootCommandIncludesDiffSubcommand(t *testing.T) {
 }
 
 func TestRootCommandIncludesMergeSubcommands(t *testing.T) {
-	command := newRootCommand(&bytes.Buffer{}, repository.NewSeedRepository())
+	command := newRootCommand(&bytes.Buffer{}, newTestSeedRepository(t))
 	for _, path := range [][]string{{"merge", "preview"}, {"merge", "apply"}} {
 		found, _, err := command.Find(path)
 		if err != nil {
@@ -103,7 +101,7 @@ func TestRootCommandIncludesMergeSubcommands(t *testing.T) {
 }
 
 func TestRootCommandIncludesHistorySubcommands(t *testing.T) {
-	command := newRootCommand(&bytes.Buffer{}, repository.NewSeedRepository())
+	command := newRootCommand(&bytes.Buffer{}, newTestSeedRepository(t))
 	for _, path := range [][]string{{"history"}, {"branches-containing"}} {
 		found, _, err := command.Find(path)
 		if err != nil {
@@ -117,7 +115,7 @@ func TestRootCommandIncludesHistorySubcommands(t *testing.T) {
 }
 
 func TestRootCommandIncludesRetrievalSubcommands(t *testing.T) {
-	command := newRootCommand(&bytes.Buffer{}, repository.NewSeedRepository())
+	command := newRootCommand(&bytes.Buffer{}, newTestSeedRepository(t))
 	for _, name := range []string{"filter", "search", "search-expand", "context"} {
 		found, _, err := command.Find([]string{name})
 		if err != nil {
@@ -130,7 +128,7 @@ func TestRootCommandIncludesRetrievalSubcommands(t *testing.T) {
 }
 
 func TestRootCommandIncludesFsckSubcommand(t *testing.T) {
-	command := newRootCommand(&bytes.Buffer{}, repository.NewSeedRepository())
+	command := newRootCommand(&bytes.Buffer{}, newTestSeedRepository(t))
 	found, _, err := command.Find([]string{"fsck"})
 	if err != nil {
 		t.Fatalf("find fsck command: %v", err)
@@ -141,7 +139,7 @@ func TestRootCommandIncludesFsckSubcommand(t *testing.T) {
 }
 
 func TestRootCommandIncludesGCSubcommand(t *testing.T) {
-	command := newRootCommand(&bytes.Buffer{}, repository.NewSeedRepository())
+	command := newRootCommand(&bytes.Buffer{}, newTestSeedRepository(t))
 	found, _, err := command.Find([]string{"gc"})
 	if err != nil {
 		t.Fatalf("find gc command: %v", err)
@@ -152,7 +150,7 @@ func TestRootCommandIncludesGCSubcommand(t *testing.T) {
 }
 
 func TestRootCommandIncludesBranchCreateSubcommand(t *testing.T) {
-	command := newRootCommand(&bytes.Buffer{}, repository.NewSeedRepository())
+	command := newRootCommand(&bytes.Buffer{}, newTestSeedRepository(t))
 
 	found, _, err := command.Find([]string{"branch", "create"})
 	if err != nil {
@@ -165,7 +163,7 @@ func TestRootCommandIncludesBranchCreateSubcommand(t *testing.T) {
 }
 
 func TestRootCommandIncludesStatusSubcommand(t *testing.T) {
-	command := newRootCommand(&bytes.Buffer{}, repository.NewSeedRepository())
+	command := newRootCommand(&bytes.Buffer{}, newTestSeedRepository(t))
 
 	found, _, err := command.Find([]string{"status"})
 	if err != nil {
@@ -178,7 +176,7 @@ func TestRootCommandIncludesStatusSubcommand(t *testing.T) {
 }
 
 func TestRootCommandIncludesCommitSubcommand(t *testing.T) {
-	command := newRootCommand(&bytes.Buffer{}, repository.NewSeedRepository())
+	command := newRootCommand(&bytes.Buffer{}, newTestSeedRepository(t))
 	found, _, err := command.Find([]string{"commit"})
 	if err != nil {
 		t.Fatalf("find commit command: %v", err)

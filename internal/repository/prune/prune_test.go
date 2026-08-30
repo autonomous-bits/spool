@@ -3,8 +3,11 @@ package prune
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
+
+	"github.com/autonomous-bits/spool/internal/repository/branch"
 )
 
 type fakeStore struct {
@@ -74,5 +77,28 @@ func TestServicePruneDelegatesToStore(t *testing.T) {
 	}
 	if !reflect.DeepEqual(res, expectedResult) {
 		t.Fatalf("result = %+v, want %+v", res, expectedResult)
+	}
+}
+
+func TestPruneSentinelErrors(t *testing.T) {
+	for _, sentinel := range []error{
+		ErrBranchRequired,
+		ErrBranchNotFound,
+		ErrProtectedBranch,
+		ErrUncommittedStagedChanges,
+	} {
+		if sentinel == nil {
+			t.Fatal("expected non-nil sentinel error")
+		}
+		wrapped := fmt.Errorf("operation failed: %w", sentinel)
+		if !errors.Is(wrapped, sentinel) {
+			t.Fatalf("expected errors.Is to match wrapped error for %v", sentinel)
+		}
+	}
+	if !errors.Is(ErrBranchRequired, branch.ErrRequired) {
+		t.Fatalf("expected ErrBranchRequired to match branch.ErrRequired")
+	}
+	if !errors.Is(ErrBranchNotFound, branch.ErrNotFound) {
+		t.Fatalf("expected ErrBranchNotFound to match branch.ErrNotFound")
 	}
 }

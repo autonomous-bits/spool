@@ -40,7 +40,7 @@ func peopleMigrationOperations() []MutationOperation {
 }
 
 func TestStageSchemaMigrationAtomicallyCommitsTargetSchemaAndGraph(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	oldCommit := repo.branches["main"]
 	oldRoot := repo.snapshots[repo.commits[oldCommit].Snapshot].SchemaRoot
 	target, err := DecodeSchemaTOML([]byte(peopleSchemaTOML))
@@ -81,7 +81,7 @@ func TestStageSchemaMigrationAtomicallyCommitsTargetSchemaAndGraph(t *testing.T)
 }
 
 func TestStageSchemaMigrationRejectsInvalidCandidateWithoutReplacingStaging(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	if _, err := repo.StageMutationBatch(StageMutationRequest{Branch: "main", Operations: validMutationBatch()}); err != nil {
 		t.Fatalf("StageMutationBatch: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestSchemaMigrationRollbackAndDurability(t *testing.T) {
 }
 
 func TestOrdinaryStagingAndCommitRevalidateCurrentSchema(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	if _, err := repo.StageSchemaMigration(SchemaMigrationRequest{
 		Branch: "main", SchemaTOML: []byte(peopleSchemaTOML), Operations: peopleMigrationOperations(),
 	}); err != nil {

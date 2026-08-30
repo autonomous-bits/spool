@@ -8,7 +8,7 @@ import (
 )
 
 func TestResolvePinnedReturnsStoredSchemaVersionAndClonedTypedNode(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	head := repo.branches["main"]
 	base := repo.snapshots[repo.commits[head].Snapshot]
 	node := richReadNode(SeedNodeID, "Seed")
@@ -40,7 +40,7 @@ func TestResolvePinnedReturnsStoredSchemaVersionAndClonedTypedNode(t *testing.T)
 }
 
 func TestReadSurfacesRetainTypedGraphFields(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	nodes := map[string]Node{
 		SeedNodeID: richReadNode(SeedNodeID, "Seed"),
 		"node-2":   richReadNode("node-2", "Related"),
@@ -144,7 +144,7 @@ func TestReadSurfacesRetainTypedGraphFields(t *testing.T) {
 }
 
 func TestPinnedReadAPIsDoNotMoveBranches(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	head, err := repo.PinBranch("main")
 	if err != nil {
 		t.Fatalf("PinBranch: %v", err)
@@ -176,7 +176,7 @@ func TestPinnedReadAPIsDoNotMoveBranches(t *testing.T) {
 }
 
 func TestPinnedReadContextAPIsHonorCancellation(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	head, err := repo.PinBranch("main")
 	if err != nil {
 		t.Fatalf("PinBranch: %v", err)
@@ -218,7 +218,7 @@ func TestPinnedReadContextAPIsHonorCancellation(t *testing.T) {
 }
 
 func TestResolvePinnedRejectsUnknownCommitWithCommitNotFound(t *testing.T) {
-	_, err := NewSeedRepository().ResolvePinned("missing", SeedNodeID)
+	_, err := newTestSeedRepository(t).ResolvePinned("missing", SeedNodeID)
 	if !errors.Is(err, ErrCommitNotFound) {
 		t.Fatalf("ResolvePinned error = %v, want ErrCommitNotFound", err)
 	}

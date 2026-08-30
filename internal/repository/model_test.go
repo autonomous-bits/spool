@@ -76,7 +76,7 @@ func TestPropertyGraphModelNormalizesRecursivelyAndDeterministically(t *testing.
 		t.Fatal("equivalent labels or property-map insertion order changed canonical CBOR")
 	}
 
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	if firstID, secondID := repo.store("node", node), repo.store("node", equivalent); firstID != secondID {
 		t.Fatalf("equivalent nodes have distinct object IDs: %q != %q", firstID, secondID)
 	}
@@ -99,7 +99,7 @@ func TestPropertyGraphModelRejectsInvalidFloatsAndStoresBuiltinSchema(t *testing
 		t.Fatalf("zero schema Normalize error = %v, want ErrInvalidSchemaSnapshot", err)
 	}
 
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	snapshot := repo.snapshots[repo.commits[repo.branches["main"]].Snapshot]
 	var schema SchemaSnapshot
 	if err := cbor.Unmarshal(repo.objects[snapshot.SchemaRoot], &schema); err != nil {

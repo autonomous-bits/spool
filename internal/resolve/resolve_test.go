@@ -11,7 +11,7 @@ import (
 )
 
 func TestResolvePinsBranchCommitForRequest(t *testing.T) {
-	repo := repository.NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	resolver := NewResolver(repo)
 
 	initialCommit, err := repo.PinBranch("main")
@@ -43,7 +43,7 @@ func TestResolvePinsBranchCommitForRequest(t *testing.T) {
 }
 
 func TestResolverRejectsCancellationAfterPinning(t *testing.T) {
-	repo := repository.NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	resolver := NewResolver(repo)
 	ctx, cancel := context.WithCancel(context.Background())
 	resolver.afterBranchResolved = cancel
@@ -55,7 +55,7 @@ func TestResolverRejectsCancellationAfterPinning(t *testing.T) {
 }
 
 func TestResolveToolRejectsCanceledQuery(t *testing.T) {
-	repo := repository.NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	tool := NewResolveTool(repo)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -70,7 +70,7 @@ func TestResolveToolRejectsCanceledQuery(t *testing.T) {
 }
 
 func TestSPLResolveReturnsSnapshotAndProjectionMetadata(t *testing.T) {
-	tool := NewResolveTool(repository.NewSeedRepository())
+	tool := NewResolveTool(newTestSeedRepository(t))
 
 	got, err := tool.SPLResolve(context.Background(), ResolveRequest{
 		Selector: SnapshotSelector{Branch: "main"},
@@ -285,7 +285,7 @@ func TestReadEnvelopesReportTargetProjectionProvenance(t *testing.T) {
 }
 
 func TestSPLDiffBoundsPublicEnvelope(t *testing.T) {
-	repo := repository.NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	base, err := repo.PinBranch("main")
 	if err != nil {
 		t.Fatalf("PinBranch base: %v", err)
@@ -371,7 +371,7 @@ func TestSPLDiffBoundsPublicEnvelope(t *testing.T) {
 }
 
 func TestSPLImpactNormalizesTraversalBudget(t *testing.T) {
-	repo := repository.NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	if _, err := repo.StageMutationBatch(repository.StageMutationRequest{Branch: "main", Operations: []repository.MutationOperation{
 		{Action: "add", Entity: "node", ID: "node-2", Title: "Second"},
 		{Action: "add", Entity: "node", ID: "node-3", Title: "Third"},
@@ -420,7 +420,7 @@ func TestSPLImpactNormalizesTraversalBudget(t *testing.T) {
 }
 
 func TestSPLHistoryReturnsSnapshotAndProjectionMetadata(t *testing.T) {
-	repo := repository.NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	head, err := repo.PinBranch("main")
 	if err != nil {
 		t.Fatalf("PinBranch: %v", err)
@@ -441,7 +441,7 @@ func TestSPLHistoryReturnsSnapshotAndProjectionMetadata(t *testing.T) {
 }
 
 func TestQueryEnvelopesReportCompletionAndFullResponseBytes(t *testing.T) {
-	repo := repository.NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	base, err := repo.PinBranch("main")
 	if err != nil {
 		t.Fatalf("PinBranch base: %v", err)
@@ -540,7 +540,7 @@ func TestQueryEnvelopesReportCompletionAndFullResponseBytes(t *testing.T) {
 }
 
 func TestPagedQueryCompletionReportsRowAndVisitedTruncation(t *testing.T) {
-	repo := repository.NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	base, err := repo.PinBranch("main")
 	if err != nil {
 		t.Fatalf("PinBranch base: %v", err)
@@ -579,7 +579,7 @@ func TestPagedQueryCompletionReportsRowAndVisitedTruncation(t *testing.T) {
 		t.Fatalf("diff completion = %#v, result = %#v", diff.Completion, diff.DiffResult)
 	}
 
-	contextRepo := repository.NewSeedRepository()
+	contextRepo := newTestSeedRepository(t)
 	if _, err := contextRepo.StageMutationBatch(repository.StageMutationRequest{
 		Branch: "main",
 		Operations: []repository.MutationOperation{
@@ -654,7 +654,7 @@ func TestPagedQueryCompletionReportsRowAndVisitedTruncation(t *testing.T) {
 
 func TestQueryDeadlineWithoutListPrefixReturnsError(t *testing.T) {
 	zero := time.Duration(0)
-	_, err := NewResolveTool(repository.NewSeedRepository()).SPLResolve(context.Background(), ResolveRequest{
+	_, err := NewResolveTool(newTestSeedRepository(t)).SPLResolve(context.Background(), ResolveRequest{
 		Selector: SnapshotSelector{Branch: "main"},
 		NodeID:   repository.SeedNodeID,
 		Budget:   QueryBudgetRequest{Timeout: &zero},
@@ -665,7 +665,7 @@ func TestQueryDeadlineWithoutListPrefixReturnsError(t *testing.T) {
 }
 
 func TestResolveToolReadAPIsRejectUnreachableExplicitCommits(t *testing.T) {
-	repo := repository.NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	if _, err := repo.CreateBranch("feature", repository.BranchSource{Branch: "main"}); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
 	}
@@ -740,7 +740,7 @@ func TestResolveToolReadAPIsRejectUnreachableExplicitCommits(t *testing.T) {
 }
 
 func TestResolveToolReadAPIsAllowDetachedCommitsOnlyWhenConfigured(t *testing.T) {
-	repo := repository.NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	if _, err := repo.CreateBranch("feature", repository.BranchSource{Branch: "main"}); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
 	}
@@ -791,7 +791,7 @@ func TestResolveToolReadAPIsAllowDetachedCommitsOnlyWhenConfigured(t *testing.T)
 }
 
 func TestResolveToolSnapshotReadAPIsRequireBranch(t *testing.T) {
-	tool := NewResolveTool(repository.NewSeedRepository())
+	tool := NewResolveTool(newTestSeedRepository(t))
 	requests := []struct {
 		name string
 		call func() error
@@ -907,7 +907,7 @@ func TestResolveToolSingleSnapshotReadAPIsRemainPinnedAfterBranchAdvances(t *tes
 	}
 	for _, read := range reads {
 		t.Run(read.name, func(t *testing.T) {
-			repo := repository.NewSeedRepository()
+			repo := newTestSeedRepository(t)
 			pinned, err := repo.PinBranch("main")
 			if err != nil {
 				t.Fatalf("PinBranch: %v", err)
@@ -940,7 +940,7 @@ func TestResolveToolSingleSnapshotReadAPIsRemainPinnedAfterBranchAdvances(t *tes
 }
 
 func TestResolveToolReadAPIsPreserveUnknownSelectorErrors(t *testing.T) {
-	tool := NewResolveTool(repository.NewSeedRepository())
+	tool := NewResolveTool(newTestSeedRepository(t))
 	if _, err := tool.SPLDiff(context.Background(), DiffRequest{
 		Base: SnapshotSelector{Branch: "missing"}, Target: SnapshotSelector{Branch: "main"},
 	}); !errors.Is(err, ErrBranchNotFound) {
@@ -966,7 +966,7 @@ func TestResolveToolReadAPIsPreserveUnknownSelectorErrors(t *testing.T) {
 }
 
 func TestSPLDiffPinsBothEndpointsIndependently(t *testing.T) {
-	repo := repository.NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	initial, err := repo.PinBranch("main")
 	if err != nil {
 		t.Fatalf("PinBranch: %v", err)
@@ -1061,7 +1061,7 @@ func TestNormalizeQueryBudgetHonorsLowerRequestsWithoutExceedingConfiguration(t 
 }
 
 func TestSPLResolveRejectsMissingBranch(t *testing.T) {
-	tool := NewResolveTool(repository.NewSeedRepository())
+	tool := NewResolveTool(newTestSeedRepository(t))
 
 	_, err := tool.SPLResolve(context.Background(), ResolveRequest{
 		Selector: SnapshotSelector{},
@@ -1073,7 +1073,7 @@ func TestSPLResolveRejectsMissingBranch(t *testing.T) {
 }
 
 func TestSPLResolveUsesExplicitReachableCommit(t *testing.T) {
-	repo := repository.NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	olderCommit, err := repo.PinBranch("main")
 	if err != nil {
 		t.Fatalf("PinBranch: %v", err)
@@ -1096,7 +1096,7 @@ func TestSPLResolveUsesExplicitReachableCommit(t *testing.T) {
 }
 
 func TestSPLResolveTraversesAllMergeParentsForExplicitCommit(t *testing.T) {
-	repo := repository.NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	base, err := repo.PinBranch("main")
 	if err != nil {
 		t.Fatalf("PinBranch: %v", err)
@@ -1141,7 +1141,7 @@ func TestSPLResolveTraversesAllMergeParentsForExplicitCommit(t *testing.T) {
 }
 
 func TestSPLResolveRejectsUnreachableExplicitCommitUnlessDetachedAccessAllowed(t *testing.T) {
-	repo := repository.NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	if _, err := repo.CreateBranch("feature", repository.BranchSource{Branch: "main"}); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
 	}
@@ -1168,7 +1168,7 @@ func TestSPLResolveRejectsUnknownExplicitCommitWithoutUnsupportedCategory(t *tes
 	commit := "unknown"
 	request := ResolveRequest{Selector: SnapshotSelector{Branch: "main", Commit: &commit}, NodeID: repository.SeedNodeID}
 	for _, options := range []Options{{}, {AllowDetachedCommit: true}} {
-		_, err := NewResolveToolWithOptions(repository.NewSeedRepository(), options).SPLResolve(context.Background(), request)
+		_, err := NewResolveToolWithOptions(newTestSeedRepository(t), options).SPLResolve(context.Background(), request)
 		if !errors.Is(err, repository.ErrCommitNotFound) || errors.Is(err, ErrUnsupportedCommit) {
 			t.Fatalf("options %#v error = %v, want ErrCommitNotFound without ErrUnsupportedCommit", options, err)
 		}
@@ -1176,7 +1176,7 @@ func TestSPLResolveRejectsUnknownExplicitCommitWithoutUnsupportedCategory(t *tes
 }
 
 func TestSPLResolveValidatesBranchWhenDetachedAccessAllowed(t *testing.T) {
-	repo := repository.NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	commit, err := repo.PinBranch("main")
 	if err != nil {
 		t.Fatalf("PinBranch: %v", err)

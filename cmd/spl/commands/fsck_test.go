@@ -15,7 +15,11 @@ import (
 func TestFsckCLIWritesValidJSONReport(t *testing.T) {
 	var output bytes.Buffer
 	command := NewFsckCommand(func(context.Context) (repository.FsckResult, error) {
-		return repository.NewSeedRepository().Fsck()
+		repo, err := repository.NewSeedRepository()
+		if err != nil {
+			return repository.FsckResult{}, err
+		}
+		return repo.Fsck()
 	})
 	command.SetOut(&output)
 	if err := command.Execute(); err != nil {

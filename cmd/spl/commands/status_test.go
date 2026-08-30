@@ -15,7 +15,7 @@ func TestStatusCLIReportsSharedStagingDelta(t *testing.T) {
 	operations := []repository.MutationOperation{
 		{Action: "add", Entity: "node", ID: "node-2", Title: "Second node"},
 	}
-	cliRepo := repository.NewSeedRepository()
+	cliRepo := newTestSeedRepository(t)
 	if _, err := cliRepo.StageMutationBatch(repository.StageMutationRequest{Branch: "main", Operations: operations}); err != nil {
 		t.Fatalf("stage CLI repository batch: %v", err)
 	}
@@ -43,7 +43,7 @@ func TestStatusCLIReportsSharedStagingDelta(t *testing.T) {
 }
 
 func TestStatusCLIReportsEmptyDeltaAndRejectsMissingBranch(t *testing.T) {
-	repo := repository.NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	newCommand := func() (*bytes.Buffer, *cobra.Command) {
 		var output bytes.Buffer
 		command := NewStatusCommand(func() (*repository.Repository, error) {

@@ -15,7 +15,7 @@ import (
 )
 
 func TestHistoryCLIAndToolReturnEquivalentContracts(t *testing.T) {
-	repo := repository.NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	if _, err := repo.StageMutationBatch(repository.StageMutationRequest{
 		Branch: "main", Operations: []repository.MutationOperation{{Action: "update", Entity: "node", ID: repository.SeedNodeID, Title: "Updated"}},
 	}); err != nil {
@@ -90,7 +90,7 @@ func TestHistoryCLIAndToolReturnEquivalentContracts(t *testing.T) {
 
 func TestHistoryCLIRequiresBranchSelector(t *testing.T) {
 	command := NewHistoryCommand(func() (*resolve.ResolveTool, error) {
-		return resolve.NewResolveTool(repository.NewSeedRepository()), nil
+		return resolve.NewResolveTool(newTestSeedRepository(t)), nil
 	})
 	command.SetArgs([]string{"--entity-id", repository.SeedNodeID})
 
@@ -101,7 +101,7 @@ func TestHistoryCLIRequiresBranchSelector(t *testing.T) {
 }
 
 func TestHistoryCLIAndToolRejectUnreachableCommitWithSameCategory(t *testing.T) {
-	repo := repository.NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	if _, err := repo.CreateBranch("feature", repository.BranchSource{Branch: "main"}); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
 	}

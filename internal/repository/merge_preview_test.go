@@ -49,7 +49,7 @@ func TestMergeNodeReportsOverlappingPropertyConflict(t *testing.T) {
 }
 
 func TestPreviewMergeAppliesSourceGraphAndRejectsStalePreview(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	if _, err := repo.CreateBranch("feature", branch.Source{Branch: "main"}); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestPreviewMergeAppliesSourceGraphAndRejectsStalePreview(t *testing.T) {
 }
 
 func TestApplyMergePreviewPreservesActiveConflictTransactionLease(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	base, source, target := createDivergedBranchHeads(repo)
 	binding := MergePreviewBinding{MergeBase: base, SourceCommit: source, TargetCommit: target}
 	if err := repo.ApplyConflictedBoundMerge("feature", "main", "owner", binding); !errors.Is(err, ErrMergeConflicted) {

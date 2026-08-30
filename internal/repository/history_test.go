@@ -13,7 +13,7 @@ import (
 )
 
 func TestHistoryReturnsCommitMetadataAndEntityChanges(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	now := time.Date(2026, 8, 17, 18, 0, 0, 0, time.UTC)
 	repo.now = func() time.Time { return now }
 	if _, err := repo.StageMutationBatch(StageMutationRequest{
@@ -67,7 +67,7 @@ func TestHistoryReturnsCommitMetadataAndEntityChanges(t *testing.T) {
 }
 
 func TestHistoryAllParentsAndContainmentTraverseMergedHistory(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	base, err := repo.PinBranch("main")
 	if err != nil {
 		t.Fatalf("pin base: %v", err)
@@ -123,7 +123,7 @@ func TestHistoryAllParentsAndContainmentTraverseMergedHistory(t *testing.T) {
 }
 
 func TestBranchesContainingMatchesSnapshotsAndRejectsAmbiguousSelectors(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	head, err := repo.PinBranch("main")
 	if err != nil {
 		t.Fatalf("pin branch: %v", err)
@@ -140,7 +140,7 @@ func TestBranchesContainingMatchesSnapshotsAndRejectsAmbiguousSelectors(t *testi
 }
 
 func TestHistoryRepresentsEdgeUpdatesAsRemovalAndAddition(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	if _, err := repo.StageMutationBatch(StageMutationRequest{
 		Branch: "main",
 		Operations: []MutationOperation{
@@ -172,7 +172,7 @@ func TestHistoryRepresentsEdgeUpdatesAsRemovalAndAddition(t *testing.T) {
 }
 
 func TestHistoryAndContainmentPagesBindTokensAndBudgets(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	for _, title := range []string{"first", "second"} {
 		if _, err := repo.StageMutationBatch(StageMutationRequest{
 			Branch: "main", Operations: []MutationOperation{{Action: "update", Entity: "node", ID: SeedNodeID, Title: title}},
@@ -251,7 +251,7 @@ func TestHistoryAndContainmentPagesBindTokensAndBudgets(t *testing.T) {
 }
 
 func TestHistoryContextReturnsPrefixWhenDeadlineFiresDuringTraversal(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	for i := 0; i < 32; i++ {
 		if _, err := repo.StageMutationBatch(StageMutationRequest{
 			Branch: "main",
@@ -283,7 +283,7 @@ func TestHistoryContextReturnsPrefixWhenDeadlineFiresDuringTraversal(t *testing.
 }
 
 func TestBranchesContainingContextReturnsPrefixWhenDeadlineFiresDuringScan(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	names := []string{"a"}
 	for i := 0; i < 32; i++ {
 		names = append(names, fmt.Sprintf("b%02d", i))

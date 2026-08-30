@@ -85,7 +85,7 @@ func TestOpenRepositoryAcceptsHistoricalPermissiveDataOutsideNewIngestionLimits(
 }
 
 func TestApplyCleanBoundMergeRejectsSchemaInvalidTargetSnapshot(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	base := repo.branches["main"]
 	source := commit{Snapshot: repo.commits[base].Snapshot, Parents: []ObjectID{base}, Message: "feature change"}
 	sourceID := repo.store("commit", source)
@@ -117,7 +117,7 @@ func TestApplyCleanBoundMergeRejectsSchemaInvalidTargetSnapshot(t *testing.T) {
 }
 
 func TestFinalizeMergeTransactionRejectsSchemaInvalidStagedSnapshot(t *testing.T) {
-	repo := NewSeedRepository()
+	repo := newTestSeedRepository(t)
 	base, source, target := createDivergedBranchHeads(repo)
 	binding := MergePreviewBinding{MergeBase: base, SourceCommit: source, TargetCommit: target}
 	if err := repo.ApplyConflictedBoundMerge("feature", "main", "owner", binding); !errors.Is(err, ErrMergeConflicted) {
