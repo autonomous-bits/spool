@@ -9,11 +9,11 @@ import (
 )
 
 var (
-	// Version is the application release version. Set via -ldflags at build time.
+	// Version is the application release version. Can be set via -ldflags at build time.
 	Version = "dev"
-	// Commit is the git commit SHA. Set via -ldflags at build time.
+	// Commit is the git commit SHA. Can be set via -ldflags at build time.
 	Commit = "none"
-	// BuildDate is the RFC3339 build timestamp. Set via -ldflags at build time.
+	// BuildDate is the RFC3339 build or commit timestamp. Can be set via -ldflags at build time.
 	BuildDate = "unknown"
 )
 
