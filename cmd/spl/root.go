@@ -77,6 +77,7 @@ func newRootCommandWithLifecycle(
 	root.AddCommand(commands.NewFsckCommand(fsckProvider))
 	root.AddCommand(commands.NewGCCommand(repoProvider))
 	root.AddCommand(commands.NewPruneCommand(repoProvider))
+	root.AddCommand(commands.NewCherryPickCommand(repoProvider))
 	root.AddCommand(commands.NewWorkspaceCommandDefault())
 	root.AddCommand(commands.NewVersionCommand())
 	return root
