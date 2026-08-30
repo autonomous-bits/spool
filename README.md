@@ -77,6 +77,12 @@ To create a local, non-workspace graph repository instead, run `spl init` from t
 directory. It creates `.spl` in the nearest directory at or above the current directory that
 already contains `.spl` or `go.work`, or in the current directory if neither is found.
 
+All commands accept the global `--state-dir <path>` override. State selection precedence is
+`--state-dir`, `SPOOL_DIR`, `SPOOL_WORKSPACE`, the persisted workspace preference, the registered
+workspace owning the current path (longest match), then local `.spl`/`go.work` discovery. An empty
+`--state-dir` is invalid; a stale persisted workspace preference is ignored so `spl workspace unset`
+can recover it.
+
 ## Storage and integrity
 
 Spool stores immutable nodes, edges, graph snapshots, schemas, and fixed-fanout sorted tree
@@ -87,8 +93,8 @@ Object IDs are BLAKE3 hashes of the typed canonical bytes. Mutable control
 state is separate: `config.toml`, `HEAD`, branch refs, staging files,
 reflogs, and merge transactions.
 
-`spl gc` retains reachable and reflog-referenced objects, packs retained objects
-into verified zstd pack/index generations, and removes unreachable loose objects
+`spl gc` retains reachable, reflog-referenced, and durable merge-resolution root objects, packs
+retained objects into verified zstd pack/index generations, and removes unreachable loose objects
 only after a 14-day grace period. Pack publication is atomic, so packing does
 not change object IDs or make a committed object unavailable.
 
@@ -158,7 +164,7 @@ Remove temporary planning data before merging a feature branch:
 # Inspect the affected nodes, incident edges, and durable nodes left disconnected.
 spl prune --branch feature --dry-run
 
-# Remove nodes labeled Ephemeral and commit the resulting graph snapshot.
+# Remove nodes labeled Ephemeral and commit the resulting graph snapshot when any are found.
 spl prune --branch feature --author alice --message "Prune transient plan"
 ```
 
@@ -188,9 +194,13 @@ spl search-expand --branch main --label Task --property-min priority=3 --directi
 `search`, `filter`, `search-expand`, and `context` return the selected snapshot and projection
 provenance with budget and completion metadata. Filtered properties must be scalar properties
 enabled with `indexed = true` in the selected schema. Retrieval is currently limited to the
-branch-head projection; selecting a historical commit is rejected. Use `--max-rows`,
-`--max-response-bytes`, `--timeout`, `--max-visited`, and `--max-depth` to narrow the configured
-query limits.
+branch-head projection; a `--commit` selector is accepted only when it names that branch head,
+and historical or divergent commits are rejected. `search` and `filter` (plus `history`,
+`branches-containing`, and `diff`) support `--continuation`; `search-expand` and `context` do not.
+Use `--max-rows`, `--max-response-bytes`, and `--timeout` for read budgets; `resolve`,
+`search-expand`, and `context` additionally accept `--max-visited` and `--max-depth`.
+`search-expand` and `context` require exactly one lexical `--query` or one or more typed filter
+flags, and accept `--seed-limit`, repeatable `--edge-type`, and `--direction out|in|both`.
 
 Export a branch's complete immutable graph snapshot as JSON for visualization or offline
 inspection:
@@ -255,6 +265,52 @@ spl workspace unset
 
 `unset` always succeeds, including when no preference is set, so it also recovers from a stale
 preference pointing at a workspace no longer in the registry.
+
+## CLI command reference
+
+The complete installed surface, including generated help and every flag, is documented in
+[`.agents/skills/spool/references/cli-help.md`](.agents/skills/spool/references/cli-help.md).
+The command and flag inventory is:
+
+| Command | Flags and positional arguments |
+| --- | --- |
+| `init` | none |
+| `add` | `--branch` (required), `--batch` (required) |
+| `status` | `--branch` |
+| `commit` | `--branch` (required), `--author`, `--message` |
+| `branch create <name>` | exactly one of `--from-branch`, `--from-commit` |
+| `branch list` | none |
+| `branch delete <name>` | none; branch must be inactive and non-default |
+| `switch <branch>` | positional branch |
+| `schema migrate` | `--branch`, `--schema`, `--batch` (all required) |
+| `validate` | `--branch` (required), `--commit` (reachable) |
+| `resolve` | `--branch` (required), `--commit`, `--node`, `--max-rows`, `--max-response-bytes`, `--timeout`, `--max-depth`, `--max-visited` |
+| `graph` | `--branch` (required) |
+| `search` | `--branch`, `--query` (required), `--commit`, `--continuation`, `--max-rows`, `--max-response-bytes`, `--timeout` |
+| `filter` | `--branch` (required), `--commit`, repeatable `--label`/property predicates, `--continuation`, `--max-rows`, `--max-response-bytes`, `--timeout` |
+| `search-expand`, `context` | `--branch` (required), `--commit`, query or typed filters, `--direction`, repeatable `--edge-type`, `--seed-limit`, `--max-depth`, `--max-visited`, `--max-rows`, `--max-response-bytes`, `--timeout` |
+| `history` | `--branch`, `--entity-id` (required), `--commit`, `--all-parents`, `--continuation`, `--max-rows`, `--max-response-bytes`, `--timeout` |
+| `branches-containing` | exactly one selector (`--entity-id`, `--snapshot-id`, `--natural-key`), `--continuation`, `--max-rows`, `--max-response-bytes`, `--timeout` |
+| `diff` | `--base-branch`, `--target-branch` (required), optional commits, repeatable `--node-id`/`--edge-id`, `--node-title-contains`, `--one-hop`, `--continuation`, `--max-rows`, `--max-response-bytes`, `--timeout` |
+| `merge preview` | `--source`, `--target` (required) |
+| `merge apply` | `--source`, `--target`, `--transaction`, `--preview` (required), `--author`, `--message` |
+| `merge conflicts` | `--target`, `--transaction` (required) |
+| `merge resolve` | `--target`, `--transaction`, `--preview`, `--selections` (required), `--overrides` |
+| `merge finalize`, `merge abort` | `--target`, `--transaction` (required) |
+| `fsck` | none; read-only integrity report |
+| `gc` | `--dry-run`, `--repack`, `--grace-period` (default `336h`) |
+| `prune` | `--branch` (required), `--dry-run`, `--force`, `--author`, `--message` |
+| `workspace init <name>` | positional name |
+| `workspace attach [path]` | `--workspace` (required); path defaults to current directory |
+| `workspace detach <path>` | positional path |
+| `workspace list`, `workspace current`, `workspace unset` | none |
+| `workspace use <name>` | positional name |
+| `completion` | shell subcommand: `bash`, `zsh`, `fish`, or `powershell` |
+| `help [command path]` | optional command path |
+
+The common query-budget flags are `--max-rows`, `--max-response-bytes`, and `--timeout`;
+traversal commands additionally use `--max-depth` and `--max-visited` as listed in the full
+reference. Every command also accepts `-h, --help` and the global `--state-dir`.
 
 ## Learn more
 

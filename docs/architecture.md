@@ -47,6 +47,30 @@ exit.
 | `internal/repository/prune` | Graph pruning and ephemeral node excision service boundary. |
 | `internal/workspace` | Detached workspace registry, attached repository paths, and active workspace preferences. Exposed to the CLI through the repository facade. |
 
+## CLI command surface
+
+The root `spl` command exposes a persistent `--state-dir` override plus Cobra's `--help`,
+`completion`, and `help` commands. The application commands are grouped by their repository
+operation:
+
+| Group | Commands |
+| --- | --- |
+| Working changes | `init`, `add`, `status`, `commit` |
+| Branches | `branch create/list/delete`, `switch` |
+| Schemas | `schema migrate`, `validate` |
+| Reads | `resolve`, `graph`, `search`, `filter`, `search-expand`, `context` |
+| History and comparison | `history`, `branches-containing`, `diff` |
+| Merge lifecycle | `merge preview/apply/conflicts/resolve/finalize/abort` |
+| Maintenance | `fsck`, `gc`, `prune` |
+| Detached workspaces | `workspace init/attach/detach/list/current/use/unset` |
+
+The complete syntax, flags, examples, and selector constraints are maintained in
+`.agents/skills/spool/references/cli-help.md`. In particular, mutation staging and schema
+migration replace a branch's staged set atomically; read-command branch and commit selectors pin
+immutable snapshots; projection retrieval is branch-head-only; and merge conflicts are handled through a
+durable target-branch lease. All successful operational commands emit JSON on stdout, while
+operational failures are structured JSON logs on stderr.
+
 ## Data model
 
 The repository is an immutable graph history:
