@@ -8,6 +8,13 @@ generated from commits since the preceding `v*` tag. Commits prefixed with `docs
 
 ## [Unreleased]
 
+## [0.0.7] - 2026-08-30
+
+### Added
+
+- Prebuilt `spl` binaries for macOS, Linux, and Windows are available from
+  GitHub Releases.
+
 ## [0.0.6] - 2026-08-28
 
 ### Added
