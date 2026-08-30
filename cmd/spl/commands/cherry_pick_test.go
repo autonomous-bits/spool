@@ -11,27 +11,38 @@ import (
 
 func TestCherryPickCLIRequiresCommitAndTargetBranchFlags(t *testing.T) {
 	repo := newTestSeedRepository(t)
-	var output bytes.Buffer
-	command := NewCherryPickCommand(func() (*repository.Repository, error) {
-		return repo, nil
-	})
-	command.SetOut(&output)
-	command.SetArgs([]string{})
-	err := command.Execute()
-	if err == nil {
-		t.Fatal("expected error when required flags are missing")
+
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "missing all required flags",
+			args: []string{},
+		},
+		{
+			name: "missing target-branch flag",
+			args: []string{"--commit", "commit-1"},
+		},
+		{
+			name: "missing commit flag",
+			args: []string{"--target-branch", "main"},
+		},
 	}
 
-	command.SetArgs([]string{"--commit", "commit-1"})
-	err = command.Execute()
-	if err == nil {
-		t.Fatal("expected error when --target-branch flag is missing")
-	}
-
-	command.SetArgs([]string{"--target-branch", "main"})
-	err = command.Execute()
-	if err == nil {
-		t.Fatal("expected error when --commit flag is missing")
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var output bytes.Buffer
+			command := NewCherryPickCommand(func() (*repository.Repository, error) {
+				return repo, nil
+			})
+			command.SetOut(&output)
+			command.SetErr(&output)
+			command.SetArgs(tc.args)
+			if err := command.Execute(); err == nil {
+				t.Fatalf("expected error for args %v, got nil", tc.args)
+			}
+		})
 	}
 }
 
