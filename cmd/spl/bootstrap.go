@@ -188,6 +188,17 @@ func repositoryStateDirFrom(workingDirectory string) (string, error) {
 	}
 	root, err := repository.WorkspaceStorageRoot()
 	if err == nil {
+		_, manifest, found, manifestErr := repository.DiscoverWorkspaceManifest(directory)
+		if manifestErr != nil {
+			return "", manifestErr
+		}
+		if found {
+			match, err := repository.FindWorkspaceByID(root, manifest.WorkspaceID)
+			if err != nil {
+				return "", fmt.Errorf("resolve workspace manifest: %w", err)
+			}
+			return match.Workspace.StateDir, nil
+		}
 		match, err := repository.FindWorkspace(root, directory)
 		if err == nil {
 			return match.Workspace.StateDir, nil

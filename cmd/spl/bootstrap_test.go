@@ -279,6 +279,45 @@ func TestRepositoryStateDirFrom(t *testing.T) {
 		}
 	})
 
+	t.Run("manifest match wins over legacy registry path", func(t *testing.T) {
+		root := configureStorageRoot(t)
+		checkout := makeDirectory(t, t.TempDir(), "repo")
+		legacyStateDir := filepath.Join(t.TempDir(), "repos", "ws_00000030")
+		manifestStateDir := filepath.Join(t.TempDir(), "repos", "ws_00000031")
+		registerWorkspaceIn(t, root, "legacy", "ws_00000030", legacyStateDir, checkout)
+		registerWorkspaceIn(t, root, "portable", "ws_00000031", manifestStateDir, makeDirectory(t, t.TempDir(), "other"))
+		if err := repository.WriteWorkspaceManifest(checkout, repository.WorkspaceManifest{
+			FormatVersion: 1,
+			RepositoryID:  "github.com/acme/storefront",
+			WorkspaceID:   "ws_00000031",
+		}); err != nil {
+			t.Fatalf("write workspace manifest: %v", err)
+		}
+
+		resolvedStateDir, err := repositoryStateDirFrom(filepath.Join(checkout, "nested"))
+		if err != nil {
+			t.Fatalf("repositoryStateDirFrom: %v", err)
+		}
+		if resolvedStateDir != manifestStateDir {
+			t.Fatalf("state directory = %q, want manifest state directory %q", resolvedStateDir, manifestStateDir)
+		}
+	})
+
+	t.Run("manifest with missing local workspace fails explicitly", func(t *testing.T) {
+		configureStorageRoot(t)
+		checkout := makeDirectory(t, t.TempDir(), "repo")
+		if err := repository.WriteWorkspaceManifest(checkout, repository.WorkspaceManifest{
+			FormatVersion: 1,
+			RepositoryID:  "github.com/acme/storefront",
+			WorkspaceID:   "ws_00000032",
+		}); err != nil {
+			t.Fatalf("write workspace manifest: %v", err)
+		}
+		if _, err := repositoryStateDirFrom(checkout); err == nil {
+			t.Fatal("repositoryStateDirFrom error = nil, want missing manifest workspace error")
+		}
+	})
+
 	t.Run("no registry match falls back to local spl directory", func(t *testing.T) {
 		configureStorageRoot(t)
 		workingDirectory := makeDirectory(t, t.TempDir(), "repo")

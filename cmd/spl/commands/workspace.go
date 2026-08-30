@@ -154,7 +154,7 @@ func newWorkspaceInitCommand(registryRoot func() (string, error)) *cobra.Command
 }
 
 func newWorkspaceAttachCommand(registryRoot func() (string, error)) *cobra.Command {
-	var workspaceName string
+	var workspaceName, repositoryID string
 	command := &cobra.Command{
 		Use:          "attach [path]",
 		Short:        "Attach a repository path to a workspace",
@@ -187,6 +187,23 @@ func newWorkspaceAttachCommand(registryRoot func() (string, error)) *cobra.Comma
 			if err != nil {
 				return err
 			}
+			if repositoryID != "" {
+				registry, err := repository.LoadWorkspaceRegistry(root)
+				if err != nil {
+					return err
+				}
+				entry, exists := registry.Workspaces[name]
+				if !exists {
+					return fmt.Errorf("%w: workspace %q is not registered", repository.ErrWorkspaceNotRegistered, name)
+				}
+				if err := repository.WriteWorkspaceManifest(attachedPath, repository.WorkspaceManifest{
+					FormatVersion: 1,
+					RepositoryID:  repositoryID,
+					WorkspaceID:   entry.ID,
+				}); err != nil {
+					return err
+				}
+			}
 			return json.NewEncoder(command.OutOrStdout()).Encode(workspacePathResult{
 				Workspace: string(name),
 				Attached:  attachedPath,
@@ -194,6 +211,7 @@ func newWorkspaceAttachCommand(registryRoot func() (string, error)) *cobra.Comma
 		},
 	}
 	command.Flags().StringVar(&workspaceName, "workspace", "", "existing workspace to attach the path to")
+	command.Flags().StringVar(&repositoryID, "repository-id", "", "portable canonical repository identity to write to the checkout manifest")
 	_ = command.MarkFlagRequired("workspace")
 	return command
 }
