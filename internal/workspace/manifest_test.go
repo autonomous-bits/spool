@@ -78,18 +78,18 @@ func TestDiscoverManifestIgnoresLocalRepositoryConfigAndRejectsInvalidManifest(t
 
 func TestFindWorkspaceByID(t *testing.T) {
 	root := t.TempDir()
-	if err := UpdateRegistry(root, func(registry *Registry) error {
-		registry.Workspaces["storefront"] = testWorkspace(root, "ws_8f1e2a3b", nil)
-		return nil
-	}); err != nil {
-		t.Fatalf("UpdateRegistry: %v", err)
+	stateDir := filepath.Join(root, "repos", "ws_8f1e2a3b")
+	if err := os.WriteFile(filepath.Join(root, registryFilename), []byte(
+		"version = 1\n\n[workspaces.storefront]\nid = \"ws_8f1e2a3b\"\nstate_dir = \""+stateDir+"\"\n",
+	), 0o600); err != nil {
+		t.Fatalf("write registry: %v", err)
 	}
-	match, err := FindWorkspaceByID(root, "ws_8f1e2a3b")
+	foundStateDir, err := FindWorkspaceByID(root, "ws_8f1e2a3b")
 	if err != nil {
 		t.Fatalf("FindWorkspaceByID: %v", err)
 	}
-	if match.Name != "storefront" {
-		t.Fatalf("workspace name = %q, want storefront", match.Name)
+	if foundStateDir != stateDir {
+		t.Fatalf("state directory = %q, want %q", foundStateDir, stateDir)
 	}
 	if _, err := FindWorkspaceByID(root, "ws_00000000"); !errors.Is(err, ErrWorkspaceNotRegistered) {
 		t.Fatalf("FindWorkspaceByID missing error = %v, want ErrWorkspaceNotRegistered", err)

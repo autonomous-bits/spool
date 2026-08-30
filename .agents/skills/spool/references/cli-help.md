@@ -23,13 +23,12 @@ Before Cobra dispatches a command, the state directory is selected in this order
 
 1. `--state-dir <path>` (or `--state-dir=<path>`)
 2. `SPOOL_DIR`
-3. `SPOOL_WORKSPACE` (the registered workspace name)
-4. the persisted preference set by `spl workspace use`
-5. the registered workspace owning the current path (longest matching attachment)
-6. the nearest local `.spl` directory or `go.work` root, or `.spl` in the current directory
+3. a validated ancestor `.spl/config.toml` workspace manifest
+4. the nearest local `.spl` directory or `go.work` root, or `.spl` in the current directory
 
-An empty `--state-dir` is invalid. An unknown `SPOOL_WORKSPACE` is an error; a stale persisted
-workspace preference is ignored so that `spl workspace unset` can recover it.
+An empty `--state-dir` is invalid. A malformed workspace manifest or unknown
+workspace ID is an error; checkouts without a workspace manifest use local
+repository discovery.
 
 ## Command index
 
@@ -44,7 +43,7 @@ workspace preference is ignored so that `spl workspace unset` can recover it.
 | `history`, `branches-containing`, `diff` | Inspect history, branch containment, and snapshot changes |
 | `merge preview/apply/conflicts/resolve/finalize/abort` | Run the merge transaction lifecycle |
 | `fsck`, `gc`, `prune` | Check integrity, maintain objects, and remove ephemeral graph data |
-| `workspace init/attach/detach/list/current/use/unset` | Manage detached multi-repository workspaces |
+| `workspace init/attach` | Provision central detached state and bind repository manifests |
 | `completion`, `help` | Generate shell completion and inspect command help |
 
 All commands accept `-h, --help` in addition to the flags below.
@@ -58,8 +57,7 @@ spl status --branch main
 spl commit --branch main --author alice --message "Add graph data"
 ```
 
-`init` creates the resolved repository and default `main` branch. Workspace initialization already
-does this for detached workspace state, so it does not need a separate `init`.
+`init` creates the resolved repository and default `main` branch.
 
 `add` requires `--branch` and `--batch`, validates a complete JSON mutation-operation array, and
 atomically replaces that branch's staged set; it does not commit. Operations can add, update, or
@@ -298,30 +296,14 @@ while the branch has staged changes.
 
 ```sh
 spl workspace init ecommerce-platform
-spl workspace attach --workspace ecommerce-platform ~/repos/order-service
-spl workspace list
-spl workspace current
-spl workspace detach ~/repos/order-service
-spl workspace use ecommerce-platform
-spl workspace unset
+spl workspace attach --workspace ecommerce-platform --repository-id github.com/acme/order-service ~/repos/order-service
 ```
 
-`workspace init <name>` creates and registers detached state with a default `main` branch.
-`attach [path]` requires `--workspace`; without a path it attaches the current directory.
-`detach <path>` removes whichever workspace owns that path. `list` is deterministic alphabetical
-JSON, and `current` resolves the workspace owning the current directory by longest matching path.
-`use <name>` persists a preferred workspace; `unset` always succeeds and reports whether a
-preference was cleared.
-
-```text
-workspace init <name>
-workspace attach [path] --workspace <name>
-workspace detach <path>
-workspace list
-workspace current
-workspace use <name>
-workspace unset
-```
+`workspace init <name>` provisions central detached state. `workspace attach`
+requires a central workspace name and portable repository ID, then writes the
+repository's `.spl/config.toml` manifest. Commit that manifest so other
+checkouts resolve the same central workspace by immutable ID. The command does
+not register a host-path attachment.
 
 ## Completion and help
 

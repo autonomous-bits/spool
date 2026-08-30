@@ -51,43 +51,32 @@ go build -o dist/spl ./cmd/spl
 
 ## Quick start
 
-Create a detached workspace and attach the checkout that will use it:
+Create a central detached workspace, then explicitly bind each repository:
 
 ```sh
 spl workspace init my-project
 spl workspace attach --workspace my-project --repository-id github.com/acme/my-project .
 ```
 
-`spl workspace init` creates the workspace's graph state and default `main` branch in detached
-storage immediately, not in the checkout. Supplying `--repository-id` to `workspace attach`
-writes a portable `.spl/config.toml` manifest that binds the checkout to the workspace's immutable
-ID. Commit that manifest so clones, worktrees, and CI runners resolve the same workspace after
-their local registry is configured. If the checkout already uses `.spl/config.toml` for local
-Spool state, attachment refuses to overwrite it; migrate a detached checkout instead. Repositories
-that ignore `.spl` must add a `.gitignore` exception for `.spl/config.toml` before committing the
-manifest. Every path attached to that workspace uses the same state;
-attach additional checkouts directly:
-
-```sh
-spl workspace attach --workspace my-project ~/repos/my-project-docs
-```
-
-Confirm which workspace owns the current directory with:
-
-```sh
-spl workspace current
-```
+`workspace init` creates the detached state in the user's central workspace
+catalog. `workspace attach` writes the checkout's portable `.spl/config.toml`
+manifest, binding its repository ID to the workspace's immutable ID. Commit the
+manifest so clones, worktrees, and CI runners resolve the same state. Repeat
+`workspace attach` for each repository that belongs to the workspace. It does
+not persist host-path attachments. If the checkout already uses
+`.spl/config.toml` for local Spool state, do not overwrite it with a workspace
+manifest. Repositories that ignore `.spl` must add a `.gitignore` exception for
+`.spl/config.toml` before committing the manifest.
 
 To create a local, non-workspace graph repository instead, run `spl init` from the desired
 directory. It creates `.spl` in the nearest directory at or above the current directory that
 already contains `.spl` or `go.work`, or in the current directory if neither is found.
 
-All commands accept the global `--state-dir <path>` override. State selection precedence is
-`--state-dir`, `SPOOL_DIR`, `SPOOL_WORKSPACE`, the persisted workspace preference, a discovered
-checkout manifest, the registered workspace owning the current path (longest match), then local
-`.spl`/`go.work` discovery. An empty
-`--state-dir` is invalid; a stale persisted workspace preference is ignored so `spl workspace unset`
-can recover it.
+All commands accept the global `--state-dir <path>` override. State selection
+precedence is `--state-dir`, `SPOOL_DIR`, a discovered checkout manifest, then
+local `.spl`/`go.work` discovery. An empty `--state-dir` is invalid. A malformed
+manifest or unregistered workspace ID is an error; checkouts without a manifest
+continue to use local repository discovery.
 
 ## Storage and integrity
 
@@ -244,33 +233,12 @@ mutation-array format as `spl add` and can repair a schema-derived semantic conf
 and finalization reject stale previews, require transaction ownership, and keep the target lease
 until finalization or abort.
 
-## Multi-repo workspaces
+## Detached workspaces
 
-A detached workspace maps one or more checked-out paths to the same Spool graph state. Create the
-workspace and attach a path; the workspace's state is initialized immediately:
-
-```sh
-spl workspace init ecommerce-platform
-spl workspace attach --workspace ecommerce-platform ~/repos/order-service
-spl workspace attach --workspace ecommerce-platform ~/repos/inventory-service
-spl workspace list
-spl workspace current
-spl workspace detach ~/repos/inventory-service
-```
-
-A repository path can be attached to only one workspace at a time. `spl workspace current`
-resolves the registered workspace that owns the current working directory by longest matching
-attached path. Workspace registry and state data live under the platform-appropriate XDG data
-location (or `%LOCALAPPDATA%` on Windows), outside the attached checkouts. Persist or clear a
-preferred active workspace for future sessions with:
-
-```sh
-spl workspace use ecommerce-platform
-spl workspace unset
-```
-
-`unset` always succeeds, including when no preference is set, so it also recovers from a stale
-preference pointing at a workspace no longer in the registry.
+`workspace init` provisions a central detached workspace. `workspace attach`
+explicitly writes a repository manifest for it. Repository resolution uses only
+that committed manifest's immutable `workspace_id`; it does not use host-path
+attachments, `SPOOL_WORKSPACE`, or active-workspace preferences.
 
 ## CLI command reference
 
@@ -307,10 +275,7 @@ The command and flag inventory is:
 | `gc` | `--dry-run`, `--repack`, `--grace-period` (default `336h`) |
 | `prune` | `--branch` (required), `--dry-run`, `--force`, `--author`, `--message` |
 | `workspace init <name>` | positional name |
-| `workspace attach [path]` | `--workspace` (required); path defaults to current directory |
-| `workspace detach <path>` | positional path |
-| `workspace list`, `workspace current`, `workspace unset` | none |
-| `workspace use <name>` | positional name |
+| `workspace attach [path]` | `--workspace` and `--repository-id` (required); path defaults to current directory |
 | `completion` | shell subcommand: `bash`, `zsh`, `fish`, or `powershell` |
 | `help [command path]` | optional command path |
 
