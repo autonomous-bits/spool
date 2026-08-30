@@ -5,6 +5,8 @@ import (
 	"github.com/autonomous-bits/spool/internal/workspace"
 )
 
+const CurrentWorkspaceManifestVersion = workspace.CurrentManifestVersion
+
 // Workspace domain types re-exported from the workspace package.
 type (
 	Workspace         = workspace.Workspace
@@ -26,6 +28,10 @@ var (
 	ErrWorkspaceInvalidStorageRoot      = workspace.ErrInvalidStorageRoot
 	ErrWorkspaceStorageRootUnavailable  = workspace.ErrStorageRootUnavailable
 	ErrWorkspaceInvalidCurrentWorkspace = workspace.ErrInvalidCurrentWorkspace
+	ErrWorkspaceManifestNotFound        = workspace.ErrManifestNotFound
+	ErrWorkspaceInvalidManifest         = workspace.ErrInvalidManifest
+	ErrWorkspaceManifestConflict        = workspace.ErrManifestConflict
+	ErrWorkspaceInvalidRepositoryID     = workspace.ErrInvalidRepositoryID
 )
 
 // WorkspaceStorageRoot returns the platform-specific data directory.
@@ -86,6 +92,24 @@ func ClearCurrentWorkspace(root string) error {
 // FindWorkspace selects the workspace whose attached paths match targetDirectory.
 func FindWorkspace(root, targetDirectory string) (WorkspaceMatch, error) {
 	return workspace.FindWorkspace(root, targetDirectory)
+}
+
+// FindWorkspaceByID resolves detached state from its immutable identity.
+func FindWorkspaceByID(root string, id WorkspaceID) (WorkspaceMatch, error) {
+	return workspace.FindWorkspaceByID(root, id)
+}
+
+// WorkspaceManifest declares a checkout's portable workspace binding.
+type WorkspaceManifest = workspace.Manifest
+
+// DiscoverWorkspaceManifest searches a directory and its ancestors for a manifest.
+func DiscoverWorkspaceManifest(workingDirectory string) (string, WorkspaceManifest, bool, error) {
+	return workspace.DiscoverManifest(workingDirectory)
+}
+
+// WriteWorkspaceManifest atomically writes a checkout-owned workspace manifest.
+func WriteWorkspaceManifest(repositoryRoot string, manifest WorkspaceManifest) error {
+	return workspace.WriteManifest(repositoryRoot, manifest)
 }
 
 // CanonicalWorkspacePath resolves target path to an absolute path.

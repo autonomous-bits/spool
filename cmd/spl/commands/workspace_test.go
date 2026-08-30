@@ -26,6 +26,7 @@ func TestWorkspaceInitCreatesWorkspaceAndRegistry(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &created); err != nil {
 		t.Fatalf("decode init output: %v", err)
 	}
+
 	if created.Name != "alpha" {
 		t.Fatalf("created workspace name = %q, want alpha", created.Name)
 	}
@@ -52,6 +53,37 @@ func TestWorkspaceInitCreatesWorkspaceAndRegistry(t *testing.T) {
 	}
 	if stored.ID != created.ID {
 		t.Fatalf("stored ID = %q, want %q", stored.ID, created.ID)
+	}
+}
+
+func TestWorkspaceAttachWritesPortableManifest(t *testing.T) {
+	root := t.TempDir()
+	checkout := t.TempDir()
+	if err := runWorkspaceCommand(root, []string{"init", "alpha"}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("workspace init: %v", err)
+	}
+	var output bytes.Buffer
+	if err := runWorkspaceCommand(root, []string{
+		"attach", "--workspace", "alpha", "--repository-id", "github.com/acme/storefront", checkout,
+	}, &output); err != nil {
+		t.Fatalf("workspace attach: %v", err)
+	}
+	_, manifest, found, err := repository.DiscoverWorkspaceManifest(checkout)
+	if err != nil {
+		t.Fatalf("discover manifest: %v", err)
+	}
+	if !found {
+		t.Fatal("workspace manifest was not written")
+	}
+	if manifest.RepositoryID != "github.com/acme/storefront" {
+		t.Fatalf("repository ID = %q, want github.com/acme/storefront", manifest.RepositoryID)
+	}
+	registry, err := repository.LoadWorkspaceRegistry(root)
+	if err != nil {
+		t.Fatalf("load registry: %v", err)
+	}
+	if manifest.WorkspaceID != registry.Workspaces["alpha"].ID {
+		t.Fatalf("workspace ID = %q, want %q", manifest.WorkspaceID, registry.Workspaces["alpha"].ID)
 	}
 }
 

@@ -102,6 +102,7 @@ func AttachPath(root string, workspaceName Name, path string) error {
 		if err := workspaceName.Validate(); err != nil {
 			return err
 		}
+
 		workspace, ok := registry.Workspaces[workspaceName]
 		if !ok {
 			return fmt.Errorf("%w: workspace %q does not exist", ErrInvalidWorkspace, workspaceName)
@@ -129,6 +130,23 @@ func AttachPath(root string, workspaceName Name, path string) error {
 		registry.Workspaces[workspaceName] = workspace
 		return nil
 	})
+}
+
+// FindWorkspaceByID loads the registry and returns the unique workspace with id.
+func FindWorkspaceByID(root string, id ID) (WorkspaceMatch, error) {
+	if err := id.Validate(); err != nil {
+		return WorkspaceMatch{}, err
+	}
+	registry, err := LoadRegistry(root)
+	if err != nil {
+		return WorkspaceMatch{}, err
+	}
+	for name, workspace := range registry.Workspaces {
+		if workspace.ID == id {
+			return WorkspaceMatch{Name: name, Workspace: workspace}, nil
+		}
+	}
+	return WorkspaceMatch{}, fmt.Errorf("%w: workspace identity %q is not registered", ErrWorkspaceNotRegistered, id)
 }
 
 // CanonicalPath returns path as an absolute, symlink-evaluated, clean path.

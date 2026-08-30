@@ -55,13 +55,18 @@ Create a detached workspace and attach the checkout that will use it:
 
 ```sh
 spl workspace init my-project
-spl workspace attach --workspace my-project .
+spl workspace attach --workspace my-project --repository-id github.com/acme/my-project .
 ```
 
 `spl workspace init` creates the workspace's graph state and default `main` branch in detached
-storage immediately, not in the checkout, so the workspace is usable as soon as a checkout is
-attached. Every path attached to that workspace uses the same state; attach additional checkouts
-directly:
+storage immediately, not in the checkout. Supplying `--repository-id` to `workspace attach`
+writes a portable `.spl/config.toml` manifest that binds the checkout to the workspace's immutable
+ID. Commit that manifest so clones, worktrees, and CI runners resolve the same workspace after
+their local registry is configured. If the checkout already uses `.spl/config.toml` for local
+Spool state, attachment refuses to overwrite it; migrate a detached checkout instead. Repositories
+that ignore `.spl` must add a `.gitignore` exception for `.spl/config.toml` before committing the
+manifest. Every path attached to that workspace uses the same state;
+attach additional checkouts directly:
 
 ```sh
 spl workspace attach --workspace my-project ~/repos/my-project-docs
@@ -78,8 +83,9 @@ directory. It creates `.spl` in the nearest directory at or above the current di
 already contains `.spl` or `go.work`, or in the current directory if neither is found.
 
 All commands accept the global `--state-dir <path>` override. State selection precedence is
-`--state-dir`, `SPOOL_DIR`, `SPOOL_WORKSPACE`, the persisted workspace preference, the registered
-workspace owning the current path (longest match), then local `.spl`/`go.work` discovery. An empty
+`--state-dir`, `SPOOL_DIR`, `SPOOL_WORKSPACE`, the persisted workspace preference, a discovered
+checkout manifest, the registered workspace owning the current path (longest match), then local
+`.spl`/`go.work` discovery. An empty
 `--state-dir` is invalid; a stale persisted workspace preference is ignored so `spl workspace unset`
 can recover it.
 
