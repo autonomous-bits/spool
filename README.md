@@ -9,21 +9,45 @@ failures are structured JSON logs on standard error.
 
 ## Install
 
-Spool currently builds from source and requires Go **1.26.1** or later:
+### Prebuilt binaries
+
+Download the latest prebuilt archive for your platform from [GitHub Releases](https://github.com/autonomous-bits/spool/releases):
+
+| Platform | Architecture | Archive |
+| :--- | :--- | :--- |
+| **macOS** | Apple Silicon (`arm64`) | `spool_<version>_darwin_arm64.tar.gz` |
+| | Intel (`amd64`) | `spool_<version>_darwin_amd64.tar.gz` |
+| **Linux** | ARM64 (`arm64`) | `spool_<version>_linux_arm64.tar.gz` |
+| | x86-64 (`amd64`) | `spool_<version>_linux_amd64.tar.gz` |
+| **Windows** | x86-64 (`amd64`) | `spool_<version>_windows_amd64.zip` |
+
+Extract the archive and place the `spl` binary (or `spl.exe` on Windows) into a directory on your `PATH`. You can verify downloads with the accompanying `checksums.txt` file.
+
+### Package managers (Upcoming)
+
+Distribution through package managers is planned for upcoming releases:
+
+- **Homebrew** (macOS / Linux): *Coming soon*
+- **WinGet** (Windows): *Coming soon*
+
+### Go install
+
+If you have Go **1.26.1** or later installed:
 
 ```sh
 go install github.com/autonomous-bits/spool/cmd/spl@latest
 ```
 
-To build the checked-out workspace instead:
+### Build from source
+
+To build from a local clone of the repository:
 
 ```sh
+git clone https://github.com/autonomous-bits/spool.git
+cd spool
 go build -o dist/spl ./cmd/spl
+# or: make build
 ```
-
-Prebuilt archives for released versions are available from the
-[GitHub Releases](https://github.com/autonomous-bits/spool/releases) page. Verify a download with
-the accompanying `checksums.txt` file.
 
 ## Quick start
 
