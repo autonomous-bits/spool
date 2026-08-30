@@ -44,6 +44,18 @@ func (e *CherryPickCommittedWithWarningError) Error() string { return e.err.Erro
 // Unwrap returns the underlying durability warning.
 func (e *CherryPickCommittedWithWarningError) Unwrap() error { return e.err }
 
+type cherryPickCandidate struct {
+	targetHead       ObjectID
+	srcCommitID      ObjectID
+	srcCommit        commit
+	mergedNodes      map[string]Node
+	mergedEdges      map[string]Edge
+	mergedSchemaRoot ObjectID
+	changes          []cherrypick.Change
+	conflicts        []MergeConflict
+	violations       []cherrypick.SchemaViolation
+}
+
 // CherryPick computes single-commit graph deltas against its parent, performs 3-way
 // property merging against target HEAD, validates referential integrity and schema rules,
 // and orchestrates atomic commit generation on targetBranch.
@@ -53,100 +65,137 @@ func (r *Repository) CherryPick(request CherryPickRequest) (CherryPickResult, er
 	if err := r.ensureOpenLocked(); err != nil {
 		return CherryPickResult{}, err
 	}
+
+	candidate, err := r.previewCherryPickLocked(request)
+	if err != nil {
+		return CherryPickResult{}, err
+	}
+
+	result := formatCherryPickResult(request, candidate)
+
+	if request.DryRun {
+		return result, nil
+	}
+	if len(candidate.conflicts) > 0 {
+		return result, cherrypick.ErrConflicts
+	}
+	if len(candidate.changes) == 0 {
+		return result, nil
+	}
+
+	return r.applyCherryPickCandidateLocked(request, candidate)
+}
+
+func (r *Repository) previewCherryPickLocked(request CherryPickRequest) (cherryPickCandidate, error) {
 	if request.Commit == "" {
-		return CherryPickResult{}, cherrypick.ErrCommitRequired
+		return cherryPickCandidate{}, cherrypick.ErrCommitRequired
 	}
 	if request.TargetBranch == "" {
-		return CherryPickResult{}, cherrypick.ErrTargetBranchRequired
+		return cherryPickCandidate{}, cherrypick.ErrTargetBranchRequired
 	}
 	if _, held := r.mergeLeases[request.TargetBranch]; held {
-		return CherryPickResult{}, ErrMergeTargetLeaseHeld
+		return cherryPickCandidate{}, ErrMergeTargetLeaseHeld
 	}
 	targetHead, exists := r.branches[request.TargetBranch]
 	if !exists {
-		return CherryPickResult{}, ErrBranchNotFound
+		return cherryPickCandidate{}, ErrBranchNotFound
 	}
 	if staged, exists := r.stagedMutations[request.TargetBranch]; exists && (len(staged.Operations) > 0 || staged.TargetSchema != nil) {
-		return CherryPickResult{}, ErrUncommittedStagedChanges
+		return cherryPickCandidate{}, ErrUncommittedStagedChanges
 	}
 
 	srcCommitID := ObjectID(request.Commit)
 	srcCommit, exists := r.commits[srcCommitID]
 	if !exists {
-		return CherryPickResult{}, ErrCommitNotFound
+		return cherryPickCandidate{}, ErrCommitNotFound
 	}
 
-	var baseSnapshotID ObjectID
-	var baseSnapshot graphSnapshot
-	var baseNodes map[string]Node
-	var baseEdges map[string]Edge
-	var baseSchemaRoot ObjectID
-
-	if len(srcCommit.Parents) > 0 {
-		baseCommitID := srcCommit.Parents[0]
-		baseCommit, ok := r.commits[baseCommitID]
-		if !ok {
-			return CherryPickResult{}, ErrCommitNotFound
-		}
-		baseSnapshotID = baseCommit.Snapshot
-		if err := r.ensureSnapshotProjectionLocked(baseSnapshotID); err != nil {
-			return CherryPickResult{}, err
-		}
-		baseSnapshot = r.snapshots[baseSnapshotID]
-		baseNodes = r.projections[baseSnapshot.NodeRoot]
-		baseEdges = r.edgeProjections[baseSnapshotID]
-		baseSchemaRoot = baseSnapshot.SchemaRoot
-	} else {
-		baseNodes = make(map[string]Node)
-		baseEdges = make(map[string]Edge)
+	baseNodes, baseEdges, baseSchemaRoot, err := r.resolveCherryPickBaseLocked(srcCommit)
+	if err != nil {
+		return cherryPickCandidate{}, err
 	}
 
-	srcSnapshotID := srcCommit.Snapshot
-	if err := r.ensureSnapshotProjectionLocked(srcSnapshotID); err != nil {
-		return CherryPickResult{}, err
+	srcNodes, srcEdges, srcSchemaRoot, err := r.resolveSnapshotEntitiesLocked(srcCommit.Snapshot)
+	if err != nil {
+		return cherryPickCandidate{}, err
 	}
-	srcSnapshot := r.snapshots[srcSnapshotID]
-	srcNodes := r.projections[srcSnapshot.NodeRoot]
-	srcEdges := r.edgeProjections[srcSnapshotID]
 
-	targetSnapshotID := r.commits[targetHead].Snapshot
-	if err := r.ensureSnapshotProjectionLocked(targetSnapshotID); err != nil {
-		return CherryPickResult{}, err
+	targetNodes, targetEdges, targetSchemaRoot, err := r.resolveSnapshotEntitiesLocked(r.commits[targetHead].Snapshot)
+	if err != nil {
+		return cherryPickCandidate{}, err
 	}
-	targetSnapshot := r.snapshots[targetSnapshotID]
-	targetNodes := r.projections[targetSnapshot.NodeRoot]
-	targetEdges := r.edgeProjections[targetSnapshotID]
 
 	conflicts := make([]MergeConflict, 0)
 	mergedNodes := mergeNodeMaps(baseNodes, srcNodes, targetNodes, &conflicts)
 	mergedEdges := mergeEdgeMaps(baseEdges, srcEdges, targetEdges, &conflicts)
+	mergedSchemaRoot := mergeCherryPickSchemaRoot(baseSchemaRoot, srcSchemaRoot, targetSchemaRoot, &conflicts)
 
-	var mergedSchemaRoot ObjectID
-	if baseSnapshotID != "" {
-		mergedSchemaRoot = mergeSchemaRoot(baseSchemaRoot, srcSnapshot.SchemaRoot, targetSnapshot.SchemaRoot, &conflicts)
-	} else {
-		if srcSnapshot.SchemaRoot == targetSnapshot.SchemaRoot || srcSnapshot.SchemaRoot == "" {
-			mergedSchemaRoot = targetSnapshot.SchemaRoot
-		} else if targetSnapshot.SchemaRoot == "" {
-			mergedSchemaRoot = srcSnapshot.SchemaRoot
-		} else {
-			mergedSchemaRoot = targetSnapshot.SchemaRoot
-			conflicts = append(conflicts, MergeConflict{Category: "schema", Entity: "schema", Field: "root"})
+	validateCherryPickEndpoints(mergedNodes, mergedEdges, &conflicts)
+	violations, err := r.validateCherryPickSchemaLocked(mergedSchemaRoot, mergedNodes, mergedEdges, &conflicts)
+	if err != nil {
+		return cherryPickCandidate{}, err
+	}
+
+	sortMergeConflicts(conflicts)
+	for i := range conflicts {
+		if conflicts[i].Paths == nil {
+			conflicts[i].Paths = mergeConflictPaths(conflicts[i])
 		}
+		conflicts[i].ConflictID = mergeConflictID(conflicts[i])
 	}
 
-	rawChanges := mergeChanges(targetNodes, mergedNodes, targetEdges, mergedEdges)
-	changes := make([]cherrypick.Change, len(rawChanges))
-	for i, c := range rawChanges {
-		changes[i] = cherrypick.Change{Entity: c.Entity, ID: c.ID, Change: c.Change}
-	}
+	return cherryPickCandidate{
+		targetHead:       targetHead,
+		srcCommitID:      srcCommitID,
+		srcCommit:        srcCommit,
+		mergedNodes:      mergedNodes,
+		mergedEdges:      mergedEdges,
+		mergedSchemaRoot: mergedSchemaRoot,
+		changes:          formatCherryPickChanges(targetNodes, mergedNodes, targetEdges, mergedEdges),
+		conflicts:        conflicts,
+		violations:       violations,
+	}, nil
+}
 
-	// Referential integrity pre-flight verification:
-	// Verify that all candidate edges have valid source and target nodes present.
-	for _, edgeID := range sortedEdgeIDs(mergedEdges) {
-		edge := mergedEdges[edgeID]
-		sourceExists := hasNode(mergedNodes, edge.Source)
-		targetExists := hasNode(mergedNodes, edge.Target)
+func (r *Repository) resolveCherryPickBaseLocked(srcCommit commit) (map[string]Node, map[string]Edge, ObjectID, error) {
+	if len(srcCommit.Parents) == 0 {
+		return make(map[string]Node), make(map[string]Edge), "", nil
+	}
+	baseCommitID := srcCommit.Parents[0]
+	baseCommit, ok := r.commits[baseCommitID]
+	if !ok {
+		return nil, nil, "", ErrCommitNotFound
+	}
+	return r.resolveSnapshotEntitiesLocked(baseCommit.Snapshot)
+}
+
+func (r *Repository) resolveSnapshotEntitiesLocked(snapshotID ObjectID) (map[string]Node, map[string]Edge, ObjectID, error) {
+	if err := r.ensureSnapshotProjectionLocked(snapshotID); err != nil {
+		return nil, nil, "", err
+	}
+	snapshot := r.snapshots[snapshotID]
+	return r.projections[snapshot.NodeRoot], r.edgeProjections[snapshotID], snapshot.SchemaRoot, nil
+}
+
+func mergeCherryPickSchemaRoot(baseRoot, srcRoot, targetRoot ObjectID, conflicts *[]MergeConflict) ObjectID {
+	if baseRoot != "" {
+		return mergeSchemaRoot(baseRoot, srcRoot, targetRoot, conflicts)
+	}
+	if srcRoot == targetRoot || srcRoot == "" {
+		return targetRoot
+	}
+	if targetRoot == "" {
+		return srcRoot
+	}
+	*conflicts = append(*conflicts, MergeConflict{Category: "schema", Entity: "schema", Field: "root"})
+	return targetRoot
+}
+
+func validateCherryPickEndpoints(nodes map[string]Node, edges map[string]Edge, conflicts *[]MergeConflict) {
+	for _, edgeID := range sortedEdgeIDs(edges) {
+		edge := edges[edgeID]
+		sourceExists := hasNode(nodes, edge.Source)
+		targetExists := hasNode(nodes, edge.Target)
 		if !sourceExists || !targetExists {
 			var field string
 			if !sourceExists && !targetExists {
@@ -156,7 +205,7 @@ func (r *Repository) CherryPick(request CherryPickRequest) (CherryPickResult, er
 			} else {
 				field = "target"
 			}
-			conflicts = append(conflicts, MergeConflict{
+			*conflicts = append(*conflicts, MergeConflict{
 				Category: "structural",
 				Entity:   "edge",
 				ID:       edgeID,
@@ -165,98 +214,77 @@ func (r *Repository) CherryPick(request CherryPickRequest) (CherryPickResult, er
 			})
 		}
 	}
+}
 
-	// Schema conformance validation
+func (r *Repository) validateCherryPickSchemaLocked(schemaRoot ObjectID, nodes map[string]Node, edges map[string]Edge, conflicts *[]MergeConflict) ([]cherrypick.SchemaViolation, error) {
+	if len(*conflicts) > 0 {
+		return nil, nil
+	}
+	schema, err := r.schemaSnapshotLocked(schemaRoot)
+	if err != nil {
+		return nil, err
+	}
 	violations := []cherrypick.SchemaViolation(nil)
-	if len(conflicts) == 0 {
-		schema, err := r.schemaSnapshotLocked(mergedSchemaRoot)
-		if err != nil {
-			return CherryPickResult{}, err
+	if err := ValidateSchemaSnapshot(schema, nodes, edges); err != nil {
+		var validation *SchemaValidationError
+		if !errors.As(err, &validation) {
+			return nil, err
 		}
-		if err := ValidateSchemaSnapshot(schema, mergedNodes, mergedEdges); err != nil {
-			var validation *SchemaValidationError
-			if errors.As(err, &validation) {
-				for _, v := range validation.Violations {
-					violations = append(violations, cherrypick.SchemaViolation{
-						Code:     string(v.Code),
-						Entity:   v.Entity,
-						EntityID: v.EntityID,
-						Rule:     v.Rule,
-						Field:    v.Field,
-						Expected: v.Expected,
-						Actual:   v.Actual,
-					})
-					conflicts = append(conflicts, MergeConflict{
-						Category: "semantic",
-						Entity:   v.Entity,
-						ID:       v.EntityID,
-						Field:    v.Field,
-						Paths:    schemaViolationPaths(v),
-					})
-				}
-			} else {
-				return CherryPickResult{}, err
-			}
+		for _, v := range validation.Violations {
+			violations = append(violations, cherrypick.SchemaViolation{
+				Code:     string(v.Code),
+				Entity:   v.Entity,
+				EntityID: v.EntityID,
+				Rule:     v.Rule,
+				Field:    v.Field,
+				Expected: v.Expected,
+				Actual:   v.Actual,
+			})
+			*conflicts = append(*conflicts, MergeConflict{
+				Category: "semantic",
+				Entity:   v.Entity,
+				ID:       v.EntityID,
+				Field:    v.Field,
+				Paths:    schemaViolationPaths(v),
+			})
 		}
 	}
+	return violations, nil
+}
 
-	sortMergeConflicts(conflicts)
-	cherrypickConflicts := make([]cherrypick.Conflict, len(conflicts))
-	for index := range conflicts {
-		if conflicts[index].Paths == nil {
-			conflicts[index].Paths = mergeConflictPaths(conflicts[index])
+func formatCherryPickChanges(targetNodes, mergedNodes map[string]Node, targetEdges, mergedEdges map[string]Edge) []cherrypick.Change {
+	rawChanges := mergeChanges(targetNodes, mergedNodes, targetEdges, mergedEdges)
+	changes := make([]cherrypick.Change, len(rawChanges))
+	for i, c := range rawChanges {
+		changes[i] = cherrypick.Change{Entity: c.Entity, ID: c.ID, Change: c.Change}
+	}
+	return changes
+}
+
+func formatCherryPickResult(request CherryPickRequest, candidate cherryPickCandidate) CherryPickResult {
+	conflictList := make([]cherrypick.Conflict, len(candidate.conflicts))
+	for i, c := range candidate.conflicts {
+		conflictList[i] = cherrypick.Conflict{
+			ConflictID: c.ConflictID,
+			Category:   c.Category,
+			Entity:     c.Entity,
+			ID:         c.ID,
+			Field:      c.Field,
+			Paths:      c.Paths,
 		}
-		conflicts[index].ConflictID = mergeConflictID(conflicts[index])
-		cherrypickConflicts[index] = cherrypick.Conflict{
-			ConflictID: conflicts[index].ConflictID,
-			Category:   conflicts[index].Category,
-			Entity:     conflicts[index].Entity,
-			ID:         conflicts[index].ID,
-			Field:      conflicts[index].Field,
-			Paths:      conflicts[index].Paths,
-		}
 	}
-
-	// Dry-run preview simulation
-	if request.DryRun {
-		return CherryPickResult{
-			TargetBranch: request.TargetBranch,
-			SourceCommit: request.Commit,
-			Commit:       string(targetHead),
-			DryRun:       true,
-			Changes:      changes,
-			Conflicts:    cherrypickConflicts,
-			Violations:   violations,
-		}, nil
+	return CherryPickResult{
+		TargetBranch: request.TargetBranch,
+		SourceCommit: request.Commit,
+		Commit:       string(candidate.targetHead),
+		DryRun:       request.DryRun,
+		Changes:      candidate.changes,
+		Conflicts:    conflictList,
+		Violations:   candidate.violations,
 	}
+}
 
-	// Non-dry-run conflicts gating: target branch must remain completely unmodified
-	if len(conflicts) > 0 {
-		return CherryPickResult{
-			TargetBranch: request.TargetBranch,
-			SourceCommit: request.Commit,
-			Commit:       string(targetHead),
-			DryRun:       false,
-			Changes:      changes,
-			Conflicts:    cherrypickConflicts,
-			Violations:   violations,
-		}, cherrypick.ErrConflicts
-	}
-
-	// Idempotent / zero-change no-op
-	if len(changes) == 0 {
-		return CherryPickResult{
-			TargetBranch: request.TargetBranch,
-			SourceCommit: request.Commit,
-			Commit:       string(targetHead),
-			DryRun:       false,
-			Changes:      []cherrypick.Change{},
-			Conflicts:    []cherrypick.Conflict{},
-			Violations:   []cherrypick.SchemaViolation{},
-		}, nil
-	}
-
-	// Atomic snapshot materialization & commit generation
+func (r *Repository) applyCherryPickCandidateLocked(request CherryPickRequest, candidate cherryPickCandidate) (CherryPickResult, error) {
 	objects, snapshots, projections, edgeProjections := r.objects, r.snapshots, r.projections, r.edgeProjections
 	materializedSnapshots, historicalProjectionLRU := r.materializedSnapshots, r.historicalProjectionLRU
 	commits, branches, stagedMutations := r.commits, r.branches, r.stagedMutations
@@ -273,7 +301,7 @@ func (r *Repository) CherryPick(request CherryPickRequest) (CherryPickResult, er
 		r.commits, r.branches, r.stagedMutations = commits, branches, stagedMutations
 	}
 
-	newSnapshot, err := r.materializeSnapshotLocked(mergedNodes, mergedEdges, mergedSchemaRoot)
+	newSnapshot, err := r.materializeSnapshotLocked(candidate.mergedNodes, candidate.mergedEdges, candidate.mergedSchemaRoot)
 	if err != nil {
 		rollback()
 		return CherryPickResult{}, fmt.Errorf("materialize cherry-picked snapshot: %w", err)
@@ -287,20 +315,20 @@ func (r *Repository) CherryPick(request CherryPickRequest) (CherryPickResult, er
 
 	author := request.Author
 	if author == "" {
-		author = srcCommit.Author
+		author = candidate.srcCommit.Author
 		if author == "" {
 			author = defaultCommitAuthor
 		}
 	}
 	message := request.Message
 	if message == "" {
-		if srcCommit.Message != "" {
-			message = fmt.Sprintf("%s\n\n(cherry picked from commit %s)", srcCommit.Message, srcCommitID)
+		if candidate.srcCommit.Message != "" {
+			message = fmt.Sprintf("%s\n\n(cherry picked from commit %s)", candidate.srcCommit.Message, candidate.srcCommitID)
 		} else {
-			message = fmt.Sprintf("Cherry-pick commit %s\n\n(cherry picked from commit %s)", srcCommitID, srcCommitID)
+			message = fmt.Sprintf("Cherry-pick commit %s\n\n(cherry picked from commit %s)", candidate.srcCommitID, candidate.srcCommitID)
 		}
 	}
-	nextCommit := r.newCommit(newSnapshotID, []ObjectID{targetHead}, author, message)
+	nextCommit := r.newCommit(newSnapshotID, []ObjectID{candidate.targetHead}, author, message)
 	nextID, err := r.storeObject("commit", nextCommit)
 	if err != nil {
 		rollback()
@@ -323,12 +351,12 @@ func (r *Repository) CherryPick(request CherryPickRequest) (CherryPickResult, er
 		SourceCommit: request.Commit,
 		Commit:       string(nextID),
 		DryRun:       false,
-		Changes:      changes,
+		Changes:      candidate.changes,
 		Conflicts:    []cherrypick.Conflict{},
 		Violations:   []cherrypick.SchemaViolation{},
 	}
 
-	refErr := r.writeRefLocked(request.TargetBranch, targetHead, nextID, "cherry-pick")
+	refErr := r.writeRefLocked(request.TargetBranch, candidate.targetHead, nextID, "cherry-pick")
 	if refErr != nil && !durableWriteCommitted(refErr) {
 		rollback()
 		_ = r.ensureBranchHeadProjectionsLocked()
