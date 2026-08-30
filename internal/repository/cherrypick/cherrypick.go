@@ -13,18 +13,8 @@ var (
 	ErrCommitRequired = errors.New("cherry-pick commit is required")
 	// ErrTargetBranchRequired reports a cherry-pick request without a target branch.
 	ErrTargetBranchRequired = branch.ErrRequired
-	// ErrCommitNotFound reports a requested source commit that does not exist.
-	ErrCommitNotFound = errors.New("commit not found")
-	// ErrBranchNotFound reports a requested target branch that does not exist.
-	ErrBranchNotFound = branch.ErrNotFound
-	// ErrUncommittedStagedChanges reports an attempt to cherry-pick onto a branch with uncommitted staged mutations.
-	ErrUncommittedStagedChanges = errors.New("branch has uncommitted staged changes")
-	// ErrTargetLeaseHeld reports an attempt to cherry-pick onto a branch held by an active merge transaction.
-	ErrTargetLeaseHeld = errors.New("merge target branch has an active transaction")
 	// ErrConflicts reports that the cherry-pick produces property or structural conflicts against the target branch.
 	ErrConflicts = errors.New("cherry-pick contains conflicts")
-	// ErrReferentialIntegrityViolation reports missing entity endpoints or orphaned references during preflight validation.
-	ErrReferentialIntegrityViolation = errors.New("cherry-pick referential integrity violation")
 )
 
 // Change describes an entity changed from the target snapshot by a cherry-pick.

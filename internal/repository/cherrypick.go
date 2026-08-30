@@ -24,11 +24,9 @@ type CherryPickSchemaViolation = cherrypick.SchemaViolation
 
 // CherryPick sentinel errors re-exported from the cherrypick package.
 var (
-	ErrCherryPickCommitRequired                = cherrypick.ErrCommitRequired
-	ErrCherryPickTargetBranchRequired          = cherrypick.ErrTargetBranchRequired
-	ErrCherryPickCommitNotFound                = cherrypick.ErrCommitNotFound
-	ErrCherryPickConflicts                     = cherrypick.ErrConflicts
-	ErrCherryPickReferentialIntegrityViolation = cherrypick.ErrReferentialIntegrityViolation
+	ErrCherryPickCommitRequired       = cherrypick.ErrCommitRequired
+	ErrCherryPickTargetBranchRequired = cherrypick.ErrTargetBranchRequired
+	ErrCherryPickConflicts            = cherrypick.ErrConflicts
 )
 
 // CherryPickCommittedWithWarningError reports that a cherry-pick operation was committed,

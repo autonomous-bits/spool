@@ -102,12 +102,7 @@ func TestCherryPickSentinelErrors(t *testing.T) {
 	for _, sentinel := range []error{
 		ErrCommitRequired,
 		ErrTargetBranchRequired,
-		ErrCommitNotFound,
-		ErrBranchNotFound,
-		ErrUncommittedStagedChanges,
-		ErrTargetLeaseHeld,
 		ErrConflicts,
-		ErrReferentialIntegrityViolation,
 	} {
 		if sentinel == nil {
 			t.Fatal("expected non-nil sentinel error")
@@ -119,8 +114,5 @@ func TestCherryPickSentinelErrors(t *testing.T) {
 	}
 	if !errors.Is(ErrTargetBranchRequired, branch.ErrRequired) {
 		t.Fatalf("expected ErrTargetBranchRequired to match branch.ErrRequired")
-	}
-	if !errors.Is(ErrBranchNotFound, branch.ErrNotFound) {
-		t.Fatalf("expected ErrBranchNotFound to match branch.ErrNotFound")
 	}
 }
