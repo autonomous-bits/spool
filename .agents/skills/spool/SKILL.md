@@ -46,7 +46,7 @@ with staged changes and requires `--force` for the protected default branch.
 | --- | --- |
 | `init`, `add`, `status`, `commit` | [Working changes](references/working-changes.md) |
 | Authoring `add` batches and atomic ideas | [Batch authoring](references/batch-authoring.md) |
-| `branch`, `branch create`, `branch list`, `branch delete`, `switch`, `history`, `branches-containing`, `diff` | [Branches and history](references/branches-and-history.md) |
+| `branch`, `branch create`, `branch list`, `branch delete`, `switch`, `history`, `branches-containing`, `diff`, `cherry-pick` | [Branches and history](references/branches-and-history.md) |
 | `schema`, `schema migrate`, `validate` | [Schemas](references/schemas.md) |
 | `resolve`, `search`, `filter`, `search-expand`, `context` | [Reading graphs](references/reading-graphs.md) |
 | `merge`, `merge preview`, `merge apply`, `merge conflicts`, `merge resolve`, `merge finalize`, `merge abort` | [Merges](references/merges.md) |

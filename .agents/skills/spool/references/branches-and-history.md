@@ -37,3 +37,12 @@ spl diff --base-branch main --base-commit <base-id> \
 Use `--node-id`, `--edge-id`, `--node-title-contains`, `--one-hop`, `--continuation`,
 `--max-rows`, and `--max-response-bytes` to constrain `diff`. Use `--continuation`,
 `--max-rows`, `--max-response-bytes`, and `--timeout` to bound `branches-containing`.
+
+Surgically transplant an individual commit's graph delta onto a target branch:
+
+```sh
+spl cherry-pick --commit <commit-id> --target-branch main --dry-run
+spl cherry-pick --commit <commit-id> --target-branch main --author "Alice <alice@example.com>" --message "Transplant fix"
+```
+
+`cherry-pick` validates referential integrity and schema rules against the candidate target snapshot, performs 3-way property merging, and advances the target branch linearly while retaining provenance metadata.

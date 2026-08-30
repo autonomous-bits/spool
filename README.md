@@ -168,6 +168,20 @@ any durable nodes left without connected edges. It refuses to run when the branc
 changes; commit or clear them first. The default branch is protected from pruning unless
 `--force` is explicitly supplied.
 
+Selectively transplant an individual commit's graph delta onto a target branch:
+
+```sh
+# Preview the transplanted changes, conflicts, and schema violations without modifying state.
+spl cherry-pick --commit <commit-id> --target-branch main --dry-run
+
+# Apply the exact single-commit delta onto main with provenance metadata.
+spl cherry-pick --commit <commit-id> --target-branch main --author alice --message "Transplant fix"
+```
+
+`cherry-pick` computes the single-commit delta against its first parent, performs 3-way property merging
+against the target branch head, and strictly verifies referential integrity and schema conformance
+before committing.
+
 Query, retrieve, and compare graph snapshots:
 
 ```sh
@@ -274,6 +288,7 @@ The command and flag inventory is:
 | `fsck` | none; read-only integrity report |
 | `gc` | `--dry-run`, `--repack`, `--grace-period` (default `336h`) |
 | `prune` | `--branch` (required), `--dry-run`, `--force`, `--author`, `--message` |
+| `cherry-pick` | `--commit` (required), `--target-branch` (required), `--dry-run`, `--author`, `--message` |
 | `workspace init <name>` | positional name |
 | `workspace attach [path]` | `--workspace` and `--repository-id` (required); path defaults to current directory |
 | `version` | none |
