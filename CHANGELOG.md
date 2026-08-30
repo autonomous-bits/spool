@@ -8,6 +8,12 @@ generated from commits since the preceding `v*` tag. Commits prefixed with `docs
 
 ## [Unreleased]
 
+## [0.0.8] - 2026-08-30
+
+### Added
+
+- Portable workspace manifests for reproducible multi-repository workspace setup.
+
 ## [0.0.7] - 2026-08-30
 
 ### Added
