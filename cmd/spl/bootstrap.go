@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -11,7 +12,6 @@ import (
 
 	"github.com/autonomous-bits/spool/internal/repository"
 	"github.com/autonomous-bits/spool/internal/resolve"
-	"github.com/autonomous-bits/spool/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -52,8 +52,11 @@ func bootstrapRootCommand(stdout io.Writer, stateDir string) (*cobra.Command, fu
 		}
 		return closeRepository()
 	}
-	return newRootCommandWithLifecycle(stdout, repoProvider, toolProvider, initialize, func() (*resolve.FsckTool, error) {
-		return resolve.NewPersistentFsckTool(stateDir), nil
+	return newRootCommandWithLifecycle(stdout, repoProvider, toolProvider, initialize, func(ctx context.Context) (repository.FsckResult, error) {
+		if err := ctx.Err(); err != nil {
+			return repository.FsckResult{}, err
+		}
+		return repository.FsckRepository(stateDir)
 	}), close
 }
 
@@ -121,8 +124,8 @@ func stateDirOverride(args []string, lookupEnv func(string) (string, bool)) (str
 	// resolution failure the same as no preference being set and fall
 	// through to path-prefix discovery, mirroring how workspace.StorageRoot
 	// errors are already tolerated below and in repositoryStateDirFrom.
-	if root, err := workspace.StorageRoot(); err == nil {
-		if name, ok, err := workspace.CurrentWorkspaceName(root); err == nil && ok {
+	if root, err := repository.WorkspaceStorageRoot(); err == nil {
+		if name, ok, err := repository.CurrentWorkspaceName(root); err == nil && ok {
 			if stateDir, err := registeredWorkspaceStateDir(root, name, "current workspace preference"); err == nil {
 				return stateDir, true, nil
 			}
@@ -155,19 +158,19 @@ func parseFlagValue(args []string, name string) (string, bool) {
 }
 
 func workspaceStateDirByName(rawName string) (string, error) {
-	root, err := workspace.StorageRoot()
+	root, err := repository.WorkspaceStorageRoot()
 	if err != nil {
 		return "", err
 	}
-	name, err := workspace.ParseName(rawName)
+	name, err := repository.ParseWorkspaceName(rawName)
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", envWorkspaceName, err)
 	}
 	return registeredWorkspaceStateDir(root, name, envWorkspaceName)
 }
 
-func registeredWorkspaceStateDir(root string, name workspace.Name, source string) (string, error) {
-	registry, err := workspace.LoadRegistry(root)
+func registeredWorkspaceStateDir(root string, name repository.WorkspaceName, source string) (string, error) {
+	registry, err := repository.LoadWorkspaceRegistry(root)
 	if err != nil {
 		return "", err
 	}
@@ -183,13 +186,13 @@ func repositoryStateDirFrom(workingDirectory string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	root, err := workspace.StorageRoot()
+	root, err := repository.WorkspaceStorageRoot()
 	if err == nil {
-		match, err := workspace.FindWorkspace(root, directory)
+		match, err := repository.FindWorkspace(root, directory)
 		if err == nil {
 			return match.Workspace.StateDir, nil
 		}
-		if !errors.Is(err, workspace.ErrWorkspaceNotFound) {
+		if !errors.Is(err, repository.ErrWorkspaceNotFound) {
 			return "", err
 		}
 	}

@@ -10,7 +10,7 @@ import (
 
 var (
 	// ErrBranchRequired reports a prune request without a branch.
-	ErrBranchRequired = errors.New("branch is required")
+	ErrBranchRequired = branch.ErrRequired
 	// ErrBranchNotFound reports a requested branch that does not exist.
 	ErrBranchNotFound = branch.ErrNotFound
 	// ErrProtectedBranch reports an attempt to prune a protected default branch without force override.

@@ -246,7 +246,7 @@ func (r *Repository) RecoverMergeTransactions() error {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("discard invalid merge state %q: %w", path, err)
 		}
-		if err := syncMergeStateDirectory(r.mergeDirectory()); err != nil {
+		if err := syncDirectory(r.mergeDirectory()); err != nil {
 			return err
 		}
 	}
@@ -656,7 +656,7 @@ func (r *Repository) deleteRefLocked(branch string, previous ObjectID, action st
 		if err := os.Remove(path); err != nil {
 			return fmt.Errorf("remove branch ref: %w", err)
 		}
-		if err := syncMergeStateDirectory(filepath.Dir(path)); err != nil {
+		if err := syncDirectory(filepath.Dir(path)); err != nil {
 			return durableWriteCommittedError{err: err}
 		}
 		return nil
@@ -678,7 +678,7 @@ func (r *Repository) writeStagedLocked(branch string, staged *StagedMutationSet)
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("remove staged mutations: %w", err)
 		}
-		if err := syncMergeStateDirectory(filepath.Dir(path)); err != nil {
+		if err := syncDirectory(filepath.Dir(path)); err != nil {
 			return durableWriteCommittedError{err: err}
 		}
 		return nil
@@ -770,7 +770,7 @@ func (r *Repository) prepareReflogLocked(ref string) (bool, error) {
 	if err := file.Close(); err != nil {
 		return true, fmt.Errorf("close empty reflog: %w", err)
 	}
-	if err := syncMergeStateDirectory(filepath.Dir(path)); err != nil {
+	if err := syncDirectory(filepath.Dir(path)); err != nil {
 		return true, durableWriteCommittedError{err: fmt.Errorf("sync empty reflog directory: %w", err)}
 	}
 	return true, nil
@@ -794,7 +794,7 @@ func (r *Repository) removePreparedReflogLocked(ref string, created bool) error 
 	if err := os.Remove(path); err != nil {
 		return fmt.Errorf("remove prepared reflog: %w", err)
 	}
-	if err := syncMergeStateDirectory(filepath.Dir(path)); err != nil {
+	if err := syncDirectory(filepath.Dir(path)); err != nil {
 		return fmt.Errorf("sync prepared reflog directory: %w", err)
 	}
 	return nil
@@ -1227,7 +1227,7 @@ func (r *Repository) persistMergeTransactionLocked(targetBranch, leaseOwner stri
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("remove merge state: %w", err)
 		}
-		if err := syncMergeStateDirectory(r.mergeDirectory()); err != nil {
+		if err := syncDirectory(r.mergeDirectory()); err != nil {
 			return durableWriteCommittedError{err: err}
 		}
 		return nil
@@ -1240,14 +1240,14 @@ func (r *Repository) persistMergeTransactionLocked(targetBranch, leaseOwner stri
 }
 
 func writeDurableStateFile(path string, data []byte) (err error) {
-	temp, err := os.CreateTemp(filepath.Dir(path), ".merge-state-*")
+	temp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+"-*")
 	if err != nil {
-		return fmt.Errorf("create merge state temp file: %w", err)
+		return fmt.Errorf("create temporary state file: %w", err)
 	}
 	tempPath := temp.Name()
 	defer func() {
 		if removeErr := os.Remove(tempPath); removeErr != nil && !os.IsNotExist(removeErr) {
-			removeErr = fmt.Errorf("remove merge state temp file: %w", removeErr)
+			removeErr = fmt.Errorf("remove temporary state file: %w", removeErr)
 			if err == nil {
 				err = removeErr
 			} else {
@@ -1256,23 +1256,23 @@ func writeDurableStateFile(path string, data []byte) (err error) {
 		}
 	}()
 	if _, err := temp.Write(data); err != nil {
-		return closeAfterWriteFailure(temp, fmt.Errorf("write merge state: %w", err))
+		return closeAfterWriteFailure(temp, fmt.Errorf("write state file: %w", err))
 	}
 	if err := temp.Sync(); err != nil {
-		return closeAfterWriteFailure(temp, fmt.Errorf("sync merge state: %w", err))
+		return closeAfterWriteFailure(temp, fmt.Errorf("sync state file: %w", err))
 	}
 	if err := temp.Close(); err != nil {
-		return fmt.Errorf("close merge state: %w", err)
+		return fmt.Errorf("close temporary state file: %w", err)
 	}
 	if err := replaceDurableStateFile(tempPath, path); err != nil {
-		return fmt.Errorf("replace merge state: %w", err)
+		return fmt.Errorf("replace state file: %w", err)
 	}
 	return nil
 }
 
 func closeAfterWriteFailure(temp *os.File, operationErr error) error {
 	if err := temp.Close(); err != nil {
-		return errors.Join(operationErr, fmt.Errorf("close merge state after write failure: %w", err))
+		return errors.Join(operationErr, fmt.Errorf("close temporary state file after write failure: %w", err))
 	}
 	return operationErr
 }

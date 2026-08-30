@@ -2,6 +2,7 @@ package commands
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -9,13 +10,12 @@ import (
 	"testing"
 
 	"github.com/autonomous-bits/spool/internal/repository"
-	"github.com/autonomous-bits/spool/internal/resolve"
 )
 
 func TestFsckCLIWritesValidJSONReport(t *testing.T) {
 	var output bytes.Buffer
-	command := NewFsckCommand(func() (*resolve.FsckTool, error) {
-		return resolve.NewFsckTool(repository.NewSeedRepository()), nil
+	command := NewFsckCommand(func(context.Context) (repository.FsckResult, error) {
+		return repository.NewSeedRepository().Fsck()
 	})
 	command.SetOut(&output)
 	if err := command.Execute(); err != nil {
@@ -47,8 +47,8 @@ func TestFsckCLIWritesCorruptReportAndReturnsError(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(stateDir, "objects", "loose", string(head[:2]), string(head[2:])), []byte("bad"), 0o600); err != nil {
 		t.Fatalf("corrupt fixture: %v", err)
 	}
-	command := NewFsckCommand(func() (*resolve.FsckTool, error) {
-		return resolve.NewPersistentFsckTool(stateDir), nil
+	command := NewFsckCommand(func(context.Context) (repository.FsckResult, error) {
+		return repository.FsckRepository(stateDir)
 	})
 	command.SetOut(&output)
 	err = command.Execute()
@@ -78,8 +78,8 @@ func TestFsckCLISurfacesPackedStorage(t *testing.T) {
 	}
 
 	var output bytes.Buffer
-	command := NewFsckCommand(func() (*resolve.FsckTool, error) {
-		return resolve.NewPersistentFsckTool(stateDir), nil
+	command := NewFsckCommand(func(context.Context) (repository.FsckResult, error) {
+		return repository.FsckRepository(stateDir)
 	})
 	command.SetOut(&output)
 	if err := command.Execute(); err != nil {

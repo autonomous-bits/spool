@@ -7,6 +7,8 @@ import (
 )
 
 var (
+	// ErrRequired reports a missing branch selector.
+	ErrRequired = errors.New("branch is required")
 	// ErrMissingSource reports a branch creation source with neither branch nor commit.
 	ErrMissingSource = errors.New("branch source is required")
 	// ErrAmbiguousSource reports a source that names both a branch and commit.

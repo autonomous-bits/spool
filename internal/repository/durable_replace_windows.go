@@ -18,6 +18,6 @@ func replaceDurableStateFile(tempPath, path string) error {
 
 // Windows does not support syncing a directory handle. Callers use this only
 // after deletion, for which this package cannot offer a durability guarantee.
-func syncMergeStateDirectory(string) error {
+func syncDirectory(string) error {
 	return nil
 }

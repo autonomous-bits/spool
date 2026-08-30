@@ -30,7 +30,7 @@ var (
 	// ErrBranchNotFound reports a requested branch that is absent from the repository.
 	ErrBranchNotFound = branch.ErrNotFound
 	// ErrBranchRequired reports a missing branch selector.
-	ErrBranchRequired = errors.New("branch is required")
+	ErrBranchRequired = branch.ErrRequired
 	// ErrBranchMissingSource reports a branch creation source with neither branch nor commit.
 	ErrBranchMissingSource = branch.ErrMissingSource
 	// ErrBranchAmbiguousSource reports a source that names both a branch and commit.

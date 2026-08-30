@@ -1,14 +1,15 @@
 package commands
 
 import (
+	"context"
 	"encoding/json"
 
-	"github.com/autonomous-bits/spool/internal/resolve"
+	"github.com/autonomous-bits/spool/internal/repository"
 	"github.com/spf13/cobra"
 )
 
 // NewFsckCommand creates the command that verifies durable repository integrity.
-func NewFsckCommand(toolProvider func() (*resolve.FsckTool, error)) *cobra.Command {
+func NewFsckCommand(fsckProvider func(context.Context) (repository.FsckResult, error)) *cobra.Command {
 	return &cobra.Command{
 		Use:          "fsck",
 		Short:        "Verify repository object and graph integrity",
@@ -17,11 +18,7 @@ func NewFsckCommand(toolProvider func() (*resolve.FsckTool, error)) *cobra.Comma
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(command *cobra.Command, _ []string) error {
-			tool, err := toolProvider()
-			if err != nil {
-				return err
-			}
-			result, fsckErr := tool.SPLFsck(command.Context())
+			result, fsckErr := fsckProvider(command.Context())
 			if err := json.NewEncoder(command.OutOrStdout()).Encode(result); err != nil {
 				return err
 			}
