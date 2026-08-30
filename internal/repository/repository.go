@@ -198,9 +198,12 @@ type Initialization struct {
 }
 
 // NewSeedRepository returns an in-memory repository initialized with the seed graph.
+// It panics if the seed graph cannot be initialized.
 func NewSeedRepository() *Repository {
-	repo := newRepository()
-	_ = repo.seed()
+	repo, err := NewSeedRepositoryErr()
+	if err != nil {
+		panic(fmt.Sprintf("NewSeedRepository: %v", err))
+	}
 	return repo
 }
 
@@ -309,7 +312,11 @@ func (r *Repository) storeObject(objectType string, value any) (ObjectID, error)
 }
 
 func (r *Repository) objectID(objectType string, value any) ObjectID {
-	return persistedObjectID(objectType, value)
+	id, err := persistedObjectID(objectType, value)
+	if err != nil {
+		return ""
+	}
+	return id
 }
 
 // CreateBranch atomically creates name at source and persists the new branch when durable.

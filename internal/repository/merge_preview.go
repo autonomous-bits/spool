@@ -2,6 +2,7 @@ package repository
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 	"sort"
 )
@@ -142,11 +143,15 @@ func (r *Repository) previewMergeLocked(sourceBranch, targetBranch string) (merg
 		),
 		Conflicts: conflicts, Violations: violations,
 	}
-	preview.ID = mergePreviewID(preview)
+	previewID, err := mergePreviewID(preview)
+	if err != nil {
+		return mergeCandidate{}, fmt.Errorf("calculate merge preview ID: %w", err)
+	}
+	preview.ID = previewID
 	return mergeCandidate{nodes: nodes, edges: edges, schemaRoot: schemaRoot, preview: preview}, nil
 }
 
-func mergePreviewID(preview MergePreview) ObjectID {
+func mergePreviewID(preview MergePreview) (ObjectID, error) {
 	return persistedObjectID("merge-preview", struct {
 		Binding      MergePreviewBinding
 		SourceBranch string
@@ -344,13 +349,17 @@ func compareMergeConflictPaths(left, right []string) int {
 }
 
 func mergeConflictID(conflict MergeConflict) string {
-	return string(persistedObjectID("merge-conflict", struct {
+	id, err := persistedObjectID("merge-conflict", struct {
 		Category string
 		Entity   string
 		ID       string
 		Field    string
 		Paths    []string
-	}{conflict.Category, conflict.Entity, conflict.ID, conflict.Field, conflict.Paths}))
+	}{conflict.Category, conflict.Entity, conflict.ID, conflict.Field, conflict.Paths})
+	if err != nil {
+		return ""
+	}
+	return string(id)
 }
 
 func mergeConflictPaths(conflict MergeConflict) []string {

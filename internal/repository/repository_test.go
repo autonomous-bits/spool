@@ -18,15 +18,26 @@ func TestCanonicalObjectIdentityUsesContentTypeAndEncoding(t *testing.T) {
 	second["alpha"] = "one"
 
 	const canonicalFixtureID ObjectID = "84d795f2ecfdd03ad938173fd4be707b7f1e99f91dc1c8ac0d9077364ae3a752"
-	got := persistedObjectID("fixture", first)
+	got, err := persistedObjectID("fixture", first)
+	if err != nil {
+		t.Fatalf("persistedObjectID fixture first: %v", err)
+	}
 	if got != canonicalFixtureID {
 		t.Fatalf("canonical fixture ID = %q, want %q", got, canonicalFixtureID)
 	}
 
-	if got != persistedObjectID("fixture", second) {
-		t.Fatalf("different map insertion order changed ID: %q != %q", got, persistedObjectID("fixture", second))
+	secondID, err := persistedObjectID("fixture", second)
+	if err != nil {
+		t.Fatalf("persistedObjectID fixture second: %v", err)
 	}
-	if got == persistedObjectID("other-fixture", first) {
+	if got != secondID {
+		t.Fatalf("different map insertion order changed ID: %q != %q", got, secondID)
+	}
+	otherID, err := persistedObjectID("other-fixture", first)
+	if err != nil {
+		t.Fatalf("persistedObjectID other-fixture first: %v", err)
+	}
+	if got == otherID {
 		t.Fatal("same content with a distinct type tag produced the same ID")
 	}
 

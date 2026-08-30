@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func validMutationBatch() []MutationOperation {
@@ -704,6 +705,8 @@ func TestCommitFailureLeavesUnreferencedObjectsAndStagingWithoutAdvancingRef(t *
 	if err != nil {
 		t.Fatalf("InitializeRepository: %v", err)
 	}
+	fixedTime := time.Date(2026, 8, 30, 0, 0, 0, 0, time.UTC)
+	repo.now = func() time.Time { return fixedTime }
 	base := repo.branches["main"]
 	if _, err := repo.StageMutationBatch(StageMutationRequest{
 		Branch: "main", Operations: []MutationOperation{{Action: "add", Entity: "node", ID: "node-2", Title: "Second node"}},
@@ -748,6 +751,7 @@ func TestCommitFailureLeavesUnreferencedObjectsAndStagingWithoutAdvancingRef(t *
 		t.Fatalf("OpenRepository after interrupted commit: %v", err)
 	}
 	defer closeTestRepository(t, reopened)
+	reopened.now = func() time.Time { return fixedTime }
 	if got := reopened.branches["main"]; got != base {
 		t.Fatalf("reopened main head = %q, want %q", got, base)
 	}
@@ -761,8 +765,8 @@ func TestCommitFailureLeavesUnreferencedObjectsAndStagingWithoutAdvancingRef(t *
 	if err != nil {
 		t.Fatalf("read manifest after retry: %v", err)
 	}
-	if len(afterRetry.Packs) < len(beforeRetry.Packs) {
-		t.Fatalf("retry active packs decreased: before %d, after %d", len(beforeRetry.Packs), len(afterRetry.Packs))
+	if len(afterRetry.Packs) != len(beforeRetry.Packs) {
+		t.Fatalf("retry appended duplicate commit pack: before %d, after %d", len(beforeRetry.Packs), len(afterRetry.Packs))
 	}
 }
 

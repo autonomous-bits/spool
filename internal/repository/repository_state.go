@@ -1010,7 +1010,11 @@ func (r persistedRepository) validSnapshotSchema(snapshot graphSnapshot) bool {
 
 func (r persistedRepository) validStoredObject(id ObjectID, objectType string, value any) bool {
 	encoded, err := canonicalObjectEncoding(value)
-	return err == nil && id == persistedObjectID(objectType, value) && bytes.Equal(r.Objects[id], encoded)
+	if err != nil {
+		return false
+	}
+	expectedID, err := persistedObjectID(objectType, value)
+	return err == nil && id == expectedID && bytes.Equal(r.Objects[id], encoded)
 }
 
 func (r persistedRepository) validProjection(nodeRoot ObjectID, projection map[string]Node) bool {
@@ -1287,12 +1291,12 @@ func mergeStateFilename(targetBranch string) string {
 	return hex.EncodeToString(sum[:]) + ".json"
 }
 
-func persistedObjectID(objectType string, value any) ObjectID {
+func persistedObjectID(objectType string, value any) (ObjectID, error) {
 	encoded, err := canonicalObjectEncoding(value)
 	if err != nil {
-		return ""
+		return "", err
 	}
-	return objectIDForEncoded(objectType, encoded)
+	return objectIDForEncoded(objectType, encoded), nil
 }
 
 func (r persistedRepository) validLegacyStoredObject(id ObjectID, objectType string, value any) bool {
