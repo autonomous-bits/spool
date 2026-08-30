@@ -3,20 +3,12 @@ package commands
 import (
 	"encoding/json"
 
-	"github.com/autonomous-bits/spool/internal/repository/branch"
-	"github.com/autonomous-bits/spool/internal/resolve"
+	"github.com/autonomous-bits/spool/internal/repository"
 	"github.com/spf13/cobra"
 )
 
-// NewBranchCommand creates the branch command and its lifecycle subcommands.
-func NewBranchCommand(tool *resolve.ResolveTool) *cobra.Command {
-	return NewBranchCommandWithToolProvider(func() (*resolve.ResolveTool, error) {
-		return tool, nil
-	})
-}
-
-// NewBranchCommandWithToolProvider creates the branch command with a lazy repository tool.
-func NewBranchCommandWithToolProvider(toolProvider func() (*resolve.ResolveTool, error)) *cobra.Command {
+// NewBranchCommand creates the branch command with a repository provider.
+func NewBranchCommand(repoProvider func() (*repository.Repository, error)) *cobra.Command {
 	var sourceBranch, sourceCommit string
 	command := &cobra.Command{
 		Use:          "branch",
@@ -33,16 +25,13 @@ func NewBranchCommandWithToolProvider(toolProvider func() (*resolve.ResolveTool,
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(command *cobra.Command, args []string) error {
-			tool, err := toolProvider()
+			repo, err := repoProvider()
 			if err != nil {
 				return err
 			}
-			result, err := tool.SPLCreateBranch(command.Context(), branch.CreateRequest{
-				Name: args[0],
-				Source: branch.Source{
-					Branch: sourceBranch,
-					Commit: sourceCommit,
-				},
+			result, err := repo.CreateBranch(args[0], repository.BranchSource{
+				Branch: sourceBranch,
+				Commit: sourceCommit,
 			})
 			if err != nil {
 				return err
@@ -60,11 +49,11 @@ func NewBranchCommandWithToolProvider(toolProvider func() (*resolve.ResolveTool,
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(command *cobra.Command, _ []string) error {
-			tool, err := toolProvider()
+			repo, err := repoProvider()
 			if err != nil {
 				return err
 			}
-			result, err := tool.SPLListBranches(command.Context())
+			result, err := repo.ListBranches()
 			if err != nil {
 				return err
 			}
@@ -79,11 +68,11 @@ func NewBranchCommandWithToolProvider(toolProvider func() (*resolve.ResolveTool,
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(command *cobra.Command, args []string) error {
-			tool, err := toolProvider()
+			repo, err := repoProvider()
 			if err != nil {
 				return err
 			}
-			result, err := tool.SPLDeleteBranch(command.Context(), branch.DeleteRequest{Name: args[0]})
+			result, err := repo.DeleteBranch(args[0])
 			if err != nil {
 				return err
 			}

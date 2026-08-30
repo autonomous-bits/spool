@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/autonomous-bits/spool/internal/repository"
-	"github.com/autonomous-bits/spool/internal/repository/branch"
 	"github.com/autonomous-bits/spool/internal/resolve"
 )
 
@@ -51,7 +50,7 @@ func TestValidateCLIUsesOnlyReachableExplicitCommit(t *testing.T) {
 	if _, err := repo.AdvanceBranch("main"); err != nil {
 		t.Fatalf("advance main: %v", err)
 	}
-	if _, err := repo.CreateBranch("feature", branch.Source{Branch: "main"}); err != nil {
+	if _, err := repo.CreateBranch("feature", repository.BranchSource{Branch: "main"}); err != nil {
 		t.Fatalf("create feature: %v", err)
 	}
 	featureCommit, err := repo.AdvanceBranch("feature")

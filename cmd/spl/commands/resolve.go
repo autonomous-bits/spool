@@ -9,15 +9,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// NewResolveCommand creates the resolve subcommand.
-func NewResolveCommand(tool *resolve.ResolveTool) *cobra.Command {
-	return NewResolveCommandWithToolProvider(func() (*resolve.ResolveTool, error) {
+// NewResolveCommandWithTool creates the resolve subcommand with a concrete tool.
+func NewResolveCommandWithTool(tool *resolve.ResolveTool) *cobra.Command {
+	return NewResolveCommand(func() (*resolve.ResolveTool, error) {
 		return tool, nil
 	})
 }
 
-// NewResolveCommandWithToolProvider creates the resolve command with a lazy repository tool.
-func NewResolveCommandWithToolProvider(toolProvider func() (*resolve.ResolveTool, error)) *cobra.Command {
+// NewResolveCommand creates the resolve command with a lazy repository tool provider.
+func NewResolveCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra.Command {
 	var branch, commit, nodeID string
 	var budgetFlags queryBudgetFlags
 	command := &cobra.Command{

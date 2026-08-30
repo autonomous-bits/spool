@@ -3,12 +3,12 @@ package commands
 import (
 	"encoding/json"
 
-	"github.com/autonomous-bits/spool/internal/resolve"
+	"github.com/autonomous-bits/spool/internal/repository"
 	"github.com/spf13/cobra"
 )
 
 // NewStatusCommand creates the command for reporting a branch's staged delta.
-func NewStatusCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra.Command {
+func NewStatusCommand(repoProvider func() (*repository.Repository, error)) *cobra.Command {
 	var branchName string
 	command := &cobra.Command{
 		Use:          "status",
@@ -18,11 +18,11 @@ func NewStatusCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra.
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(command *cobra.Command, _ []string) error {
-			tool, err := toolProvider()
+			repo, err := repoProvider()
 			if err != nil {
 				return err
 			}
-			result, err := tool.SPLBranchStagingStatus(command.Context(), branchName)
+			result, err := repo.BranchStagingStatus(branchName)
 			if err != nil {
 				return err
 			}

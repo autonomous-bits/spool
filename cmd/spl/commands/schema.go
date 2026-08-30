@@ -6,25 +6,24 @@ import (
 	"os"
 
 	"github.com/autonomous-bits/spool/internal/repository"
-	"github.com/autonomous-bits/spool/internal/resolve"
 	"github.com/spf13/cobra"
 )
 
 // NewSchemaCommand creates schema authoring and migration commands.
-func NewSchemaCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra.Command {
+func NewSchemaCommand(repoProvider func() (*repository.Repository, error)) *cobra.Command {
 	command := &cobra.Command{
 		Use:          "schema",
 		Short:        "Author and migrate graph schemas",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 	}
-	command.AddCommand(NewSchemaMigrateCommand(toolProvider))
+	command.AddCommand(NewSchemaMigrateCommand(repoProvider))
 	return command
 }
 
 // NewSchemaMigrateCommand creates the command that atomically stages a schema
 // migration and its graph mutation batch.
-func NewSchemaMigrateCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra.Command {
+func NewSchemaMigrateCommand(repoProvider func() (*repository.Repository, error)) *cobra.Command {
 	var branchName, schemaPath, batchPath string
 	command := &cobra.Command{
 		Use:          "migrate",
@@ -49,11 +48,11 @@ func NewSchemaMigrateCommand(toolProvider func() (*resolve.ResolveTool, error)) 
 			if err := json.Unmarshal(data, &operations); err != nil {
 				return fmt.Errorf("decode mutation batch: %w", err)
 			}
-			tool, err := toolProvider()
+			repo, err := repoProvider()
 			if err != nil {
 				return err
 			}
-			result, err := tool.SPLStageSchemaMigration(command.Context(), repository.SchemaMigrationRequest{
+			result, err := repo.StageSchemaMigration(repository.SchemaMigrationRequest{
 				Branch: branchName, SchemaTOML: schemaTOML, Operations: operations,
 			})
 			if err != nil {

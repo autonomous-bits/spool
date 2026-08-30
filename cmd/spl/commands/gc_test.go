@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/autonomous-bits/spool/internal/repository"
-	"github.com/autonomous-bits/spool/internal/resolve"
 )
 
 func TestGCCLIWritesCompleteJSONReport(t *testing.T) {
@@ -21,8 +20,8 @@ func TestGCCLIWritesCompleteJSONReport(t *testing.T) {
 	})
 
 	var output bytes.Buffer
-	command := NewGCCommand(func() (*resolve.ResolveTool, error) {
-		return resolve.NewResolveTool(repo), nil
+	command := NewGCCommand(func() (*repository.Repository, error) {
+		return repo, nil
 	})
 	command.SetOut(&output)
 	command.SetArgs([]string{"--dry-run"})

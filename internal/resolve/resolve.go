@@ -9,15 +9,12 @@ import (
 	"time"
 
 	"github.com/autonomous-bits/spool/internal/repository"
-	"github.com/autonomous-bits/spool/internal/repository/branch"
 	"github.com/autonomous-bits/spool/internal/repository/integrity"
-	"github.com/autonomous-bits/spool/internal/repository/merge"
-	"github.com/autonomous-bits/spool/internal/repository/prune"
 )
 
 var (
 	// ErrMissingBranch reports a resolution selector without a branch.
-	ErrMissingBranch = errors.New("branch is required")
+	ErrMissingBranch = repository.ErrBranchRequired
 	// ErrUnsupportedCommit reports an explicit commit that policy does not permit.
 	ErrUnsupportedCommit = errors.New("commit selectors are not supported")
 	// ErrBranchNotFound reports an absent repository branch.
@@ -384,18 +381,9 @@ type MergeConflictsRequest struct {
 	TransactionID string `json:"transactionId"`
 }
 
-// MergeTransactionRequest identifies an owning conflicted merge transaction.
-type MergeTransactionRequest = MergeConflictsRequest
-
-// MergeResolveRequest supplies conflict selections and optional corrective mutations.
-type MergeResolveRequest = repository.ResolveConflictedMergeRequest
-
-// ResolveTool adapts resolver, branch, and repository operations to context-aware tool methods.
+// ResolveTool adapts snapshot queries to context-aware tool methods.
 type ResolveTool struct {
 	resolver    *Resolver
-	branches    branch.Service
-	merges      merge.Service
-	prunes      prune.Service
 	queryBudget *QueryBudget
 	repository  *repository.Repository
 }
@@ -443,73 +431,9 @@ func NewResolveTool(repo *repository.Repository) *ResolveTool {
 func NewResolveToolWithOptions(repo *repository.Repository, options Options) *ResolveTool {
 	return &ResolveTool{
 		resolver:    NewResolverWithOptions(repo, options),
-		branches:    branch.NewService(repo),
-		merges:      merge.NewService(repo),
-		prunes:      prune.NewService(repo),
 		queryBudget: options.QueryBudget,
 		repository:  repo,
 	}
-}
-
-// SPLGC honors cancellation before beginning the atomic maintenance operation.
-// Once GC starts, it must run to a durable result so cancellation cannot leave
-// a caller uncertain whether publication or cleanup occurred.
-func (t *ResolveTool) SPLGC(ctx context.Context, options repository.GCOptions) (repository.GCResult, error) {
-	if err := ctx.Err(); err != nil {
-		return repository.GCResult{}, err
-	}
-	return t.repository.GC(options)
-}
-
-// SPLMergePreview computes a deterministic, non-mutating three-way merge preview.
-func (t *ResolveTool) SPLMergePreview(ctx context.Context, sourceBranch, targetBranch string) (repository.MergePreview, error) {
-	if err := ctx.Err(); err != nil {
-		return repository.MergePreview{}, err
-	}
-	return t.merges.Preview(sourceBranch, targetBranch)
-}
-
-// SPLApplyMergePreview applies an exact clean preview.
-func (t *ResolveTool) SPLApplyMergePreview(ctx context.Context, request MergeApplyRequest) (repository.ObjectID, error) {
-	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	return t.merges.ApplyPreview(
-		request.SourceBranch, request.TargetBranch, request.TransactionID,
-		request.PreviewID, request.Author, request.Message,
-	)
-}
-
-// SPLMergeConflicts returns the durable preview and resolution state for its owner.
-func (t *ResolveTool) SPLMergeConflicts(ctx context.Context, request MergeConflictsRequest) (repository.MergeTransactionStatus, error) {
-	if err := ctx.Err(); err != nil {
-		return repository.MergeTransactionStatus{}, err
-	}
-	return t.merges.Conflicts(request.TargetBranch, request.TransactionID)
-}
-
-// SPLFinalizeMerge commits a fully resolved conflicted merge.
-func (t *ResolveTool) SPLFinalizeMerge(ctx context.Context, request MergeTransactionRequest) (repository.ObjectID, error) {
-	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	return t.merges.Finalize(request.TargetBranch, request.TransactionID)
-}
-
-// SPLResolveMerge persists a complete, schema-valid conflict resolution.
-func (t *ResolveTool) SPLResolveMerge(ctx context.Context, request MergeResolveRequest) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	return t.merges.ResolveConflicts(request)
-}
-
-// SPLAbortMerge durably abandons a conflicted merge and releases its target lease.
-func (t *ResolveTool) SPLAbortMerge(ctx context.Context, request MergeTransactionRequest) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	return t.merges.Abort(request.TargetBranch, request.TransactionID)
 }
 
 // SPLResolve resolves one node within the effective query deadline.
@@ -803,73 +727,4 @@ func (t *ResolveTool) SPLImpact(ctx context.Context, request ImpactRequest) (Imp
 		return ImpactResult{}, err
 	}
 	return result, nil
-}
-
-// SPLCreateBranch delegates a context-aware branch creation request.
-func (t *ResolveTool) SPLCreateBranch(ctx context.Context, request branch.CreateRequest) (branch.CreateResult, error) {
-	return t.branches.Create(ctx, request)
-}
-
-// SPLListBranches delegates a context-aware branch listing request.
-func (t *ResolveTool) SPLListBranches(ctx context.Context) (branch.ListResult, error) {
-	return t.branches.List(ctx)
-}
-
-// SPLDeleteBranch delegates a context-aware branch deletion request.
-func (t *ResolveTool) SPLDeleteBranch(ctx context.Context, request branch.DeleteRequest) (branch.DeleteResult, error) {
-	return t.branches.Delete(ctx, request)
-}
-
-// SPLSwitchBranch delegates a context-aware branch switch request.
-func (t *ResolveTool) SPLSwitchBranch(ctx context.Context, request branch.SwitchRequest) (branch.SwitchResult, error) {
-	return t.branches.Switch(ctx, request)
-}
-
-// SPLStageMutationBatch honors cancellation and replaces a branch's shared staged mutations.
-func (t *ResolveTool) SPLStageMutationBatch(ctx context.Context, request repository.StageMutationRequest) (repository.StageMutationResult, error) {
-	if err := ctx.Err(); err != nil {
-		return repository.StageMutationResult{}, err
-	}
-	return t.resolver.repo.StageMutationBatch(request)
-}
-
-// SPLStageSchemaMigration honors cancellation and atomically stages a target
-// schema with the graph mutations required to conform to it.
-func (t *ResolveTool) SPLStageSchemaMigration(ctx context.Context, request repository.SchemaMigrationRequest) (repository.StageMutationResult, error) {
-	if err := ctx.Err(); err != nil {
-		return repository.StageMutationResult{}, err
-	}
-	return t.resolver.repo.StageSchemaMigration(request)
-}
-
-// SPLBranchStagingStatus honors cancellation and returns a branch's shared staging summary.
-func (t *ResolveTool) SPLBranchStagingStatus(ctx context.Context, branch string) (repository.BranchStagingStatus, error) {
-	if err := ctx.Err(); err != nil {
-		return repository.BranchStagingStatus{}, err
-	}
-	return t.resolver.repo.BranchStagingStatus(branch)
-}
-
-// SPLCommitStagedMutations honors cancellation and commits a branch's staged mutations.
-func (t *ResolveTool) SPLCommitStagedMutations(ctx context.Context, branch string) (repository.CommitStagedMutationResult, error) {
-	if err := ctx.Err(); err != nil {
-		return repository.CommitStagedMutationResult{}, err
-	}
-	return t.resolver.repo.CommitStagedMutations(branch)
-}
-
-// SPLCommitStagedMutationBatch honors cancellation and commits staged mutations with metadata.
-func (t *ResolveTool) SPLCommitStagedMutationBatch(ctx context.Context, request repository.CommitStagedMutationRequest) (repository.CommitStagedMutationResult, error) {
-	if err := ctx.Err(); err != nil {
-		return repository.CommitStagedMutationResult{}, err
-	}
-	return t.resolver.repo.CommitStagedMutationBatch(request)
-}
-
-// SPLPrune honors cancellation and executes a branch pruning operation.
-func (t *ResolveTool) SPLPrune(ctx context.Context, request repository.PruneRequest) (repository.PruneResult, error) {
-	if err := ctx.Err(); err != nil {
-		return repository.PruneResult{}, err
-	}
-	return t.prunes.Prune(ctx, request)
 }

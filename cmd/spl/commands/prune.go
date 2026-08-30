@@ -5,12 +5,11 @@ import (
 	"errors"
 
 	"github.com/autonomous-bits/spool/internal/repository"
-	"github.com/autonomous-bits/spool/internal/resolve"
 	"github.com/spf13/cobra"
 )
 
 // NewPruneCommand creates the prune command for excising ephemeral entities and cascading edges.
-func NewPruneCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra.Command {
+func NewPruneCommand(repoProvider func() (*repository.Repository, error)) *cobra.Command {
 	var (
 		branch  string
 		dryRun  bool
@@ -29,11 +28,11 @@ func NewPruneCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra.C
 			if err := command.Context().Err(); err != nil {
 				return err
 			}
-			tool, err := toolProvider()
+			repo, err := repoProvider()
 			if err != nil {
 				return err
 			}
-			result, pruneErr := tool.SPLPrune(command.Context(), repository.PruneRequest{
+			result, pruneErr := repo.Prune(repository.PruneRequest{
 				Branch:  branch,
 				DryRun:  dryRun,
 				Force:   force,

@@ -6,12 +6,11 @@ import (
 	"os"
 
 	"github.com/autonomous-bits/spool/internal/repository"
-	"github.com/autonomous-bits/spool/internal/resolve"
 	"github.com/spf13/cobra"
 )
 
 // NewAddCommand creates the command for validating and staging a graph-mutation batch.
-func NewAddCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra.Command {
+func NewAddCommand(repoProvider func() (*repository.Repository, error)) *cobra.Command {
 	var branchName, batchPath string
 	command := &cobra.Command{
 		Use:   "add",
@@ -37,11 +36,11 @@ func NewAddCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra.Com
 			if err := json.Unmarshal(data, &operations); err != nil {
 				return fmt.Errorf("decode mutation batch: %w", err)
 			}
-			tool, err := toolProvider()
+			repo, err := repoProvider()
 			if err != nil {
 				return err
 			}
-			result, err := tool.SPLStageMutationBatch(command.Context(), repository.StageMutationRequest{
+			result, err := repo.StageMutationBatch(repository.StageMutationRequest{
 				Branch: branchName, Operations: operations,
 			})
 			if err != nil {

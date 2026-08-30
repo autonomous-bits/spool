@@ -7,15 +7,13 @@ import (
 	"testing"
 
 	"github.com/autonomous-bits/spool/internal/repository"
-	"github.com/autonomous-bits/spool/internal/repository/branch"
-	"github.com/autonomous-bits/spool/internal/resolve"
 )
 
 func TestPruneCLIRequiresBranchFlag(t *testing.T) {
 	repo := repository.NewSeedRepository()
 	var output bytes.Buffer
-	command := NewPruneCommand(func() (*resolve.ResolveTool, error) {
-		return resolve.NewResolveTool(repo), nil
+	command := NewPruneCommand(func() (*repository.Repository, error) {
+		return repo, nil
 	})
 	command.SetOut(&output)
 	command.SetArgs([]string{})
@@ -49,8 +47,8 @@ func TestPruneCLIDryRunEmitsJSON(t *testing.T) {
 	}
 
 	var output bytes.Buffer
-	command := NewPruneCommand(func() (*resolve.ResolveTool, error) {
-		return resolve.NewResolveTool(repo), nil
+	command := NewPruneCommand(func() (*repository.Repository, error) {
+		return repo, nil
 	})
 	command.SetOut(&output)
 	command.SetArgs([]string{"--branch", "main", "--dry-run", "--force"})
@@ -81,7 +79,7 @@ func TestPruneCLIExecutionEmitsJSONAndAdvancesBranch(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = repo.Close() })
 
-	_, err = repo.CreateBranch("feature", branch.Source{Branch: "main"})
+	_, err = repo.CreateBranch("feature", repository.BranchSource{Branch: "main"})
 	if err != nil {
 		t.Fatalf("CreateBranch: %v", err)
 	}
@@ -102,8 +100,8 @@ func TestPruneCLIExecutionEmitsJSONAndAdvancesBranch(t *testing.T) {
 	}
 
 	var output bytes.Buffer
-	command := NewPruneCommand(func() (*resolve.ResolveTool, error) {
-		return resolve.NewResolveTool(repo), nil
+	command := NewPruneCommand(func() (*repository.Repository, error) {
+		return repo, nil
 	})
 	command.SetOut(&output)
 	command.SetArgs([]string{"--branch", "feature", "--author", "alice", "--message", "Clean scaffold"})

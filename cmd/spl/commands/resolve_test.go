@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/autonomous-bits/spool/internal/repository"
-	"github.com/autonomous-bits/spool/internal/repository/branch"
 	"github.com/autonomous-bits/spool/internal/resolve"
 )
 
@@ -166,7 +165,7 @@ func TestResolveCLIHONorsLowerBudgetAndCapsOverLimitRequests(t *testing.T) {
 
 func TestResolveCLIRejectsDisallowedOrEmptyExplicitCommitWithoutOutput(t *testing.T) {
 	repo := repository.NewSeedRepository()
-	if _, err := repo.CreateBranch("feature", branch.Source{Branch: "main"}); err != nil {
+	if _, err := repo.CreateBranch("feature", repository.BranchSource{Branch: "main"}); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
 	}
 	featureCommit, err := repo.AdvanceBranch("feature")
@@ -203,7 +202,9 @@ func TestResolveCLIRejectsDisallowedOrEmptyExplicitCommitWithoutOutput(t *testin
 }
 
 func runResolveCommand(args []string, output *bytes.Buffer, tool *resolve.ResolveTool) error {
-	command := NewResolveCommand(tool)
+	command := NewResolveCommand(func() (*resolve.ResolveTool, error) {
+		return tool, nil
+	})
 	command.SetOut(output)
 	command.SetArgs(args)
 	return command.Execute()

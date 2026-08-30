@@ -28,7 +28,21 @@ var (
 	// ErrLegacyRepositoryState reports an unsupported monolithic repository.json state file.
 	ErrLegacyRepositoryState = errors.New("legacy repository.json state is unsupported")
 	// ErrBranchNotFound reports a requested branch that is absent from the repository.
-	ErrBranchNotFound = errors.New("branch not found")
+	ErrBranchNotFound = branch.ErrNotFound
+	// ErrBranchRequired reports a missing branch selector.
+	ErrBranchRequired = errors.New("branch is required")
+	// ErrBranchMissingSource reports a branch creation source with neither branch nor commit.
+	ErrBranchMissingSource = branch.ErrMissingSource
+	// ErrBranchAmbiguousSource reports a source that names both a branch and commit.
+	ErrBranchAmbiguousSource = branch.ErrAmbiguousSource
+	// ErrBranchSourceNotFound reports a requested branch-creation source that does not exist.
+	ErrBranchSourceNotFound = branch.ErrSourceNotFound
+	// ErrBranchAlreadyExists reports an attempt to create an existing branch.
+	ErrBranchAlreadyExists = branch.ErrAlreadyExists
+	// ErrDefaultBranchProtected reports an attempt to delete the default branch.
+	ErrDefaultBranchProtected = branch.ErrDefaultProtected
+	// ErrActiveBranchProtected reports an attempt to delete the active branch.
+	ErrActiveBranchProtected = branch.ErrActiveProtected
 	// ErrCommitNotFound reports a requested commit that is absent from the repository.
 	ErrCommitNotFound = errors.New("commit not found")
 	// ErrCommitNotReachable reports a commit that is not reachable from its selected branch.
@@ -64,6 +78,18 @@ var (
 	// ErrMergeRepositoryClosed reports use after Close.
 	ErrMergeRepositoryClosed = errors.New("merge repository is closed")
 	canonicalCBOR, _         = cbor.CanonicalEncOptions().EncMode()
+)
+
+// Branch types re-exported from the branch subpackage.
+type (
+	BranchSource        = branch.Source
+	BranchCreateRequest = branch.CreateRequest
+	BranchCreateResult  = branch.CreateResult
+	BranchListResult    = branch.ListResult
+	BranchDeleteRequest = branch.DeleteRequest
+	BranchDeleteResult  = branch.DeleteResult
+	BranchSwitchRequest = branch.SwitchRequest
+	BranchSwitchResult  = branch.SwitchResult
 )
 
 // ObjectID is the content-derived identifier of a durable repository object.
@@ -172,12 +198,22 @@ type Initialization struct {
 }
 
 // NewSeedRepository returns an in-memory repository initialized with the seed graph.
+// It panics if the seed graph cannot be initialized.
 func NewSeedRepository() *Repository {
-	repo := newRepository()
-	if err := repo.seed(); err != nil {
-		panic(fmt.Sprintf("seed repository: %v", err))
+	repo, err := NewSeedRepositoryErr()
+	if err != nil {
+		panic(fmt.Sprintf("NewSeedRepository: %v", err))
 	}
 	return repo
+}
+
+// NewSeedRepositoryErr returns an in-memory repository initialized with the seed graph, or an error.
+func NewSeedRepositoryErr() (*Repository, error) {
+	repo := newRepository()
+	if err := repo.seed(); err != nil {
+		return nil, fmt.Errorf("seed repository: %w", err)
+	}
+	return repo, nil
 }
 
 func newRepository() *Repository {
@@ -263,14 +299,6 @@ func (r *Repository) ensureOpenLocked() error {
 	return nil
 }
 
-func (r *Repository) store(objectType string, value any) ObjectID {
-	id, err := r.storeObject(objectType, value)
-	if err != nil {
-		panic(fmt.Sprintf("store %s: %v", objectType, err))
-	}
-	return id
-}
-
 // storeObject records an immutable object for durable publication before it can
 // become reachable from a mutable control file. During a commit batch, the
 // object is buffered until the batch's pack publication succeeds. Callers
@@ -284,7 +312,11 @@ func (r *Repository) storeObject(objectType string, value any) (ObjectID, error)
 }
 
 func (r *Repository) objectID(objectType string, value any) ObjectID {
-	return persistedObjectID(objectType, value)
+	id, err := persistedObjectID(objectType, value)
+	if err != nil {
+		return ""
+	}
+	return id
 }
 
 // CreateBranch atomically creates name at source and persists the new branch when durable.

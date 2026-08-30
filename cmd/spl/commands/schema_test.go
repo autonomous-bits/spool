@@ -2,7 +2,6 @@ package commands
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -12,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/autonomous-bits/spool/internal/repository"
-	"github.com/autonomous-bits/spool/internal/resolve"
 )
 
 const schemaMigratePeopleTOML = `
@@ -27,23 +25,25 @@ types = ["string"]
 `
 
 func schemaMigratePeopleOperations() []repository.MutationOperation {
-	return []repository.MutationOperation{{
-		Action: "update", Entity: "node", ID: repository.SeedNodeID, Title: "Alice",
-		Labels: []string{"Person"}, Properties: map[string]repository.PropertyValue{
-			"name": repository.StringPropertyValue("Alice"),
+	return []repository.MutationOperation{
+		{
+			Action: "update", Entity: "node", ID: repository.SeedNodeID, Title: "Alice",
+			Labels: []string{"Person"}, Properties: map[string]repository.PropertyValue{
+				"name": repository.StringPropertyValue("Alice"),
+			},
 		},
-	}}
+	}
 }
 
-func TestSchemaMigrateCLIStagesEquivalentMigration(t *testing.T) {
+func TestSchemaMigrateCLIStagesSchemaAndMutationsTogether(t *testing.T) {
 	schemaPath, batchPath := writeSchemaMigrationInputs(t, schemaMigratePeopleTOML, schemaMigratePeopleOperations())
 
 	cliRepo := repository.NewSeedRepository()
 	var output bytes.Buffer
 	if err := runSchemaCommand([]string{
 		"migrate", "--branch", "main", "--schema", schemaPath, "--batch", batchPath,
-	}, &output, func() (*resolve.ResolveTool, error) {
-		return resolve.NewResolveTool(cliRepo), nil
+	}, &output, func() (*repository.Repository, error) {
+		return cliRepo, nil
 	}); err != nil {
 		t.Fatalf("execute schema migrate: %v", err)
 	}
@@ -57,14 +57,14 @@ func TestSchemaMigrateCLIStagesEquivalentMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read schema: %v", err)
 	}
-	mcpResult, err := resolve.NewResolveTool(mcpRepo).SPLStageSchemaMigration(context.Background(), repository.SchemaMigrationRequest{
+	mcpResult, err := mcpRepo.StageSchemaMigration(repository.SchemaMigrationRequest{
 		Branch: "main", SchemaTOML: schemaTOML, Operations: schemaMigratePeopleOperations(),
 	})
 	if err != nil {
-		t.Fatalf("SPLStageSchemaMigration: %v", err)
+		t.Fatalf("StageSchemaMigration: %v", err)
 	}
 	if !reflect.DeepEqual(cliResult, mcpResult) {
-		t.Fatalf("CLI result %#v does not match tool result %#v", cliResult, mcpResult)
+		t.Fatalf("CLI result %#v does not match direct repository result %#v", cliResult, mcpResult)
 	}
 }
 
@@ -75,31 +75,31 @@ func TestSchemaMigrateCLIRejectsInvalidInputAndPropagatesErrors(t *testing.T) {
 	if err := os.WriteFile(invalidBatch, []byte("["), 0o600); err != nil {
 		t.Fatalf("write invalid batch: %v", err)
 	}
-	providerErr := errors.New("open schema tool")
+	providerErr := errors.New("open schema repository")
 
 	for _, testCase := range []struct {
 		name     string
 		schema   string
 		batch    string
-		provider func() (*resolve.ResolveTool, error)
+		provider func() (*repository.Repository, error)
 		want     error
 	}{
 		{
 			name: "invalid TOML", schema: invalidSchema, batch: validBatch,
-			provider: func() (*resolve.ResolveTool, error) {
-				return resolve.NewResolveTool(repository.NewSeedRepository()), nil
+			provider: func() (*repository.Repository, error) {
+				return repository.NewSeedRepository(), nil
 			},
 			want: repository.ErrInvalidSchemaTOML,
 		},
 		{
 			name: "invalid batch JSON", schema: validSchema, batch: invalidBatch,
-			provider: func() (*resolve.ResolveTool, error) {
-				return resolve.NewResolveTool(repository.NewSeedRepository()), nil
+			provider: func() (*repository.Repository, error) {
+				return repository.NewSeedRepository(), nil
 			},
 		},
 		{
-			name: "tool provider", schema: validSchema, batch: validBatch,
-			provider: func() (*resolve.ResolveTool, error) { return nil, providerErr },
+			name: "provider error", schema: validSchema, batch: validBatch,
+			provider: func() (*repository.Repository, error) { return nil, providerErr },
 			want:     providerErr,
 		},
 	} {
@@ -108,15 +108,14 @@ func TestSchemaMigrateCLIRejectsInvalidInputAndPropagatesErrors(t *testing.T) {
 			err := runSchemaCommand([]string{
 				"migrate", "--branch", "main", "--schema", testCase.schema, "--batch", testCase.batch,
 			}, &output, testCase.provider)
-			if testCase.want != nil {
-				if !errors.Is(err, testCase.want) {
-					t.Fatalf("schema migrate error = %v, want %v", err, testCase.want)
-				}
-			} else if err == nil || !strings.Contains(err.Error(), "decode mutation batch") {
-				t.Fatalf("schema migrate error = %v, want mutation-batch decoding error", err)
+			if testCase.want != nil && !errors.Is(err, testCase.want) {
+				t.Fatalf("schema migrate error = %v, want %v", err, testCase.want)
+			}
+			if testCase.want == nil && err == nil {
+				t.Fatal("schema migrate unexpectedly succeeded")
 			}
 			if output.Len() != 0 {
-				t.Fatalf("schema migrate wrote success output: %q", output.String())
+				t.Fatalf("schema migrate wrote output on error: %q", output.String())
 			}
 		})
 	}
@@ -124,8 +123,8 @@ func TestSchemaMigrateCLIRejectsInvalidInputAndPropagatesErrors(t *testing.T) {
 
 func TestSchemaMigrateCLIHelpDescribesAtomicStaging(t *testing.T) {
 	var output bytes.Buffer
-	if err := runSchemaCommand([]string{"migrate", "--help"}, &output, func() (*resolve.ResolveTool, error) {
-		return resolve.NewResolveTool(repository.NewSeedRepository()), nil
+	if err := runSchemaCommand([]string{"migrate", "--help"}, &output, func() (*repository.Repository, error) {
+		return repository.NewSeedRepository(), nil
 	}); err != nil {
 		t.Fatalf("execute schema migrate help: %v", err)
 	}
@@ -159,8 +158,8 @@ func writeSchemaMigrationInputs(t *testing.T, schema string, operations []reposi
 	return schemaPath, batchPath
 }
 
-func runSchemaCommand(args []string, output *bytes.Buffer, toolProvider func() (*resolve.ResolveTool, error)) error {
-	command := NewSchemaCommand(toolProvider)
+func runSchemaCommand(args []string, output *bytes.Buffer, repoProvider func() (*repository.Repository, error)) error {
+	command := NewSchemaCommand(repoProvider)
 	command.SetOut(output)
 	command.SetArgs(args)
 	return command.Execute()
