@@ -8,6 +8,13 @@ generated from commits since the preceding `v*` tag. Commits prefixed with `docs
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-30
+
+### Added
+
+- `spl version` command to display application release version, git commit hash,
+  build timestamp, Go runtime version, and platform as structured JSON.
+
 ## [1.0.0] - 2026-08-30
 
 ### Changed
