@@ -16,8 +16,8 @@ func replaceDurableStateFile(tempPath, path string) error {
 	return windows.MoveFileEx(from, to, windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH)
 }
 
-// Windows does not support syncing a directory handle. Callers use this only
-// after deletion, for which this package cannot offer a durability guarantee.
-func syncMergeStateDirectory(string) error {
+// Windows does not support syncing a directory handle; directory metadata
+// durability relies on atomic file replacement and write-through flags.
+func syncDirectory(string) error {
 	return nil
 }

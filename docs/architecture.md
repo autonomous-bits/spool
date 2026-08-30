@@ -10,10 +10,11 @@ logs on standard error.
 ```mermaid
 flowchart LR
     Client[CLI client or automation] --> CLI[spl Cobra commands]
+    CLI --> Repository[repository.Repository]
     CLI --> Tool[resolve.ResolveTool]
-    Tool --> Services[Branch and query services]
-    Tool --> Repository[repository.Repository]
-    Services --> Repository
+    Tool --> Contextual[internal/contextual]
+    Tool --> Repository
+    Contextual --> Repository
     Repository --> Memory[In-memory graph and ref indexes]
     Repository --> Objects["state-dir/objects/{loose,pack,info}"]
     Repository --> Projection["state-dir/graph.db (derived SQLite/FTS5)"]
@@ -36,12 +37,15 @@ exit.
 | Component | Responsibility |
 | --- | --- |
 | `cmd/spl` | Cobra command definitions, flag and argument validation, repository discovery, JSON output, and error logging. |
-| `internal/resolve` | Context-aware, policy-constrained adapter for graph queries and command-facing operations. It applies query budgets, pins a branch, and exposes public retrieval results with provenance and completion metadata. |
+| `internal/resolve` | Context-aware, policy-constrained adapter for read-only graph queries. It applies query budgets, pins a branch snapshot, and exposes public retrieval results with provenance and completion metadata. |
 | `internal/contextual` | Go use cases that combine branch-head lexical or typed-filter evidence with bounded, deterministic expansion of a pinned graph snapshot. |
 | `internal/repository` | Authoritative graph storage, commits, branches, staging, query implementations, durable state, locking, and recovery. |
 | `internal/repository/branch` | Branch request validation and lifecycle service boundary. |
+| `internal/repository/fsck` | Non-opening repository diagnostic and integrity verification service boundary. |
 | `internal/repository/initialization` | Repository initialization service boundary. |
 | `internal/repository/merge` | Merge transaction lifecycle service boundary. The repository supplies its durable, atomic store contract. |
+| `internal/repository/prune` | Graph pruning and ephemeral node excision service boundary. |
+| `internal/workspace` | Detached workspace registry, attached repository paths, and active workspace preferences. Exposed to the CLI through the repository facade. |
 
 ## Data model
 

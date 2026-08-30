@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/autonomous-bits/spool/internal/repository"
-	workspacepkg "github.com/autonomous-bits/spool/internal/workspace"
 )
 
 func TestWorkspaceInitCreatesWorkspaceAndRegistry(t *testing.T) {
@@ -23,7 +22,7 @@ func TestWorkspaceInitCreatesWorkspaceAndRegistry(t *testing.T) {
 		t.Fatalf("run workspace init: %v", err)
 	}
 
-	var created workspacepkg.Workspace
+	var created repository.Workspace
 	if err := json.Unmarshal(output.Bytes(), &created); err != nil {
 		t.Fatalf("decode init output: %v", err)
 	}
@@ -36,18 +35,18 @@ func TestWorkspaceInitCreatesWorkspaceAndRegistry(t *testing.T) {
 	if created.StateDir == "" {
 		t.Fatal("created workspace state directory is empty")
 	}
-	registryPath, err := workspacepkg.RegistryPath(root)
+	registryPath, err := repository.WorkspaceRegistryPath(root)
 	if err != nil {
 		t.Fatalf("registry path: %v", err)
 	}
 	if _, err := os.Stat(registryPath); err != nil {
 		t.Fatalf("stat registry: %v", err)
 	}
-	registry, err := workspacepkg.LoadRegistry(root)
+	registry, err := repository.LoadWorkspaceRegistry(root)
 	if err != nil {
 		t.Fatalf("load registry: %v", err)
 	}
-	stored, ok := registry.Workspaces[workspacepkg.Name("alpha")]
+	stored, ok := registry.Workspaces[repository.WorkspaceName("alpha")]
 	if !ok {
 		t.Fatal("workspace alpha not found in registry")
 	}
@@ -66,7 +65,7 @@ func TestWorkspaceInitInitializesRepositoryState(t *testing.T) {
 	if err := runWorkspaceCommand(root, []string{"init", "alpha"}, &output); err != nil {
 		t.Fatalf("run workspace init: %v", err)
 	}
-	var created workspacepkg.Workspace
+	var created repository.Workspace
 	if err := json.Unmarshal(output.Bytes(), &created); err != nil {
 		t.Fatalf("decode init output: %v", err)
 	}
@@ -109,11 +108,11 @@ func TestWorkspaceInitDoesNotRegisterOnInitializationFailure(t *testing.T) {
 	if output.Len() != 0 {
 		t.Fatalf("failed init wrote success output: %q", output.String())
 	}
-	registry, loadErr := workspacepkg.LoadRegistry(root)
+	registry, loadErr := repository.LoadWorkspaceRegistry(root)
 	if loadErr != nil {
 		t.Fatalf("load registry: %v", loadErr)
 	}
-	if _, exists := registry.Workspaces[workspacepkg.Name("alpha")]; exists {
+	if _, exists := registry.Workspaces[repository.WorkspaceName("alpha")]; exists {
 		t.Fatal("registry contains workspace alpha despite initialization failure")
 	}
 }
@@ -172,14 +171,14 @@ func TestWorkspaceInitSerializesConcurrentSameNameRequests(t *testing.T) {
 		t.Fatalf("successful concurrent inits = %d, want 1", successes)
 	}
 
-	registry, err := workspacepkg.LoadRegistry(root)
+	registry, err := repository.LoadWorkspaceRegistry(root)
 	if err != nil {
 		t.Fatalf("load registry: %v", err)
 	}
 	if len(registry.Workspaces) != 1 {
 		t.Fatalf("registered workspaces = %d, want 1", len(registry.Workspaces))
 	}
-	stored := registry.Workspaces[workspacepkg.Name("alpha")]
+	stored := registry.Workspaces[repository.WorkspaceName("alpha")]
 	repo, err := repository.OpenRepository(stored.StateDir)
 	if err != nil {
 		t.Fatalf("open registered workspace state: %v", err)
@@ -222,14 +221,14 @@ func TestWorkspaceUseSucceedsAndPersistsPreference(t *testing.T) {
 		t.Fatalf("use output paths = %#v, want empty", result.Paths)
 	}
 
-	current, ok, err := workspacepkg.CurrentWorkspaceName(root)
+	current, ok, err := repository.CurrentWorkspaceName(root)
 	if err != nil {
 		t.Fatalf("load current workspace preference: %v", err)
 	}
 	if !ok {
 		t.Fatal("current workspace preference not persisted")
 	}
-	if current != workspacepkg.Name("alpha") {
+	if current != repository.WorkspaceName("alpha") {
 		t.Fatalf("current workspace preference = %q, want alpha", current)
 	}
 }
@@ -239,7 +238,7 @@ func TestWorkspaceUseRejectsMissingWorkspace(t *testing.T) {
 
 	var output bytes.Buffer
 	err := runWorkspaceCommand(root, []string{"use", "missing"}, &output)
-	if !errors.Is(err, workspacepkg.ErrWorkspaceNotRegistered) {
+	if !errors.Is(err, repository.ErrWorkspaceNotRegistered) {
 		t.Fatalf("use missing workspace error = %v, want ErrWorkspaceNotRegistered", err)
 	}
 	if !strings.Contains(err.Error(), `workspace "missing" is not registered`) {
@@ -248,7 +247,7 @@ func TestWorkspaceUseRejectsMissingWorkspace(t *testing.T) {
 	if output.Len() != 0 {
 		t.Fatalf("use missing workspace wrote success output: %q", output.String())
 	}
-	current, ok, err := workspacepkg.CurrentWorkspaceName(root)
+	current, ok, err := repository.CurrentWorkspaceName(root)
 	if err != nil {
 		t.Fatalf("load current workspace preference: %v", err)
 	}
@@ -271,8 +270,8 @@ func TestWorkspaceUseRejectsMissingArgsAndInvalidName(t *testing.T) {
 
 	output.Reset()
 	err = runWorkspaceCommand(root, []string{"use", "Alpha"}, &output)
-	if !errors.Is(err, workspacepkg.ErrInvalidName) {
-		t.Fatalf("use invalid workspace name error = %v, want ErrInvalidName", err)
+	if !errors.Is(err, repository.ErrWorkspaceInvalidName) {
+		t.Fatalf("use invalid workspace name error = %v, want ErrWorkspaceInvalidName", err)
 	}
 	if output.Len() != 0 {
 		t.Fatalf("use invalid workspace name wrote success output: %q", output.String())
@@ -303,7 +302,7 @@ func TestWorkspaceUnsetClearsPersistedPreference(t *testing.T) {
 		t.Fatal("unset output cleared = false, want true")
 	}
 
-	_, ok, err := workspacepkg.CurrentWorkspaceName(root)
+	_, ok, err := repository.CurrentWorkspaceName(root)
 	if err != nil {
 		t.Fatalf("load current workspace preference: %v", err)
 	}
@@ -339,8 +338,8 @@ func TestWorkspaceUnsetRecoversFromStalePreference(t *testing.T) {
 	if err := runWorkspaceCommand(root, []string{"use", "alpha"}, &bytes.Buffer{}); err != nil {
 		t.Fatalf("use workspace: %v", err)
 	}
-	if err := workspacepkg.UpdateRegistry(root, func(registry *workspacepkg.Registry) error {
-		delete(registry.Workspaces, workspacepkg.Name("alpha"))
+	if err := repository.UpdateWorkspaceRegistry(root, func(registry *repository.WorkspaceRegistry) error {
+		delete(registry.Workspaces, repository.WorkspaceName("alpha"))
 		return nil
 	}); err != nil {
 		t.Fatalf("remove workspace from registry: %v", err)
@@ -360,7 +359,7 @@ func TestWorkspaceUnsetRecoversFromStalePreference(t *testing.T) {
 	if !result.Cleared {
 		t.Fatal("unset output cleared = false, want true for a stale preference")
 	}
-	_, ok, err := workspacepkg.CurrentWorkspaceName(root)
+	_, ok, err := repository.CurrentWorkspaceName(root)
 	if err != nil {
 		t.Fatalf("load current workspace preference: %v", err)
 	}
@@ -388,7 +387,7 @@ func TestWorkspaceAttachSucceeds(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
 		t.Fatalf("decode attach output: %v", err)
 	}
-	canonicalPath, err := workspacepkg.CanonicalPath(repositoryPath)
+	canonicalPath, err := repository.CanonicalWorkspacePath(repositoryPath)
 	if err != nil {
 		t.Fatalf("canonicalize repository path: %v", err)
 	}
@@ -396,11 +395,11 @@ func TestWorkspaceAttachSucceeds(t *testing.T) {
 		t.Fatalf("attach result = %#v, want workspace alpha attached %q", result, canonicalPath)
 	}
 
-	registry, err := workspacepkg.LoadRegistry(root)
+	registry, err := repository.LoadWorkspaceRegistry(root)
 	if err != nil {
 		t.Fatalf("load registry: %v", err)
 	}
-	if got := registry.Workspaces[workspacepkg.Name("alpha")].Paths; len(got) != 1 || got[0] != canonicalPath {
+	if got := registry.Workspaces[repository.WorkspaceName("alpha")].Paths; len(got) != 1 || got[0] != canonicalPath {
 		t.Fatalf("attached paths = %#v, want [%q]", got, canonicalPath)
 	}
 }
@@ -422,7 +421,7 @@ func TestWorkspaceAttachRejectsAlreadyAttachedAndMissingWorkspace(t *testing.T) 
 
 	var output bytes.Buffer
 	err := runWorkspaceCommand(root, []string{"attach", "--workspace", "beta", repositoryPath}, &output)
-	if !errors.Is(err, workspacepkg.ErrPathAlreadyAttached) {
+	if !errors.Is(err, repository.ErrWorkspacePathAlreadyAttached) {
 		t.Fatalf("attach duplicate path error = %v, want ErrPathAlreadyAttached", err)
 	}
 	if output.Len() != 0 {
@@ -431,7 +430,7 @@ func TestWorkspaceAttachRejectsAlreadyAttachedAndMissingWorkspace(t *testing.T) 
 
 	output.Reset()
 	err = runWorkspaceCommand(root, []string{"attach", "--workspace", "missing", repositoryPath}, &output)
-	if !errors.Is(err, workspacepkg.ErrInvalidWorkspace) {
+	if !errors.Is(err, repository.ErrWorkspaceInvalid) {
 		t.Fatalf("attach missing workspace error = %v, want ErrInvalidWorkspace", err)
 	}
 	if output.Len() != 0 {
@@ -461,18 +460,18 @@ func TestWorkspaceDetachSucceedsAndRemovesPath(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
 		t.Fatalf("decode detach output: %v", err)
 	}
-	canonicalPath, err := workspacepkg.CanonicalPath(repositoryPath)
+	canonicalPath, err := repository.CanonicalWorkspacePath(repositoryPath)
 	if err != nil {
 		t.Fatalf("canonicalize repository path: %v", err)
 	}
 	if result.Workspace != "alpha" || result.Detached != canonicalPath {
 		t.Fatalf("detach result = %#v, want workspace alpha detached %q", result, canonicalPath)
 	}
-	registry, err := workspacepkg.LoadRegistry(root)
+	registry, err := repository.LoadWorkspaceRegistry(root)
 	if err != nil {
 		t.Fatalf("load registry: %v", err)
 	}
-	if got := registry.Workspaces[workspacepkg.Name("alpha")].Paths; len(got) != 0 {
+	if got := registry.Workspaces[repository.WorkspaceName("alpha")].Paths; len(got) != 0 {
 		t.Fatalf("attached paths after detach = %#v, want empty", got)
 	}
 }
@@ -509,7 +508,7 @@ func TestWorkspaceDetachSucceedsAfterAttachedRepositoryIsDeleted(t *testing.T) {
 	if err := runWorkspaceCommand(root, []string{"attach", "--workspace", "alpha", repositoryPath}, &bytes.Buffer{}); err != nil {
 		t.Fatalf("attach workspace: %v", err)
 	}
-	canonicalPath, err := workspacepkg.CanonicalPath(repositoryPath)
+	canonicalPath, err := repository.CanonicalWorkspacePath(repositoryPath)
 	if err != nil {
 		t.Fatalf("canonicalize repository path: %v", err)
 	}
@@ -528,11 +527,11 @@ func TestWorkspaceDetachSucceedsAfterAttachedRepositoryIsDeleted(t *testing.T) {
 	if result.Workspace != "alpha" || result.Detached != canonicalPath {
 		t.Fatalf("detach result = %#v, want workspace alpha detached %q", result, canonicalPath)
 	}
-	registry, err := workspacepkg.LoadRegistry(root)
+	registry, err := repository.LoadWorkspaceRegistry(root)
 	if err != nil {
 		t.Fatalf("load registry: %v", err)
 	}
-	if got := registry.Workspaces[workspacepkg.Name("alpha")].Paths; len(got) != 0 {
+	if got := registry.Workspaces[repository.WorkspaceName("alpha")].Paths; len(got) != 0 {
 		t.Fatalf("attached paths after detach = %#v, want empty", got)
 	}
 }
@@ -544,7 +543,7 @@ func TestWorkspaceListHandlesEmptyRegistryAndSortedOutput(t *testing.T) {
 	if err := runWorkspaceCommand(root, []string{"list"}, &output); err != nil {
 		t.Fatalf("list empty registry: %v", err)
 	}
-	var empty []workspacepkg.Workspace
+	var empty []repository.Workspace
 	if err := json.Unmarshal(output.Bytes(), &empty); err != nil {
 		t.Fatalf("decode empty list output: %v", err)
 	}
@@ -575,7 +574,7 @@ func TestWorkspaceListHandlesEmptyRegistryAndSortedOutput(t *testing.T) {
 	if err := runWorkspaceCommand(root, []string{"list"}, &output); err != nil {
 		t.Fatalf("list populated registry: %v", err)
 	}
-	var listed []workspacepkg.Workspace
+	var listed []repository.Workspace
 	if err := json.Unmarshal(output.Bytes(), &listed); err != nil {
 		t.Fatalf("decode populated list output: %v", err)
 	}
@@ -585,11 +584,11 @@ func TestWorkspaceListHandlesEmptyRegistryAndSortedOutput(t *testing.T) {
 	if listed[0].Name != "alpha" || listed[1].Name != "zeta" {
 		t.Fatalf("listed workspace order = [%q %q], want [alpha zeta]", listed[0].Name, listed[1].Name)
 	}
-	alphaCanonical, err := workspacepkg.CanonicalPath(alphaPath)
+	alphaCanonical, err := repository.CanonicalWorkspacePath(alphaPath)
 	if err != nil {
 		t.Fatalf("canonicalize alpha path: %v", err)
 	}
-	zetaCanonical, err := workspacepkg.CanonicalPath(zetaPath)
+	zetaCanonical, err := repository.CanonicalWorkspacePath(zetaPath)
 	if err != nil {
 		t.Fatalf("canonicalize zeta path: %v", err)
 	}
@@ -607,15 +606,15 @@ func TestWorkspaceListAndCurrentExposeRegistrySlugSeparatelyFromDisplayName(t *t
 	if err := os.MkdirAll(repositoryPath, 0o755); err != nil {
 		t.Fatalf("mkdir repo: %v", err)
 	}
-	canonicalPath, err := workspacepkg.CanonicalPath(repositoryPath)
+	canonicalPath, err := repository.CanonicalWorkspacePath(repositoryPath)
 	if err != nil {
 		t.Fatalf("canonicalize repository path: %v", err)
 	}
 	// Registry keys are stable slugs while Workspace.Name is a separate
 	// display name; construct an entry where they diverge, as can already
 	// happen for registries not solely produced by "workspace init".
-	if err := workspacepkg.UpdateRegistry(root, func(registry *workspacepkg.Registry) error {
-		registry.Workspaces[workspacepkg.Name("ecommerce-platform")] = workspacepkg.Workspace{
+	if err := repository.UpdateWorkspaceRegistry(root, func(registry *repository.WorkspaceRegistry) error {
+		registry.Workspaces[repository.WorkspaceName("ecommerce-platform")] = repository.Workspace{
 			ID:        "ws_00000001",
 			Name:      "E-Commerce Platform",
 			StateDir:  filepath.Join(root, "repos", "ws_00000001"),
@@ -698,7 +697,7 @@ func TestWorkspaceCurrentFindsAttachedWorkingDirectory(t *testing.T) {
 		t.Fatalf("resolve current workspace: %v", err)
 	}
 
-	var current workspacepkg.Workspace
+	var current repository.Workspace
 	if err := json.Unmarshal(output.Bytes(), &current); err != nil {
 		t.Fatalf("decode current output: %v", err)
 	}
@@ -727,7 +726,7 @@ func TestWorkspaceCurrentRejectsUnattachedWorkingDirectory(t *testing.T) {
 
 	var output bytes.Buffer
 	err = runWorkspaceCommand(root, []string{"current"}, &output)
-	if !errors.Is(err, workspacepkg.ErrWorkspaceNotFound) {
+	if !errors.Is(err, repository.ErrWorkspaceNotFound) {
 		t.Fatalf("current missing workspace error = %v, want ErrWorkspaceNotFound", err)
 	}
 	if !strings.Contains(err.Error(), "no workspace is registered for the current directory") {

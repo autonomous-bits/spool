@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"io"
 
 	"github.com/autonomous-bits/spool/cmd/spl/commands"
@@ -17,8 +18,11 @@ func newRootCommand(stdout io.Writer, repo *repository.Repository) *cobra.Comman
 		return tool, nil
 	}, func() (*repository.Repository, error) {
 		return repository.NewSeedRepository(), nil
-	}, func() (*resolve.FsckTool, error) {
-		return tool.FsckTool(), nil
+	}, func(ctx context.Context) (repository.FsckResult, error) {
+		if err := ctx.Err(); err != nil {
+			return repository.FsckResult{}, err
+		}
+		return repo.Fsck()
 	})
 }
 
@@ -27,14 +31,20 @@ func newRootCommandWithLifecycle(
 	repoProvider func() (*repository.Repository, error),
 	toolProvider func() (*resolve.ResolveTool, error),
 	initialize func() (*repository.Repository, error),
-	fsckProviders ...func() (*resolve.FsckTool, error),
+	fsckProviders ...func(context.Context) (repository.FsckResult, error),
 ) *cobra.Command {
-	fsckProvider := func() (*resolve.FsckTool, error) {
-		tool, err := toolProvider()
-		if err != nil {
-			return nil, err
+	fsckProvider := func(ctx context.Context) (repository.FsckResult, error) {
+		if err := ctx.Err(); err != nil {
+			return repository.FsckResult{}, err
 		}
-		return tool.FsckTool(), nil
+		repo, err := repoProvider()
+		if err != nil {
+			return repository.FsckResult{}, err
+		}
+		if err := ctx.Err(); err != nil {
+			return repository.FsckResult{}, err
+		}
+		return repo.Fsck()
 	}
 	if len(fsckProviders) > 0 {
 		fsckProvider = fsckProviders[0]

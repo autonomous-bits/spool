@@ -364,7 +364,7 @@ func ensureDurableDirectory(path string) error {
 		return err
 	}
 	for index := len(missing) - 1; index >= 0; index-- {
-		if err := syncMergeStateDirectory(filepath.Dir(missing[index])); err != nil {
+		if err := syncDirectory(filepath.Dir(missing[index])); err != nil {
 			return err
 		}
 	}

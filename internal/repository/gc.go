@@ -380,14 +380,14 @@ func (s *looseObjectStore) writeAndPublishPack(
 		return PackMetadata{}, fmt.Errorf("publish pack: %w", err)
 	}
 	packTemp = ""
-	if err := syncMergeStateDirectory(s.packDirectory()); err != nil {
+	if err := syncDirectory(s.packDirectory()); err != nil {
 		return PackMetadata{}, fmt.Errorf("sync published pack directory: %w", err)
 	}
 	if err := os.Rename(indexTemp, indexPath); err != nil {
 		return PackMetadata{}, fmt.Errorf("publish pack index: %w", err)
 	}
 	indexTemp = ""
-	if err := syncMergeStateDirectory(s.packDirectory()); err != nil {
+	if err := syncDirectory(s.packDirectory()); err != nil {
 		return PackMetadata{}, fmt.Errorf("sync published pack index directory: %w", err)
 	}
 	next := PackManifest{Version: PackManifestFormatVersion}
@@ -492,7 +492,7 @@ func removeLooseObjectFiles(files []looseObjectFile) (uint64, uint64, error) {
 		directories[filepath.Dir(file.path)] = struct{}{}
 	}
 	for _, directory := range sortedDirectories(directories) {
-		if err := syncMergeStateDirectory(directory); err != nil {
+		if err := syncDirectory(directory); err != nil {
 			result = errors.Join(result, fmt.Errorf("sync loose object directory: %w", err))
 		}
 	}
@@ -539,7 +539,7 @@ func (s *looseObjectStore) retirePacks(metadata []PackMetadata) (uint64, uint64,
 		}
 	}
 	if changed {
-		if err := syncMergeStateDirectory(s.packDirectory()); err != nil {
+		if err := syncDirectory(s.packDirectory()); err != nil {
 			result = errors.Join(result, fmt.Errorf("sync retired pack directory: %w", err))
 		}
 	}

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/autonomous-bits/spool/internal/repository"
-	workspacepkg "github.com/autonomous-bits/spool/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -19,13 +18,13 @@ type workspacePathResult struct {
 	Detached  string `json:"detached,omitempty"`
 }
 
-// workspaceEntry mirrors workspacepkg.Workspace but also carries the stable
+// workspaceEntry mirrors repository.Workspace but also carries the stable
 // registry slug (the map key), since Workspace.Name is only a display name
 // and can differ from the slug that "workspace attach --workspace" and
 // SPOOL_WORKSPACE actually accept.
 type workspaceEntry struct {
-	Slug workspacepkg.Name `json:"slug"`
-	workspacepkg.Workspace
+	Slug repository.WorkspaceName `json:"slug"`
+	repository.Workspace
 }
 
 const maxWorkspaceIdentityAttempts = 8
@@ -38,13 +37,13 @@ const maxWorkspaceIdentityAttempts = 8
 // repos/<id> state directory and silently share graph state. Called while
 // holding the registry lock (from within an UpdateRegistry mutation) so the
 // collision check is against the authoritative, current registry contents.
-func uniqueWorkspaceIdentity(registry *workspacepkg.Registry, root string) (workspacepkg.ID, string, error) {
+func uniqueWorkspaceIdentity(registry *repository.WorkspaceRegistry, root string) (repository.WorkspaceID, string, error) {
 	for attempt := 0; attempt < maxWorkspaceIdentityAttempts; attempt++ {
-		id, err := workspacepkg.NewID()
+		id, err := repository.NewWorkspaceID()
 		if err != nil {
 			return "", "", err
 		}
-		stateDir, err := workspacepkg.RepositoryPath(root, id)
+		stateDir, err := repository.RepositoryWorkspacePath(root, id)
 		if err != nil {
 			return "", "", err
 		}
@@ -65,13 +64,13 @@ func uniqueWorkspaceIdentity(registry *workspacepkg.Registry, root string) (work
 // NewWorkspaceCommandDefault creates the workspace command using the default
 // detached-storage root provider.
 func NewWorkspaceCommandDefault() *cobra.Command {
-	return NewWorkspaceCommand(workspacepkg.StorageRoot)
+	return NewWorkspaceCommand(repository.WorkspaceStorageRoot)
 }
 
 // NewWorkspaceCommand creates the workspace command group.
 func NewWorkspaceCommand(registryRoot func() (string, error)) *cobra.Command {
 	if registryRoot == nil {
-		registryRoot = workspacepkg.StorageRoot
+		registryRoot = repository.WorkspaceStorageRoot
 	}
 
 	command := &cobra.Command{
@@ -106,7 +105,7 @@ func newWorkspaceInitCommand(registryRoot func() (string, error)) *cobra.Command
 			if err != nil {
 				return err
 			}
-			name, err := workspacepkg.ParseName(args[0])
+			name, err := repository.ParseWorkspaceName(args[0])
 			if err != nil {
 				return err
 			}
@@ -120,8 +119,8 @@ func newWorkspaceInitCommand(registryRoot func() (string, error)) *cobra.Command
 			// crash mid-initialization leaves at most an orphaned, unlisted
 			// state directory rather than a workspace registered with no
 			// backing repository state.
-			var created workspacepkg.Workspace
-			if err := workspacepkg.UpdateRegistry(root, func(registry *workspacepkg.Registry) error {
+			var created repository.Workspace
+			if err := repository.UpdateWorkspaceRegistry(root, func(registry *repository.WorkspaceRegistry) error {
 				if _, exists := registry.Workspaces[name]; exists {
 					return fmt.Errorf("workspace %q already exists", name)
 				}
@@ -136,7 +135,7 @@ func newWorkspaceInitCommand(registryRoot func() (string, error)) *cobra.Command
 				if err := repo.Close(); err != nil {
 					return fmt.Errorf("close initialized workspace state: %w", err)
 				}
-				created = workspacepkg.Workspace{
+				created = repository.Workspace{
 					ID:        id,
 					Name:      string(name),
 					StateDir:  stateDir,
@@ -168,7 +167,7 @@ func newWorkspaceAttachCommand(registryRoot func() (string, error)) *cobra.Comma
 			if err != nil {
 				return err
 			}
-			name, err := workspacepkg.ParseName(workspaceName)
+			name, err := repository.ParseWorkspaceName(workspaceName)
 			if err != nil {
 				return err
 			}
@@ -181,10 +180,10 @@ func newWorkspaceAttachCommand(registryRoot func() (string, error)) *cobra.Comma
 			} else {
 				path = args[0]
 			}
-			if err := workspacepkg.AttachPath(root, name, path); err != nil {
+			if err := repository.AttachWorkspacePath(root, name, path); err != nil {
 				return err
 			}
-			attachedPath, err := workspacepkg.CanonicalPath(path)
+			attachedPath, err := repository.CanonicalWorkspacePath(path)
 			if err != nil {
 				return err
 			}
@@ -208,7 +207,7 @@ func newWorkspaceUseCommand(registryRoot func() (string, error)) *cobra.Command 
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(command *cobra.Command, args []string) error {
-			name, err := workspacepkg.ParseName(args[0])
+			name, err := repository.ParseWorkspaceName(args[0])
 			if err != nil {
 				return err
 			}
@@ -216,10 +215,10 @@ func newWorkspaceUseCommand(registryRoot func() (string, error)) *cobra.Command 
 			if err != nil {
 				return err
 			}
-			if err := workspacepkg.SetCurrentWorkspace(root, name); err != nil {
+			if err := repository.SetCurrentWorkspace(root, name); err != nil {
 				return err
 			}
-			registry, err := workspacepkg.LoadRegistry(root)
+			registry, err := repository.LoadWorkspaceRegistry(root)
 			if err != nil {
 				return err
 			}
@@ -231,7 +230,7 @@ func newWorkspaceUseCommand(registryRoot func() (string, error)) *cobra.Command 
 			// zero-value workspace.
 			entry, exists := registry.Workspaces[name]
 			if !exists {
-				return fmt.Errorf("%w: workspace %q is not registered", workspacepkg.ErrWorkspaceNotRegistered, name)
+				return fmt.Errorf("%w: workspace %q is not registered", repository.ErrWorkspaceNotRegistered, name)
 			}
 			if entry.Paths == nil {
 				entry.Paths = []string{}
@@ -269,8 +268,8 @@ func newWorkspaceUnsetCommand(registryRoot func() (string, error)) *cobra.Comman
 			// read failure is reported as if a preference was present
 			// rather than surfacing a hard error that would defeat the
 			// point of this recovery command.
-			_, hadPreference, readErr := workspacepkg.CurrentWorkspaceName(root)
-			if err := workspacepkg.ClearCurrentWorkspace(root); err != nil {
+			_, hadPreference, readErr := repository.CurrentWorkspaceName(root)
+			if err := repository.ClearCurrentWorkspace(root); err != nil {
 				return err
 			}
 			return json.NewEncoder(command.OutOrStdout()).Encode(workspaceUnsetResult{Cleared: hadPreference || readErr != nil})
@@ -313,11 +312,11 @@ func newWorkspaceListCommand(registryRoot func() (string, error)) *cobra.Command
 			if err != nil {
 				return err
 			}
-			registry, err := workspacepkg.LoadRegistry(root)
+			registry, err := repository.LoadWorkspaceRegistry(root)
 			if err != nil {
 				return err
 			}
-			names := make([]workspacepkg.Name, 0, len(registry.Workspaces))
+			names := make([]repository.WorkspaceName, 0, len(registry.Workspaces))
 			for name := range registry.Workspaces {
 				names = append(names, name)
 			}
@@ -352,9 +351,9 @@ func newWorkspaceCurrentCommand(registryRoot func() (string, error)) *cobra.Comm
 			if err != nil {
 				return err
 			}
-			match, err := workspacepkg.FindWorkspace(root, workingDirectory)
+			match, err := repository.FindWorkspace(root, workingDirectory)
 			if err != nil {
-				if errors.Is(err, workspacepkg.ErrWorkspaceNotFound) {
+				if errors.Is(err, repository.ErrWorkspaceNotFound) {
 					return fmt.Errorf("no workspace is registered for the current directory: %w", err)
 				}
 				return err
@@ -374,12 +373,12 @@ func detachWorkspacePath(root, path string) (workspacePathResult, error) {
 	// CanonicalStoredPath's documentation), and detach is the only way to
 	// remove one, so it must not fail with ENOENT on the very entry it is
 	// meant to clean up.
-	canonicalPath, err := workspacepkg.CanonicalStoredPath(path)
+	canonicalPath, err := repository.CanonicalStoredWorkspacePath(path)
 	if err != nil {
 		return workspacePathResult{}, err
 	}
-	var detachedWorkspace workspacepkg.Name
-	err = workspacepkg.UpdateRegistry(root, func(registry *workspacepkg.Registry) error {
+	var detachedWorkspace repository.WorkspaceName
+	err = repository.UpdateWorkspaceRegistry(root, func(registry *repository.WorkspaceRegistry) error {
 		for name, entry := range registry.Workspaces {
 			remainingPaths := make([]string, 0, len(entry.Paths))
 			found := false

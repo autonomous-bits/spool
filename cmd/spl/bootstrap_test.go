@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/autonomous-bits/spool/internal/workspace"
+	"github.com/autonomous-bits/spool/internal/repository"
 )
 
 func TestRepositoryStateDirFromArgs(t *testing.T) {
@@ -362,7 +362,7 @@ func configureStorageRoot(t *testing.T) string {
 	t.Helper()
 	xdgDataHome := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", xdgDataHome)
-	root, err := workspace.StorageRoot()
+	root, err := repository.WorkspaceStorageRoot()
 	if err != nil {
 		t.Fatalf("StorageRoot: %v", err)
 	}
@@ -380,23 +380,23 @@ func registerWorkspace(t *testing.T, slug, id, stateDir string, paths ...string)
 // calls (configureStorageRoot always provisions a fresh temporary root).
 func registerWorkspaceIn(t *testing.T, root, slug, id, stateDir string, paths ...string) {
 	t.Helper()
-	name, err := workspace.ParseName(slug)
+	name, err := repository.ParseWorkspaceName(slug)
 	if err != nil {
 		t.Fatalf("ParseName(%q): %v", slug, err)
 	}
 
 	canonicalPaths := make([]string, 0, len(paths))
 	for _, path := range paths {
-		canonicalPath, err := workspace.CanonicalPath(path)
+		canonicalPath, err := repository.CanonicalWorkspacePath(path)
 		if err != nil {
 			t.Fatalf("CanonicalPath(%q): %v", path, err)
 		}
 		canonicalPaths = append(canonicalPaths, canonicalPath)
 	}
 
-	if err := workspace.UpdateRegistry(root, func(registry *workspace.Registry) error {
-		registry.Workspaces[name] = workspace.Workspace{
-			ID:        workspace.ID(id),
+	if err := repository.UpdateWorkspaceRegistry(root, func(registry *repository.WorkspaceRegistry) error {
+		registry.Workspaces[name] = repository.Workspace{
+			ID:        repository.WorkspaceID(id),
 			Name:      "Workspace " + id,
 			StateDir:  stateDir,
 			CreatedAt: time.Date(2026, time.August, 22, 15, 0, 0, 0, time.UTC),
@@ -410,22 +410,22 @@ func registerWorkspaceIn(t *testing.T, root, slug, id, stateDir string, paths ..
 
 func setCurrentWorkspace(t *testing.T, root, slug string) {
 	t.Helper()
-	name, err := workspace.ParseName(slug)
+	name, err := repository.ParseWorkspaceName(slug)
 	if err != nil {
 		t.Fatalf("ParseName(%q): %v", slug, err)
 	}
-	if err := workspace.SetCurrentWorkspace(root, name); err != nil {
+	if err := repository.SetCurrentWorkspace(root, name); err != nil {
 		t.Fatalf("SetCurrentWorkspace(%q): %v", slug, err)
 	}
 }
 
 func removeWorkspace(t *testing.T, root, slug string) {
 	t.Helper()
-	name, err := workspace.ParseName(slug)
+	name, err := repository.ParseWorkspaceName(slug)
 	if err != nil {
 		t.Fatalf("ParseName(%q): %v", slug, err)
 	}
-	if err := workspace.UpdateRegistry(root, func(registry *workspace.Registry) error {
+	if err := repository.UpdateWorkspaceRegistry(root, func(registry *repository.WorkspaceRegistry) error {
 		delete(registry.Workspaces, name)
 		return nil
 	}); err != nil {
