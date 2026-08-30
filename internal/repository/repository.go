@@ -206,11 +206,6 @@ func NewSeedRepository() (*Repository, error) {
 	return repo, nil
 }
 
-// NewSeedRepositoryErr returns an in-memory repository initialized with the seed graph, or an error.
-func NewSeedRepositoryErr() (*Repository, error) {
-	return NewSeedRepository()
-}
-
 func newRepository() *Repository {
 	repo := &Repository{
 		defaultBranch:         defaultBranchName,

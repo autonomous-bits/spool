@@ -3,8 +3,11 @@ package prune
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
+
+	"github.com/autonomous-bits/spool/internal/repository/branch"
 )
 
 type fakeStore struct {
@@ -78,19 +81,24 @@ func TestServicePruneDelegatesToStore(t *testing.T) {
 }
 
 func TestPruneSentinelErrors(t *testing.T) {
-	if ErrBranchRequired == nil || ErrBranchNotFound == nil || ErrProtectedBranch == nil || ErrUncommittedStagedChanges == nil {
-		t.Fatal("expected non-nil sentinel errors")
+	for _, sentinel := range []error{
+		ErrBranchRequired,
+		ErrBranchNotFound,
+		ErrProtectedBranch,
+		ErrUncommittedStagedChanges,
+	} {
+		if sentinel == nil {
+			t.Fatal("expected non-nil sentinel error")
+		}
+		wrapped := fmt.Errorf("operation failed: %w", sentinel)
+		if !errors.Is(wrapped, sentinel) {
+			t.Fatalf("expected errors.Is to match wrapped error for %v", sentinel)
+		}
 	}
-	if ErrBranchRequired.Error() != "branch is required" {
-		t.Fatalf("unexpected ErrBranchRequired message: %s", ErrBranchRequired.Error())
+	if !errors.Is(ErrBranchRequired, branch.ErrRequired) {
+		t.Fatalf("expected ErrBranchRequired to match branch.ErrRequired")
 	}
-	if ErrBranchNotFound.Error() != "branch not found" {
-		t.Fatalf("unexpected ErrBranchNotFound message: %s", ErrBranchNotFound.Error())
-	}
-	if ErrProtectedBranch.Error() != "cannot prune protected branch without force" {
-		t.Fatalf("unexpected ErrProtectedBranch message: %s", ErrProtectedBranch.Error())
-	}
-	if ErrUncommittedStagedChanges.Error() != "branch has uncommitted staged changes" {
-		t.Fatalf("unexpected ErrUncommittedStagedChanges message: %s", ErrUncommittedStagedChanges.Error())
+	if !errors.Is(ErrBranchNotFound, branch.ErrNotFound) {
+		t.Fatalf("expected ErrBranchNotFound to match branch.ErrNotFound")
 	}
 }
