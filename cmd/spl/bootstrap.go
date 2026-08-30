@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -18,7 +17,6 @@ import (
 const (
 	stateDirFlagName = "--state-dir"
 	envStateDir      = "SPOOL_DIR"
-	envWorkspaceName = "SPOOL_WORKSPACE"
 )
 
 func bootstrapRootCommand(stdout io.Writer, stateDir string) (*cobra.Command, func() error) {
@@ -94,10 +92,8 @@ func repositoryStateDirFromArgs(args []string, lookupEnv func(string) (string, b
 }
 
 // stateDirOverride resolves an explicit state-directory override from the
-// --state-dir flag, the SPOOL_DIR/SPOOL_WORKSPACE environment variables, or
-// the persisted current-workspace preference, in that priority order. It
-// reports ok=false when no override applies, so callers fall back to
-// registry-based path-prefix discovery.
+// --state-dir flag or SPOOL_DIR. It reports ok=false when no override applies,
+// so callers fall back to manifest and local-repository discovery.
 func stateDirOverride(args []string, lookupEnv func(string) (string, bool)) (string, bool, error) {
 	if value, found := parseFlagValue(args, stateDirFlagName); found {
 		if value == "" {
@@ -107,29 +103,6 @@ func stateDirOverride(args []string, lookupEnv func(string) (string, bool)) (str
 	}
 	if value, found := lookupEnv(envStateDir); found && value != "" {
 		return value, true, nil
-	}
-	if value, found := lookupEnv(envWorkspaceName); found && value != "" {
-		stateDir, err := workspaceStateDirByName(value)
-		if err != nil {
-			return "", false, err
-		}
-		return stateDir, true, nil
-	}
-	// A broken persisted preference (malformed current.toml, or a slug that
-	// no longer exists in the registry) must not become a hard error here:
-	// repositoryStateDir runs unconditionally in main() before cobra parses
-	// which subcommand was requested, so an error at this point would block
-	// every spl invocation -- including "spl workspace use"/"spl workspace
-	// unset", the only commands that can fix a broken preference. Treat any
-	// resolution failure the same as no preference being set and fall
-	// through to path-prefix discovery, mirroring how workspace.StorageRoot
-	// errors are already tolerated below and in repositoryStateDirFrom.
-	if root, err := repository.WorkspaceStorageRoot(); err == nil {
-		if name, ok, err := repository.CurrentWorkspaceName(root); err == nil && ok {
-			if stateDir, err := registeredWorkspaceStateDir(root, name, "current workspace preference"); err == nil {
-				return stateDir, true, nil
-			}
-		}
 	}
 	return "", false, nil
 }
@@ -157,55 +130,25 @@ func parseFlagValue(args []string, name string) (string, bool) {
 	return "", false
 }
 
-func workspaceStateDirByName(rawName string) (string, error) {
-	root, err := repository.WorkspaceStorageRoot()
-	if err != nil {
-		return "", err
-	}
-	name, err := repository.ParseWorkspaceName(rawName)
-	if err != nil {
-		return "", fmt.Errorf("%s: %w", envWorkspaceName, err)
-	}
-	return registeredWorkspaceStateDir(root, name, envWorkspaceName)
-}
-
-func registeredWorkspaceStateDir(root string, name repository.WorkspaceName, source string) (string, error) {
-	registry, err := repository.LoadWorkspaceRegistry(root)
-	if err != nil {
-		return "", err
-	}
-	entry, exists := registry.Workspaces[name]
-	if !exists {
-		return "", fmt.Errorf("%s: workspace %q is not registered", source, name)
-	}
-	return entry.StateDir, nil
-}
-
 func repositoryStateDirFrom(workingDirectory string) (string, error) {
 	directory, err := filepath.Abs(workingDirectory)
 	if err != nil {
 		return "", err
 	}
-	root, err := repository.WorkspaceStorageRoot()
-	if err == nil {
-		_, manifest, found, manifestErr := repository.DiscoverWorkspaceManifest(directory)
-		if manifestErr != nil {
-			return "", manifestErr
+	_, manifest, found, err := repository.DiscoverWorkspaceManifest(directory)
+	if err != nil {
+		return "", err
+	}
+	if found {
+		root, err := repository.WorkspaceStorageRoot()
+		if err != nil {
+			return "", fmt.Errorf("resolve workspace manifest storage: %w", err)
 		}
-		if found {
-			match, err := repository.FindWorkspaceByID(root, manifest.WorkspaceID)
-			if err != nil {
-				return "", fmt.Errorf("resolve workspace manifest: %w", err)
-			}
-			return match.Workspace.StateDir, nil
+		stateDir, err := repository.FindWorkspaceByID(root, manifest.WorkspaceID)
+		if err != nil {
+			return "", fmt.Errorf("resolve workspace manifest: %w", err)
 		}
-		match, err := repository.FindWorkspace(root, directory)
-		if err == nil {
-			return match.Workspace.StateDir, nil
-		}
-		if !errors.Is(err, repository.ErrWorkspaceNotFound) {
-			return "", err
-		}
+		return stateDir, nil
 	}
 	return localRepositoryStateDir(directory)
 }

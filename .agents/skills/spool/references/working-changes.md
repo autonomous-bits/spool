@@ -6,10 +6,11 @@ Initialize the resolved Spool state directory once:
 spl init
 ```
 
-For a workspace-backed repository, `spl workspace init` already initializes the workspace's state
-when it is created, so no separate `spl init` step is needed after `spl workspace attach`. Without
-a workspace, run `spl init` to create local `.spl` state at the nearest parent `.spl` or `go.work`
-directory, or the current directory.
+For a workspace-backed repository, first run `spl workspace init <name>`, then
+use `spl workspace attach --workspace <name> --repository-id <id> [path]` to
+write and commit its manifest. Without a workspace manifest, run `spl init` to
+create local `.spl` state at the nearest parent `.spl` or `go.work` directory,
+or the current directory.
 
 ## Branch selection
 

@@ -12,7 +12,8 @@ component boundaries, data model, and persistence design.
 - `resolve/` owns node-resolution queries and their tool adapter; it is not repository storage.
 - `contextual/` owns bounded evidence-and-expansion use cases over a pinned graph snapshot; it is
   not projection persistence.
-- `workspace/` owns the central, detached multi-repo workspace registry and persisted active-
-  workspace preference; it is independent of any single repository's `.spl` state.
+- `workspace/` owns central detached-workspace provisioning, checkout manifest
+  validation/discovery, and immutable workspace-ID lookup; it is independent of
+  any single repository's `.spl` state.
 
 Keep repository lifecycle behavior under `repository/`. Add other query use cases in appropriately named packages.

@@ -78,28 +78,3 @@ func RepositoryPath(storageRoot string, id ID) (string, error) {
 	}
 	return stateDir, nil
 }
-
-// CreateLocation is the resolved detached location for a workspace creation
-// request.
-type CreateLocation struct {
-	StorageRoot string `json:"storageRoot"`
-	StateDir    string `json:"stateDir"`
-	ID          ID     `json:"id"`
-}
-
-// ResolveCreateLocation validates request and resolves its detached state
-// directory from the current process environment.
-func ResolveCreateLocation(request CreateRequest) (CreateLocation, error) {
-	if err := request.Validate(); err != nil {
-		return CreateLocation{}, err
-	}
-	root, err := StorageRoot()
-	if err != nil {
-		return CreateLocation{}, err
-	}
-	stateDir, err := RepositoryPath(root, request.ID)
-	if err != nil {
-		return CreateLocation{}, err
-	}
-	return CreateLocation{StorageRoot: root, StateDir: stateDir, ID: request.ID}, nil
-}

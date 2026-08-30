@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/pelletier/go-toml/v2"
 )
 
 func TestWriteAndDiscoverManifest(t *testing.T) {
@@ -78,20 +80,52 @@ func TestDiscoverManifestIgnoresLocalRepositoryConfigAndRejectsInvalidManifest(t
 
 func TestFindWorkspaceByID(t *testing.T) {
 	root := t.TempDir()
+	stateDir := filepath.Join(root, "repos", "ws_8f1e2a3b")
 	if err := UpdateRegistry(root, func(registry *Registry) error {
-		registry.Workspaces["storefront"] = testWorkspace(root, "ws_8f1e2a3b", nil)
+		registry.Workspaces["storefront"] = Workspace{ID: "ws_8f1e2a3b", StateDir: stateDir}
 		return nil
 	}); err != nil {
-		t.Fatalf("UpdateRegistry: %v", err)
+		t.Fatalf("update registry: %v", err)
 	}
-	match, err := FindWorkspaceByID(root, "ws_8f1e2a3b")
+
+	foundStateDir, err := FindWorkspaceByID(root, "ws_8f1e2a3b")
 	if err != nil {
 		t.Fatalf("FindWorkspaceByID: %v", err)
 	}
-	if match.Name != "storefront" {
-		t.Fatalf("workspace name = %q, want storefront", match.Name)
+	if foundStateDir != stateDir {
+		t.Fatalf("state directory = %q, want %q", foundStateDir, stateDir)
 	}
 	if _, err := FindWorkspaceByID(root, "ws_00000000"); !errors.Is(err, ErrWorkspaceNotRegistered) {
 		t.Fatalf("FindWorkspaceByID missing error = %v, want ErrWorkspaceNotRegistered", err)
+	}
+}
+
+func TestFindWorkspaceByIDRejectsDuplicateIdentity(t *testing.T) {
+	root := t.TempDir()
+	catalog := struct {
+		Version    int `toml:"version"`
+		Workspaces map[string]struct {
+			ID       string `toml:"id"`
+			StateDir string `toml:"state_dir"`
+		} `toml:"workspaces"`
+	}{
+		Version: 1,
+		Workspaces: map[string]struct {
+			ID       string `toml:"id"`
+			StateDir string `toml:"state_dir"`
+		}{
+			"first":  {ID: "ws_00000000", StateDir: filepath.Join(root, "repos", "first")},
+			"second": {ID: "ws_00000000", StateDir: filepath.Join(root, "repos", "second")},
+		},
+	}
+	data, err := toml.Marshal(catalog)
+	if err != nil {
+		t.Fatalf("encode registry: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, registryFilename), data, 0o600); err != nil {
+		t.Fatalf("write registry: %v", err)
+	}
+	if _, err := FindWorkspaceByID(root, "ws_00000000"); !errors.Is(err, ErrInvalidRegistry) {
+		t.Fatalf("FindWorkspaceByID duplicate error = %v, want ErrInvalidRegistry", err)
 	}
 }

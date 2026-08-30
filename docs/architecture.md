@@ -23,14 +23,15 @@ flowchart LR
     Repository --> Lock["state-dir/repository.lock"]
 ```
 
-The CLI resolves a state directory before running a command. An explicit `--state-dir` takes
-priority, followed by `SPOOL_DIR`, `SPOOL_WORKSPACE` (a registered workspace name), and a persisted
-active-workspace preference. Otherwise, an attached workspace owning the current path is selected
-by longest matching path prefix. If no workspace applies, the CLI discovers the nearest parent
-`.spl` directory; `spl init` creates local state at the directory containing `go.work`, or at the
-current directory when none exists. Subsequent commands open the resolved repository, acquire its
-process lock, perform the operation, persist any state change, and release the lock at process
-exit.
+The CLI resolves a state directory before running a command. An explicit
+`--state-dir` takes priority, followed by `SPOOL_DIR`, then a validated
+ancestor `.spl/config.toml` workspace manifest. A manifest resolves its
+immutable workspace ID through the detached-state catalog; malformed manifests
+and unknown IDs are errors. Without a manifest, the CLI discovers the nearest
+parent `.spl` directory; `spl init` creates local state at the directory
+containing `go.work`, or at the current directory when none exists. Subsequent
+commands open the resolved repository, acquire its process lock, perform the
+operation, persist any state change, and release the lock at process exit.
 
 ## Components
 
@@ -45,7 +46,7 @@ exit.
 | `internal/repository/initialization` | Repository initialization service boundary. |
 | `internal/repository/merge` | Merge transaction lifecycle service boundary. The repository supplies its durable, atomic store contract. |
 | `internal/repository/prune` | Graph pruning and ephemeral node excision service boundary. |
-| `internal/workspace` | Detached workspace registry, attached repository paths, and active workspace preferences. Exposed to the CLI through the repository facade. |
+| `internal/workspace` | Central detached-workspace provisioning plus manifest validation/discovery/writing and immutable workspace-ID lookup. Exposed to the CLI through the repository facade. |
 
 ## CLI command surface
 
@@ -62,7 +63,7 @@ operation:
 | History and comparison | `history`, `branches-containing`, `diff` |
 | Merge lifecycle | `merge preview/apply/conflicts/resolve/finalize/abort` |
 | Maintenance | `fsck`, `gc`, `prune` |
-| Detached workspaces | `workspace init/attach/detach/list/current/use/unset` |
+| Detached workspaces | `workspace init/attach` |
 
 The complete syntax, flags, examples, and selector constraints are maintained in
 `.agents/skills/spool/references/cli-help.md`. In particular, mutation staging and schema
@@ -300,20 +301,13 @@ or deletes data.
 
 ## Multi-repo workspaces
 
-`internal/workspace` manages a central, detached workspace registry that maps independently
-checked-out paths to one named workspace and its detached repository state. The registry is stored
-as `registry.toml` under a platform-appropriate XDG (or Windows per-user application-data) storage
-root, alongside a `current.toml` persisted-preference file. Workspace state lives at
-`repos/<workspace-id>` under the same root. The registry is protected by an `flock`-based lock and
-the same durable temp-file-plus-rename write path the repository package uses for its own control
-files.
-
-`spl workspace init` initializes a workspace's backing state (config, seed snapshot, default `main`
-branch) before registering it, so a failed or interrupted initialization never leaves a workspace
-registered with no backing state. `attach`/`detach` then associate or remove paths (one workspace
-per path); `list` and `current` inspect the registry; `use`/`unset` persist or clear which
-workspace future sessions treat as active. A path attached to a workspace resolves to its detached
-state instead of a local `.spl` directory.
+`internal/workspace` provisions central detached state and resolves checkouts
+through portable `.spl/config.toml` manifests. `workspace init` creates a
+named catalog entry and detached repository state under the platform-appropriate
+XDG (or Windows per-user application-data) root. `workspace attach` explicitly
+writes a repository manifest binding its portable identity to that immutable
+workspace ID. Resolution never uses host-path associations, mutable active
+preferences, or `SPOOL_WORKSPACE`.
 
 ## Extension points and current scope
 

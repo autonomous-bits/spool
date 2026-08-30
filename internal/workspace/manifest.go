@@ -152,3 +152,41 @@ func validateRepositoryID(value string) error {
 	}
 	return nil
 }
+
+func writeDurableFile(path string, data []byte, tempPattern, label string) (err error) {
+	temp, err := os.CreateTemp(filepath.Dir(path), tempPattern)
+	if err != nil {
+		return fmt.Errorf("create %s temporary file: %w", label, err)
+	}
+	tempPath := temp.Name()
+	defer func() {
+		if removeErr := os.Remove(tempPath); removeErr != nil && !os.IsNotExist(removeErr) {
+			removeErr = fmt.Errorf("remove %s temporary file: %w", label, removeErr)
+			if err == nil {
+				err = removeErr
+			} else {
+				err = errors.Join(err, removeErr)
+			}
+		}
+	}()
+	if _, err := temp.Write(data); err != nil {
+		return closeTempFileAfterFailure(temp, fmt.Errorf("write %s: %w", label, err), label)
+	}
+	if err := temp.Sync(); err != nil {
+		return closeTempFileAfterFailure(temp, fmt.Errorf("sync %s: %w", label, err), label)
+	}
+	if err := temp.Close(); err != nil {
+		return fmt.Errorf("close %s temporary file: %w", label, err)
+	}
+	if err := replaceDurableFile(tempPath, path, label); err != nil {
+		return fmt.Errorf("replace %s: %w", label, err)
+	}
+	return nil
+}
+
+func closeTempFileAfterFailure(temp *os.File, operationErr error, label string) error {
+	if err := temp.Close(); err != nil {
+		return errors.Join(operationErr, fmt.Errorf("close %s temporary file: %w", label, err))
+	}
+	return operationErr
+}

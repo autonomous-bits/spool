@@ -19,6 +19,20 @@ func TestRootCommandIncludesResolveSubcommand(t *testing.T) {
 	}
 }
 
+func TestRootCommandIncludesWorkspaceProvisioningCommands(t *testing.T) {
+	command := newRootCommand(&bytes.Buffer{}, newTestSeedRepository(t))
+
+	for _, path := range [][]string{{"workspace", "init"}, {"workspace", "attach"}} {
+		found, _, err := command.Find(path)
+		if err != nil {
+			t.Fatalf("find %v: %v", path, err)
+		}
+		if found.Name() != path[len(path)-1] {
+			t.Fatalf("command = %q, want %q", found.Name(), path[len(path)-1])
+		}
+	}
+}
+
 func TestCommandHelpIncludesExamples(t *testing.T) {
 	testCases := []struct {
 		path    []string
