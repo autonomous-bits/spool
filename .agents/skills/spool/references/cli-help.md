@@ -44,6 +44,7 @@ repository discovery.
 | `merge preview/apply/conflicts/resolve/finalize/abort` | Run the merge transaction lifecycle |
 | `fsck`, `gc`, `prune` | Check integrity, maintain objects, and remove ephemeral graph data |
 | `workspace init/attach` | Provision central detached state and bind repository manifests |
+| `version` | Print Spool release version and build information as JSON |
 | `completion`, `help` | Generate shell completion and inspect command help |
 
 All commands accept `-h, --help` in addition to the flags below.
@@ -304,6 +305,14 @@ requires a central workspace name and portable repository ID, then writes the
 repository's `.spl/config.toml` manifest. Commit that manifest so other
 checkouts resolve the same central workspace by immutable ID. The command does
 not register a host-path attachment.
+
+## Version
+
+```sh
+spl version
+```
+
+`version` prints binary build provenance (release version, commit hash, build date, Go runtime version, and OS/architecture platform) formatted as JSON to standard output without requiring an initialized workspace.
 
 ## Completion and help
 

@@ -52,4 +52,4 @@ with staged changes and requires `--force` for the protected default branch.
 | `merge`, `merge preview`, `merge apply`, `merge conflicts`, `merge resolve`, `merge finalize`, `merge abort` | [Merges](references/merges.md) |
 | `fsck`, `gc`, `prune` | [Maintenance](references/maintenance.md) |
 | `workspace`, `workspace init`, `workspace attach` | [Multi-repo workspaces](references/workspaces.md) |
-| `completion`, `help` | [CLI help](references/cli-help.md) |
+| `version`, `completion`, `help` | [CLI help](references/cli-help.md) |
