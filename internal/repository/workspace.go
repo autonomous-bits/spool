@@ -5,6 +5,8 @@ import (
 	"github.com/autonomous-bits/spool/internal/workspace"
 )
 
+const CurrentWorkspaceManifestVersion = workspace.CurrentManifestVersion
+
 // Workspace domain types re-exported from the workspace package.
 type (
 	Workspace         = workspace.Workspace

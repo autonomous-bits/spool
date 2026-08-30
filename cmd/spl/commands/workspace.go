@@ -197,7 +197,7 @@ func newWorkspaceAttachCommand(registryRoot func() (string, error)) *cobra.Comma
 					return fmt.Errorf("%w: workspace %q is not registered", repository.ErrWorkspaceNotRegistered, name)
 				}
 				if err := repository.WriteWorkspaceManifest(attachedPath, repository.WorkspaceManifest{
-					FormatVersion: 1,
+					FormatVersion: repository.CurrentWorkspaceManifestVersion,
 					RepositoryID:  repositoryID,
 					WorkspaceID:   entry.ID,
 				}); err != nil {

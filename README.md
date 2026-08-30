@@ -62,7 +62,10 @@ spl workspace attach --workspace my-project --repository-id github.com/acme/my-p
 storage immediately, not in the checkout. Supplying `--repository-id` to `workspace attach`
 writes a portable `.spl/config.toml` manifest that binds the checkout to the workspace's immutable
 ID. Commit that manifest so clones, worktrees, and CI runners resolve the same workspace after
-their local registry is configured. Every path attached to that workspace uses the same state;
+their local registry is configured. If the checkout already uses `.spl/config.toml` for local
+Spool state, attachment refuses to overwrite it; migrate a detached checkout instead. Repositories
+that ignore `.spl` must add a `.gitignore` exception for `.spl/config.toml` before committing the
+manifest. Every path attached to that workspace uses the same state;
 attach additional checkouts directly:
 
 ```sh

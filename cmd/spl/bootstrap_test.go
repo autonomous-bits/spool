@@ -287,7 +287,7 @@ func TestRepositoryStateDirFrom(t *testing.T) {
 		registerWorkspaceIn(t, root, "legacy", "ws_00000030", legacyStateDir, checkout)
 		registerWorkspaceIn(t, root, "portable", "ws_00000031", manifestStateDir, makeDirectory(t, t.TempDir(), "other"))
 		if err := repository.WriteWorkspaceManifest(checkout, repository.WorkspaceManifest{
-			FormatVersion: 1,
+			FormatVersion: repository.CurrentWorkspaceManifestVersion,
 			RepositoryID:  "github.com/acme/storefront",
 			WorkspaceID:   "ws_00000031",
 		}); err != nil {
@@ -307,7 +307,7 @@ func TestRepositoryStateDirFrom(t *testing.T) {
 		configureStorageRoot(t)
 		checkout := makeDirectory(t, t.TempDir(), "repo")
 		if err := repository.WriteWorkspaceManifest(checkout, repository.WorkspaceManifest{
-			FormatVersion: 1,
+			FormatVersion: repository.CurrentWorkspaceManifestVersion,
 			RepositoryID:  "github.com/acme/storefront",
 			WorkspaceID:   "ws_00000032",
 		}); err != nil {
