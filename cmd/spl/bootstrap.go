@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/autonomous-bits/spool/internal/repository"
-	"github.com/autonomous-bits/spool/internal/repository/initialization"
 	"github.com/autonomous-bits/spool/internal/resolve"
 	"github.com/autonomous-bits/spool/internal/workspace"
 	"github.com/spf13/cobra"
@@ -24,16 +23,23 @@ const (
 
 func bootstrapRootCommand(stdout io.Writer, stateDir string) (*cobra.Command, func() error) {
 	var closeRepository func() error
-	toolProvider := func() (*resolve.ResolveTool, error) {
-		tool, close, err := openPersistentTool(stateDir)
+	repoProvider := func() (*repository.Repository, error) {
+		repo, err := repository.OpenRepository(stateDir)
 		if err != nil {
 			return nil, err
 		}
-		closeRepository = close
-		return tool, nil
+		closeRepository = repo.Close
+		return repo, nil
+	}
+	toolProvider := func() (*resolve.ResolveTool, error) {
+		repo, err := repoProvider()
+		if err != nil {
+			return nil, err
+		}
+		return resolve.NewResolveTool(repo), nil
 	}
 	initialize := func() (*repository.Repository, error) {
-		repo, err := initialization.Initialize(stateDir)
+		repo, err := repository.InitializeRepository(stateDir)
 		if err != nil {
 			return nil, err
 		}
@@ -46,9 +52,17 @@ func bootstrapRootCommand(stdout io.Writer, stateDir string) (*cobra.Command, fu
 		}
 		return closeRepository()
 	}
-	return newRootCommandWithLifecycle(stdout, toolProvider, initialize, func() (*resolve.FsckTool, error) {
+	return newRootCommandWithLifecycle(stdout, repoProvider, toolProvider, initialize, func() (*resolve.FsckTool, error) {
 		return resolve.NewPersistentFsckTool(stateDir), nil
 	}), close
+}
+
+func openPersistentRepository(stateDir string) (*repository.Repository, func() error, error) {
+	repo, err := repository.OpenRepository(stateDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	return repo, repo.Close, nil
 }
 
 func openPersistentTool(stateDir string) (*resolve.ResolveTool, func() error, error) {

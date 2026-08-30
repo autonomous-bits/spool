@@ -5,13 +5,12 @@ import (
 	"errors"
 
 	"github.com/autonomous-bits/spool/internal/repository"
-	"github.com/autonomous-bits/spool/internal/resolve"
 	"github.com/spf13/cobra"
 )
 
 // NewGCCommand creates the command that packs retained objects and prunes
 // grace-expired unreachable loose objects.
-func NewGCCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra.Command {
+func NewGCCommand(repoProvider func() (*repository.Repository, error)) *cobra.Command {
 	var options repository.GCOptions
 	command := &cobra.Command{
 		Use:          "gc",
@@ -21,11 +20,11 @@ func NewGCCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra.Comm
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(command *cobra.Command, _ []string) error {
-			tool, err := toolProvider()
+			repo, err := repoProvider()
 			if err != nil {
 				return err
 			}
-			result, gcErr := tool.SPLGC(command.Context(), options)
+			result, gcErr := repo.GC(options)
 			if gcErr != nil {
 				var warning *repository.GCCommittedWithWarningError
 				if !errors.As(gcErr, &warning) {

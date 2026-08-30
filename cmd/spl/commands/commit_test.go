@@ -11,7 +11,7 @@ import (
 	"github.com/autonomous-bits/spool/internal/resolve"
 )
 
-func TestCommitCLIAndMCPCommitEquivalentStaging(t *testing.T) {
+func TestCommitCLIAdvancesBranchAndClearsStaging(t *testing.T) {
 	operations := []repository.MutationOperation{{Action: "add", Entity: "node", ID: "node-2", Title: "Second node"}}
 	cliRepo := repository.NewSeedRepository()
 	if _, err := cliRepo.StageMutationBatch(repository.StageMutationRequest{Branch: "main", Operations: operations}); err != nil {
@@ -19,7 +19,7 @@ func TestCommitCLIAndMCPCommitEquivalentStaging(t *testing.T) {
 	}
 
 	var output bytes.Buffer
-	command := NewCommitCommand(func() (*resolve.ResolveTool, error) { return resolve.NewResolveTool(cliRepo), nil })
+	command := NewCommitCommand(func() (*repository.Repository, error) { return cliRepo, nil })
 	command.SetOut(&output)
 	command.SetArgs([]string{"--branch", "main"})
 	if err := command.Execute(); err != nil {
@@ -29,17 +29,15 @@ func TestCommitCLIAndMCPCommitEquivalentStaging(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &cliResult); err != nil {
 		t.Fatalf("decode CLI result: %v", err)
 	}
-
-	mcpRepo := repository.NewSeedRepository()
-	if _, err := mcpRepo.StageMutationBatch(repository.StageMutationRequest{Branch: "main", Operations: operations}); err != nil {
-		t.Fatalf("stage MCP batch: %v", err)
+	if cliResult.Commit == "" {
+		t.Fatalf("empty commit result: %#v", cliResult)
 	}
-	mcpResult, err := resolve.NewResolveTool(mcpRepo).SPLCommitStagedMutations(context.Background(), "main")
+	status, err := cliRepo.BranchStagingStatus("main")
 	if err != nil {
-		t.Fatalf("SPLCommitStagedMutations: %v", err)
+		t.Fatalf("BranchStagingStatus: %v", err)
 	}
-	if cliResult != mcpResult {
-		t.Fatalf("CLI result %#v does not match MCP result %#v", cliResult, mcpResult)
+	if status.Operations != 0 {
+		t.Fatalf("staged operations remaining = %d, want 0", status.Operations)
 	}
 }
 
@@ -50,13 +48,13 @@ func TestCommitCLIPersistsCallerMetadataForHistory(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("stage: %v", err)
 	}
-	command := NewCommitCommand(func() (*resolve.ResolveTool, error) { return resolve.NewResolveTool(repo), nil })
+	command := NewCommitCommand(func() (*repository.Repository, error) { return repo, nil })
 	command.SetArgs([]string{"--branch", "main", "--author", "alice", "--message", "update node"})
 	if err := command.Execute(); err != nil {
 		t.Fatalf("commit: %v", err)
 	}
 	history, err := resolve.NewResolveTool(repo).SPLHistory(context.Background(), resolve.HistoryRequest{
-		Selector: snapshotSelector("main", ""), EntityID: repository.SeedNodeID,
+		Selector: resolve.SnapshotSelector{Branch: "main"}, EntityID: repository.SeedNodeID,
 	})
 	if err != nil {
 		t.Fatalf("history: %v", err)
@@ -67,8 +65,8 @@ func TestCommitCLIPersistsCallerMetadataForHistory(t *testing.T) {
 }
 
 func TestCommitCLIRejectsUnstagedBranch(t *testing.T) {
-	command := NewCommitCommand(func() (*resolve.ResolveTool, error) {
-		return resolve.NewResolveTool(repository.NewSeedRepository()), nil
+	command := NewCommitCommand(func() (*repository.Repository, error) {
+		return repository.NewSeedRepository(), nil
 	})
 	command.SetArgs([]string{"--branch", "main"})
 	if err := command.Execute(); !errors.Is(err, repository.ErrNoStagedMutations) {
@@ -96,8 +94,8 @@ func TestCommitCLIRejectsStaleStagedBaseWithoutChangingBranchOrStaging(t *testin
 		t.Fatalf("BranchStagingStatus before commit: %v", err)
 	}
 
-	command := NewCommitCommand(func() (*resolve.ResolveTool, error) {
-		return resolve.NewResolveTool(repo), nil
+	command := NewCommitCommand(func() (*repository.Repository, error) {
+		return repo, nil
 	})
 	command.SetArgs([]string{"--branch", "main"})
 	if err := command.Execute(); !errors.Is(err, repository.ErrStaleStagedBase) {

@@ -7,19 +7,17 @@ import (
 	"testing"
 
 	"github.com/autonomous-bits/spool/internal/repository"
-	"github.com/autonomous-bits/spool/internal/repository/branch"
-	"github.com/autonomous-bits/spool/internal/resolve"
 )
 
 func TestSwitchCLISelectsExistingInactiveBranch(t *testing.T) {
 	repo := repository.NewSeedRepository()
-	if _, err := repo.CreateBranch("feature", branch.Source{Branch: "main"}); err != nil {
+	if _, err := repo.CreateBranch("feature", repository.BranchSource{Branch: "main"}); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
 	}
 	var output bytes.Buffer
 
-	command := NewSwitchCommand(func() (*resolve.ResolveTool, error) {
-		return resolve.NewResolveTool(repo), nil
+	command := NewSwitchCommand(func() (*repository.Repository, error) {
+		return repo, nil
 	})
 	command.SetOut(&output)
 	command.SetArgs([]string{"feature"})
@@ -27,11 +25,11 @@ func TestSwitchCLISelectsExistingInactiveBranch(t *testing.T) {
 		t.Fatalf("execute switch command: %v", err)
 	}
 
-	var result branch.SwitchResult
+	var result repository.BranchSwitchResult
 	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
 		t.Fatalf("decode CLI result: %v", err)
 	}
-	if result != (branch.SwitchResult{ActiveBranch: "feature"}) {
+	if result.ActiveBranch != "feature" {
 		t.Fatalf("result = %#v", result)
 	}
 	initialization, err := repo.Initialization()
@@ -47,13 +45,13 @@ func TestSwitchCLIRejectsMissingBranchWithoutWritingSuccessOutput(t *testing.T) 
 	repo := repository.NewSeedRepository()
 	var output bytes.Buffer
 
-	command := NewSwitchCommand(func() (*resolve.ResolveTool, error) {
-		return resolve.NewResolveTool(repo), nil
+	command := NewSwitchCommand(func() (*repository.Repository, error) {
+		return repo, nil
 	})
 	command.SetOut(&output)
 	command.SetArgs([]string{"missing"})
-	if err := command.Execute(); !errors.Is(err, branch.ErrNotFound) {
-		t.Fatalf("execute switch command error = %v, want ErrNotFound", err)
+	if err := command.Execute(); !errors.Is(err, repository.ErrBranchNotFound) {
+		t.Fatalf("execute switch command error = %v, want ErrBranchNotFound", err)
 	}
 	if output.Len() != 0 {
 		t.Fatalf("switch command wrote success output: %q", output.String())
@@ -71,8 +69,8 @@ func TestSwitchCLISucceedsWhenBranchIsAlreadyActive(t *testing.T) {
 	repo := repository.NewSeedRepository()
 	var output bytes.Buffer
 
-	command := NewSwitchCommand(func() (*resolve.ResolveTool, error) {
-		return resolve.NewResolveTool(repo), nil
+	command := NewSwitchCommand(func() (*repository.Repository, error) {
+		return repo, nil
 	})
 	command.SetOut(&output)
 	command.SetArgs([]string{"main"})
@@ -80,11 +78,11 @@ func TestSwitchCLISucceedsWhenBranchIsAlreadyActive(t *testing.T) {
 		t.Fatalf("execute switch command: %v", err)
 	}
 
-	var result branch.SwitchResult
+	var result repository.BranchSwitchResult
 	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
 		t.Fatalf("decode CLI result: %v", err)
 	}
-	if result != (branch.SwitchResult{ActiveBranch: "main"}) {
+	if result.ActiveBranch != "main" {
 		t.Fatalf("result = %#v", result)
 	}
 	initialization, err := repo.Initialization()

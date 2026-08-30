@@ -4,12 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"reflect"
 	"testing"
 	"time"
 
 	"github.com/autonomous-bits/spool/internal/repository"
-	"github.com/autonomous-bits/spool/internal/repository/branch"
 )
 
 func TestResolvePinsBranchCommitForRequest(t *testing.T) {
@@ -56,27 +54,18 @@ func TestResolverRejectsCancellationAfterPinning(t *testing.T) {
 	}
 }
 
-func TestResolveToolRejectsCanceledMutationWithoutChangingRepository(t *testing.T) {
+func TestResolveToolRejectsCanceledQuery(t *testing.T) {
 	repo := repository.NewSeedRepository()
 	tool := NewResolveTool(repo)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := tool.SPLStageMutationBatch(ctx, repository.StageMutationRequest{
-		Branch: "main",
-		Operations: []repository.MutationOperation{
-			{Action: "add", Entity: "node", ID: "node-2", Title: "Second"},
-		},
+	_, err := tool.SPLResolve(ctx, ResolveRequest{
+		Selector: SnapshotSelector{Branch: "main"},
+		NodeID:   repository.SeedNodeID,
 	})
 	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("SPLStageMutationBatch error = %v, want context.Canceled", err)
-	}
-	status, err := repo.BranchStagingStatus("main")
-	if err != nil {
-		t.Fatalf("BranchStagingStatus: %v", err)
-	}
-	if status.Operations != 0 {
-		t.Fatalf("canceled mutation staged %d operations", status.Operations)
+		t.Fatalf("SPLResolve error = %v, want context.Canceled", err)
 	}
 }
 
@@ -470,7 +459,7 @@ func TestQueryEnvelopesReportCompletionAndFullResponseBytes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CommitStagedMutations: %v", err)
 	}
-	if _, err := repo.CreateBranch("feature", branch.Source{Branch: "main"}); err != nil {
+	if _, err := repo.CreateBranch("feature", repository.BranchSource{Branch: "main"}); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
 	}
 	tool := NewResolveTool(repo)
@@ -571,7 +560,7 @@ func TestPagedQueryCompletionReportsRowAndVisitedTruncation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CommitStagedMutations: %v", err)
 	}
-	if _, err := repo.CreateBranch("feature", branch.Source{Branch: "main"}); err != nil {
+	if _, err := repo.CreateBranch("feature", repository.BranchSource{Branch: "main"}); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
 	}
 	one, generous := 1, 1<<20
@@ -677,7 +666,7 @@ func TestQueryDeadlineWithoutListPrefixReturnsError(t *testing.T) {
 
 func TestResolveToolReadAPIsRejectUnreachableExplicitCommits(t *testing.T) {
 	repo := repository.NewSeedRepository()
-	if _, err := repo.CreateBranch("feature", branch.Source{Branch: "main"}); err != nil {
+	if _, err := repo.CreateBranch("feature", repository.BranchSource{Branch: "main"}); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
 	}
 	featureCommit, err := repo.AdvanceBranch("feature")
@@ -752,7 +741,7 @@ func TestResolveToolReadAPIsRejectUnreachableExplicitCommits(t *testing.T) {
 
 func TestResolveToolReadAPIsAllowDetachedCommitsOnlyWhenConfigured(t *testing.T) {
 	repo := repository.NewSeedRepository()
-	if _, err := repo.CreateBranch("feature", branch.Source{Branch: "main"}); err != nil {
+	if _, err := repo.CreateBranch("feature", repository.BranchSource{Branch: "main"}); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
 	}
 	featureCommit, err := repo.AdvanceBranch("feature")
@@ -1112,7 +1101,7 @@ func TestSPLResolveTraversesAllMergeParentsForExplicitCommit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PinBranch: %v", err)
 	}
-	if _, err := repo.CreateBranch("feature", branch.Source{Branch: "main"}); err != nil {
+	if _, err := repo.CreateBranch("feature", repository.BranchSource{Branch: "main"}); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
 	}
 	if _, err := repo.StageMutationBatch(repository.StageMutationRequest{
@@ -1153,7 +1142,7 @@ func TestSPLResolveTraversesAllMergeParentsForExplicitCommit(t *testing.T) {
 
 func TestSPLResolveRejectsUnreachableExplicitCommitUnlessDetachedAccessAllowed(t *testing.T) {
 	repo := repository.NewSeedRepository()
-	if _, err := repo.CreateBranch("feature", branch.Source{Branch: "main"}); err != nil {
+	if _, err := repo.CreateBranch("feature", repository.BranchSource{Branch: "main"}); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
 	}
 	featureCommit, err := repo.AdvanceBranch("feature")
@@ -1199,249 +1188,5 @@ func TestSPLResolveValidatesBranchWhenDetachedAccessAllowed(t *testing.T) {
 	})
 	if !errors.Is(err, ErrBranchNotFound) {
 		t.Fatalf("SPLResolve error = %v, want ErrBranchNotFound", err)
-	}
-}
-
-func TestSPLCreateBranchUsesExplicitSource(t *testing.T) {
-	repo := repository.NewSeedRepository()
-	tool := NewResolveTool(repo)
-	mainHead, err := repo.PinBranch("main")
-	if err != nil {
-		t.Fatalf("PinBranch: %v", err)
-	}
-
-	result, err := tool.SPLCreateBranch(context.Background(), branch.CreateRequest{
-		Name:   "feature",
-		Source: branch.Source{Branch: "main"},
-	})
-	if err != nil {
-		t.Fatalf("SPLCreateBranch: %v", err)
-	}
-	if result != (branch.CreateResult{Name: "feature", Commit: string(mainHead)}) {
-		t.Fatalf("result = %#v, want name feature at %q", result, mainHead)
-	}
-}
-
-func TestSPLCreateBranchRejectsMissingSourceBeforeDuplicateName(t *testing.T) {
-	tool := NewResolveTool(repository.NewSeedRepository())
-
-	_, err := tool.SPLCreateBranch(context.Background(), branch.CreateRequest{
-		Name:   "main",
-		Source: branch.Source{Branch: "missing"},
-	})
-	if !errors.Is(err, branch.ErrSourceNotFound) {
-		t.Fatalf("SPLCreateBranch error = %v, want ErrSourceNotFound", err)
-	}
-
-}
-
-func TestSPLListBranchesReturnsSortedLocalBranchNames(t *testing.T) {
-	repo := repository.NewSeedRepository()
-	if _, err := repo.CreateBranch("zebra", branch.Source{Branch: "main"}); err != nil {
-		t.Fatalf("CreateBranch zebra: %v", err)
-	}
-
-	if _, err := repo.CreateBranch("alpha", branch.Source{Branch: "main"}); err != nil {
-		t.Fatalf("CreateBranch alpha: %v", err)
-	}
-
-	result, err := NewResolveTool(repo).SPLListBranches(context.Background())
-	if err != nil {
-		t.Fatalf("SPLListBranches: %v", err)
-	}
-	want := []string{"alpha", "main", "zebra"}
-	if !reflect.DeepEqual(result.Branches, want) {
-		t.Fatalf("branches = %#v, want %#v", result.Branches, want)
-	}
-}
-
-func TestSPLDeleteBranchDeletesExistingNonDefaultBranch(t *testing.T) {
-	repo := repository.NewSeedRepository()
-	if _, err := repo.CreateBranch("feature", branch.Source{Branch: "main"}); err != nil {
-		t.Fatalf("CreateBranch: %v", err)
-	}
-
-	result, err := NewResolveTool(repo).SPLDeleteBranch(context.Background(), branch.DeleteRequest{Name: "feature"})
-	if err != nil {
-		t.Fatalf("SPLDeleteBranch: %v", err)
-	}
-	if result != (branch.DeleteResult{Name: "feature"}) {
-		t.Fatalf("result = %#v", result)
-	}
-	if _, err := repo.PinBranch("feature"); !errors.Is(err, repository.ErrBranchNotFound) {
-		t.Fatalf("PinBranch after delete error = %v, want ErrBranchNotFound", err)
-	}
-}
-
-func TestSPLDeleteBranchRejectsDefaultAndMissingBranches(t *testing.T) {
-	tool := NewResolveTool(repository.NewSeedRepository())
-	for _, testCase := range []struct {
-		name string
-		want error
-	}{
-		{name: "main", want: branch.ErrDefaultProtected},
-		{name: "missing", want: branch.ErrNotFound},
-	} {
-		t.Run(testCase.name, func(t *testing.T) {
-			_, err := tool.SPLDeleteBranch(context.Background(), branch.DeleteRequest{Name: testCase.name})
-			if !errors.Is(err, testCase.want) {
-				t.Fatalf("SPLDeleteBranch error = %v, want %v", err, testCase.want)
-			}
-
-		})
-	}
-}
-
-func TestSPLSwitchBranchMakesExistingInactiveBranchActive(t *testing.T) {
-	repo := repository.NewSeedRepository()
-	if _, err := repo.CreateBranch("feature", branch.Source{Branch: "main"}); err != nil {
-		t.Fatalf("CreateBranch: %v", err)
-	}
-
-	result, err := NewResolveTool(repo).SPLSwitchBranch(context.Background(), branch.SwitchRequest{Name: "feature"})
-	if err != nil {
-		t.Fatalf("SPLSwitchBranch: %v", err)
-	}
-	if result != (branch.SwitchResult{ActiveBranch: "feature"}) {
-		t.Fatalf("result = %#v", result)
-	}
-	initialization, err := repo.Initialization()
-	if err != nil {
-		t.Fatalf("Initialization: %v", err)
-	}
-	if initialization.ActiveBranch != "feature" {
-		t.Fatalf("active branch = %q, want feature", initialization.ActiveBranch)
-	}
-}
-
-func TestSPLSwitchBranchRejectsMissingBranchWithoutChangingActiveBranch(t *testing.T) {
-	repo := repository.NewSeedRepository()
-	tool := NewResolveTool(repo)
-	originalActiveBranch, err := repo.Initialization()
-	if err != nil {
-		t.Fatalf("Initialization before switch: %v", err)
-	}
-
-	if _, err := tool.SPLSwitchBranch(context.Background(), branch.SwitchRequest{Name: "missing"}); !errors.Is(err, branch.ErrNotFound) {
-		t.Fatalf("SPLSwitchBranch error = %v, want ErrNotFound", err)
-	}
-	current, err := repo.Initialization()
-	if err != nil {
-		t.Fatalf("Initialization after switch: %v", err)
-	}
-	if current.ActiveBranch != originalActiveBranch.ActiveBranch {
-		t.Fatalf("active branch = %q, want unchanged %q", current.ActiveBranch, originalActiveBranch.ActiveBranch)
-	}
-}
-
-func TestSPLSwitchBranchSucceedsWhenBranchIsAlreadyActive(t *testing.T) {
-	repo := repository.NewSeedRepository()
-
-	result, err := NewResolveTool(repo).SPLSwitchBranch(context.Background(), branch.SwitchRequest{Name: "main"})
-	if err != nil {
-		t.Fatalf("SPLSwitchBranch: %v", err)
-	}
-
-	if result != (branch.SwitchResult{ActiveBranch: "main"}) {
-		t.Fatalf("result = %#v", result)
-	}
-	initialization, err := repo.Initialization()
-	if err != nil {
-		t.Fatalf("Initialization: %v", err)
-	}
-	if initialization.ActiveBranch != "main" {
-		t.Fatalf("active branch = %q, want main", initialization.ActiveBranch)
-	}
-}
-
-func TestSPLBranchStagingStatusReportsStagedDelta(t *testing.T) {
-	repo := repository.NewSeedRepository()
-	if _, err := repo.StageMutationBatch(repository.StageMutationRequest{
-		Branch: "main",
-		Operations: []repository.MutationOperation{
-			{Action: "add", Entity: "node", ID: "node-2", Title: "Second node"},
-		},
-	}); err != nil {
-		t.Fatalf("StageMutationBatch: %v", err)
-	}
-
-	status, err := NewResolveTool(repo).SPLBranchStagingStatus(context.Background(), "main")
-	if err != nil {
-		t.Fatalf("SPLBranchStagingStatus: %v", err)
-	}
-	if status.Branch != "main" || status.BaseCommit == "" || status.Operations != 1 {
-		t.Fatalf("status = %#v", status)
-	}
-}
-
-func TestSPLCommitStagedMutationsRejectsStaleBaseWithoutChangingBranchOrStaging(t *testing.T) {
-	repo := repository.NewSeedRepository()
-	if _, err := repo.StageMutationBatch(repository.StageMutationRequest{
-		Branch:     "main",
-		Operations: []repository.MutationOperation{{Action: "add", Entity: "node", ID: "node-2", Title: "Second node"}},
-	}); err != nil {
-		t.Fatalf("StageMutationBatch: %v", err)
-	}
-	if _, err := repo.AdvanceBranch("main"); err != nil {
-		t.Fatalf("AdvanceBranch: %v", err)
-	}
-	head, err := repo.PinBranch("main")
-	if err != nil {
-		t.Fatalf("PinBranch before commit: %v", err)
-	}
-	staging, err := repo.BranchStagingStatus("main")
-	if err != nil {
-		t.Fatalf("BranchStagingStatus before commit: %v", err)
-	}
-
-	if _, err := NewResolveTool(repo).SPLCommitStagedMutations(context.Background(), "main"); !errors.Is(err, repository.ErrStaleStagedBase) {
-		t.Fatalf("SPLCommitStagedMutations error = %v, want ErrStaleStagedBase", err)
-	}
-
-	currentHead, err := repo.PinBranch("main")
-	if err != nil {
-		t.Fatalf("PinBranch after commit: %v", err)
-	}
-	currentStaging, err := repo.BranchStagingStatus("main")
-	if err != nil {
-		t.Fatalf("BranchStagingStatus after commit: %v", err)
-	}
-	if currentHead != head || currentStaging != staging {
-		t.Fatalf("branch/staging = %q/%#v, want unchanged %q/%#v", currentHead, currentStaging, head, staging)
-	}
-}
-
-func TestSPLGCRejectsCanceledContext(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	_, err := NewResolveTool(repository.NewSeedRepository()).SPLGC(ctx, repository.GCOptions{})
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("SPLGC error = %v, want context.Canceled", err)
-	}
-}
-
-func TestSPLPruneRejectsCanceledContext(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	_, err := NewResolveTool(repository.NewSeedRepository()).SPLPrune(ctx, repository.PruneRequest{Branch: "main"})
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("SPLPrune error = %v, want context.Canceled", err)
-	}
-}
-
-func TestSPLPruneExecutesOnRepository(t *testing.T) {
-	repo := repository.NewSeedRepository()
-	tool := NewResolveTool(repo)
-	res, err := tool.SPLPrune(context.Background(), repository.PruneRequest{
-		Branch: "main",
-		Force:  true,
-	})
-	if err != nil {
-		t.Fatalf("SPLPrune error = %v", err)
-	}
-	if res.PrunedNodesCount != 0 {
-		t.Fatalf("PrunedNodesCount = %d, want 0", res.PrunedNodesCount)
 	}
 }

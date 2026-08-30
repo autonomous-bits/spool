@@ -7,27 +7,26 @@ import (
 	"os"
 
 	"github.com/autonomous-bits/spool/internal/repository"
-	"github.com/autonomous-bits/spool/internal/resolve"
 	"github.com/spf13/cobra"
 )
 
 // NewMergeCommand creates the command group for previewing and applying graph merges.
-func NewMergeCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra.Command {
+func NewMergeCommand(repoProvider func() (*repository.Repository, error)) *cobra.Command {
 	command := &cobra.Command{
 		Use:          "merge",
 		Short:        "Preview and apply three-way graph merges",
 		SilenceUsage: true,
 	}
-	command.AddCommand(newMergePreviewCommand(toolProvider))
-	command.AddCommand(newMergeApplyCommand(toolProvider))
-	command.AddCommand(newMergeConflictsCommand(toolProvider))
-	command.AddCommand(newMergeResolveCommand(toolProvider))
-	command.AddCommand(newMergeFinalizeCommand(toolProvider))
-	command.AddCommand(newMergeAbortCommand(toolProvider))
+	command.AddCommand(newMergePreviewCommand(repoProvider))
+	command.AddCommand(newMergeApplyCommand(repoProvider))
+	command.AddCommand(newMergeConflictsCommand(repoProvider))
+	command.AddCommand(newMergeResolveCommand(repoProvider))
+	command.AddCommand(newMergeFinalizeCommand(repoProvider))
+	command.AddCommand(newMergeAbortCommand(repoProvider))
 	return command
 }
 
-func newMergePreviewCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra.Command {
+func newMergePreviewCommand(repoProvider func() (*repository.Repository, error)) *cobra.Command {
 	var source, target string
 	command := &cobra.Command{
 		Use:          "preview",
@@ -35,11 +34,11 @@ func newMergePreviewCommand(toolProvider func() (*resolve.ResolveTool, error)) *
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(command *cobra.Command, _ []string) error {
-			tool, err := toolProvider()
+			repo, err := repoProvider()
 			if err != nil {
 				return err
 			}
-			result, err := tool.SPLMergePreview(command.Context(), source, target)
+			result, err := repo.PreviewMerge(source, target)
 			if err != nil {
 				return err
 			}
@@ -53,7 +52,7 @@ func newMergePreviewCommand(toolProvider func() (*resolve.ResolveTool, error)) *
 	return command
 }
 
-func newMergeApplyCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra.Command {
+func newMergeApplyCommand(repoProvider func() (*repository.Repository, error)) *cobra.Command {
 	var source, target, transactionID, previewID, author, message string
 	command := &cobra.Command{
 		Use:          "apply",
@@ -61,19 +60,14 @@ func newMergeApplyCommand(toolProvider func() (*resolve.ResolveTool, error)) *co
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(command *cobra.Command, _ []string) error {
-			tool, err := toolProvider()
+			repo, err := repoProvider()
 			if err != nil {
 				return err
 			}
-			commit, err := tool.SPLApplyMergePreview(command.Context(), resolve.MergeApplyRequest{
-				SourceBranch: source, TargetBranch: target, TransactionID: transactionID,
-				PreviewID: repository.ObjectID(previewID), Author: author, Message: message,
-			})
+			commit, err := repo.ApplyMergePreview(source, target, transactionID, repository.ObjectID(previewID), author, message)
 			if err != nil {
 				if errors.Is(err, repository.ErrMergeConflicted) {
-					result, inspectErr := tool.SPLMergeConflicts(command.Context(), resolve.MergeConflictsRequest{
-						TargetBranch: target, TransactionID: transactionID,
-					})
+					result, inspectErr := repo.InspectMergeTransaction(target, transactionID)
 					if inspectErr != nil {
 						return inspectErr
 					}
@@ -99,7 +93,7 @@ func newMergeApplyCommand(toolProvider func() (*resolve.ResolveTool, error)) *co
 	return command
 }
 
-func newMergeConflictsCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra.Command {
+func newMergeConflictsCommand(repoProvider func() (*repository.Repository, error)) *cobra.Command {
 	var target, transactionID string
 	command := &cobra.Command{
 		Use:          "conflicts",
@@ -107,14 +101,12 @@ func newMergeConflictsCommand(toolProvider func() (*resolve.ResolveTool, error))
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(command *cobra.Command, _ []string) error {
-			tool, err := toolProvider()
+			repo, err := repoProvider()
 			if err != nil {
 				return err
 			}
 
-			result, err := tool.SPLMergeConflicts(command.Context(), resolve.MergeConflictsRequest{
-				TargetBranch: target, TransactionID: transactionID,
-			})
+			result, err := repo.InspectMergeTransaction(target, transactionID)
 			if err != nil {
 				return err
 			}
@@ -128,15 +120,15 @@ func newMergeConflictsCommand(toolProvider func() (*resolve.ResolveTool, error))
 	return command
 }
 
-func newMergeFinalizeCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra.Command {
+func newMergeFinalizeCommand(repoProvider func() (*repository.Repository, error)) *cobra.Command {
 	var target, transactionID string
 	command := &cobra.Command{Use: "finalize", Short: "Finalize a resolved conflicted merge", Args: cobra.NoArgs, SilenceUsage: true,
 		RunE: func(command *cobra.Command, _ []string) error {
-			tool, err := toolProvider()
+			repo, err := repoProvider()
 			if err != nil {
 				return err
 			}
-			commit, err := tool.SPLFinalizeMerge(command.Context(), resolve.MergeTransactionRequest{TargetBranch: target, TransactionID: transactionID})
+			commit, err := repo.FinalizeMergeTransaction(target, transactionID)
 			if err != nil {
 				return err
 			}
@@ -151,7 +143,7 @@ func newMergeFinalizeCommand(toolProvider func() (*resolve.ResolveTool, error)) 
 	return command
 }
 
-func newMergeResolveCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra.Command {
+func newMergeResolveCommand(repoProvider func() (*repository.Repository, error)) *cobra.Command {
 	var target, transactionID, previewID, selectionsPath, overridesPath string
 	command := &cobra.Command{Use: "resolve", Short: "Resolve every conflict in a persisted merge", Args: cobra.NoArgs, SilenceUsage: true,
 		RunE: func(command *cobra.Command, _ []string) error {
@@ -173,11 +165,11 @@ func newMergeResolveCommand(toolProvider func() (*resolve.ResolveTool, error)) *
 					return fmt.Errorf("decode merge overrides: %w", err)
 				}
 			}
-			tool, err := toolProvider()
+			repo, err := repoProvider()
 			if err != nil {
 				return err
 			}
-			if err := tool.SPLResolveMerge(command.Context(), resolve.MergeResolveRequest{
+			if err := repo.ResolveConflictedMerge(repository.ResolveConflictedMergeRequest{
 				TargetBranch: target, TransactionID: transactionID, PreviewID: repository.ObjectID(previewID),
 				Selections: selections, Overrides: overrides,
 			}); err != nil {
@@ -198,15 +190,15 @@ func newMergeResolveCommand(toolProvider func() (*resolve.ResolveTool, error)) *
 	return command
 }
 
-func newMergeAbortCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra.Command {
+func newMergeAbortCommand(repoProvider func() (*repository.Repository, error)) *cobra.Command {
 	var target, transactionID string
 	command := &cobra.Command{Use: "abort", Short: "Abort a conflicted merge", Args: cobra.NoArgs, SilenceUsage: true,
 		RunE: func(command *cobra.Command, _ []string) error {
-			tool, err := toolProvider()
+			repo, err := repoProvider()
 			if err != nil {
 				return err
 			}
-			if err := tool.SPLAbortMerge(command.Context(), resolve.MergeTransactionRequest{TargetBranch: target, TransactionID: transactionID}); err != nil {
+			if err := repo.AbortMergeTransaction(target, transactionID); err != nil {
 				return err
 			}
 			return json.NewEncoder(command.OutOrStdout()).Encode(struct {

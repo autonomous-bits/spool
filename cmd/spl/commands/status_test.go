@@ -2,18 +2,16 @@ package commands
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"reflect"
 	"testing"
 
 	"github.com/autonomous-bits/spool/internal/repository"
-	"github.com/autonomous-bits/spool/internal/resolve"
 	"github.com/spf13/cobra"
 )
 
-func TestStatusCLIAndMCPReportEquivalentSharedStagingDelta(t *testing.T) {
+func TestStatusCLIReportsSharedStagingDelta(t *testing.T) {
 	operations := []repository.MutationOperation{
 		{Action: "add", Entity: "node", ID: "node-2", Title: "Second node"},
 	}
@@ -22,8 +20,8 @@ func TestStatusCLIAndMCPReportEquivalentSharedStagingDelta(t *testing.T) {
 		t.Fatalf("stage CLI repository batch: %v", err)
 	}
 	var output bytes.Buffer
-	command := NewStatusCommand(func() (*resolve.ResolveTool, error) {
-		return resolve.NewResolveTool(cliRepo), nil
+	command := NewStatusCommand(func() (*repository.Repository, error) {
+		return cliRepo, nil
 	})
 	command.SetOut(&output)
 	command.SetArgs([]string{"--branch", "main"})
@@ -35,16 +33,12 @@ func TestStatusCLIAndMCPReportEquivalentSharedStagingDelta(t *testing.T) {
 		t.Fatalf("decode CLI result: %v", err)
 	}
 
-	mcpRepo := repository.NewSeedRepository()
-	if _, err := mcpRepo.StageMutationBatch(repository.StageMutationRequest{Branch: "main", Operations: operations}); err != nil {
-		t.Fatalf("stage MCP repository batch: %v", err)
-	}
-	mcpResult, err := resolve.NewResolveTool(mcpRepo).SPLBranchStagingStatus(context.Background(), "main")
+	directResult, err := cliRepo.BranchStagingStatus("main")
 	if err != nil {
-		t.Fatalf("SPLBranchStagingStatus: %v", err)
+		t.Fatalf("BranchStagingStatus: %v", err)
 	}
-	if !reflect.DeepEqual(cliResult, mcpResult) {
-		t.Fatalf("CLI result %#v does not match MCP result %#v", cliResult, mcpResult)
+	if !reflect.DeepEqual(cliResult, directResult) {
+		t.Fatalf("CLI result %#v does not match direct repository result %#v", cliResult, directResult)
 	}
 }
 
@@ -52,8 +46,8 @@ func TestStatusCLIReportsEmptyDeltaAndRejectsMissingBranch(t *testing.T) {
 	repo := repository.NewSeedRepository()
 	newCommand := func() (*bytes.Buffer, *cobra.Command) {
 		var output bytes.Buffer
-		command := NewStatusCommand(func() (*resolve.ResolveTool, error) {
-			return resolve.NewResolveTool(repo), nil
+		command := NewStatusCommand(func() (*repository.Repository, error) {
+			return repo, nil
 		})
 		command.SetOut(&output)
 		return &output, command

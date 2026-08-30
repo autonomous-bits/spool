@@ -44,12 +44,12 @@ func TestPersistentToolRetainsCreatedBranchAcrossCommandInstances(t *testing.T) 
 	if err := initialized.Close(); err != nil {
 		t.Fatalf("close initialized repository: %v", err)
 	}
-	createTool, closeCreate, err := openPersistentTool(stateDir)
+	createRepo, closeCreate, err := openPersistentRepository(stateDir)
 	if err != nil {
-		t.Fatalf("newPersistentTool for create: %v", err)
+		t.Fatalf("openPersistentRepository for create: %v", err)
 	}
 	var createOutput bytes.Buffer
-	createCommand := newRootCommand(&createOutput, createTool)
+	createCommand := newRootCommand(&createOutput, createRepo)
 	createCommand.SetArgs([]string{"branch", "create", "feature", "--from-branch", "main"})
 	if err := createCommand.Execute(); err != nil {
 		t.Fatalf("create branch command: %v", err)
@@ -58,9 +58,9 @@ func TestPersistentToolRetainsCreatedBranchAcrossCommandInstances(t *testing.T) 
 		t.Fatalf("close created repository: %v", err)
 	}
 
-	resolveTool, closeResolve, err := openPersistentTool(stateDir)
+	resolveRepo, closeResolve, err := openPersistentRepository(stateDir)
 	if err != nil {
-		t.Fatalf("newPersistentTool for resolve: %v", err)
+		t.Fatalf("openPersistentRepository for resolve: %v", err)
 	}
 
 	t.Cleanup(func() {
@@ -69,7 +69,7 @@ func TestPersistentToolRetainsCreatedBranchAcrossCommandInstances(t *testing.T) 
 		}
 	})
 	var resolveOutput bytes.Buffer
-	resolveCommand := newRootCommand(&resolveOutput, resolveTool)
+	resolveCommand := newRootCommand(&resolveOutput, resolveRepo)
 	resolveCommand.SetArgs([]string{"resolve", "--branch", "feature", "--node", repository.SeedNodeID})
 	if err := resolveCommand.Execute(); err != nil {
 		t.Fatalf("resolve created branch command: %v", err)
@@ -86,24 +86,29 @@ func TestInitCommandCreatesDurableMainBranch(t *testing.T) {
 	stateDir := t.TempDir()
 	var output bytes.Buffer
 	var closeRepository func() error
-	command := newRootCommandWithLifecycle(
-		&output,
-		func() (*resolve.ResolveTool, error) {
-			repo, err := repository.OpenRepository(stateDir)
-			if err != nil {
-				return nil, err
-			}
+	repoProvider := func() (*repository.Repository, error) {
+		repo, err := repository.OpenRepository(stateDir)
+		if err != nil {
+			return nil, err
+		}
+		closeRepository = repo.Close
+		return repo, nil
+	}
+	toolProvider := func() (*resolve.ResolveTool, error) {
+		repo, err := repoProvider()
+		if err != nil {
+			return nil, err
+		}
+		return resolve.NewResolveTool(repo), nil
+	}
+	initProvider := func() (*repository.Repository, error) {
+		repo, err := repository.InitializeRepository(stateDir)
+		if err == nil {
 			closeRepository = repo.Close
-			return resolve.NewResolveTool(repo), nil
-		},
-		func() (*repository.Repository, error) {
-			repo, err := repository.InitializeRepository(stateDir)
-			if err == nil {
-				closeRepository = repo.Close
-			}
-			return repo, err
-		},
-	)
+		}
+		return repo, err
+	}
+	command := newRootCommandWithLifecycle(&output, repoProvider, toolProvider, initProvider)
 	command.SetArgs([]string{"init"})
 	if err := command.Execute(); err != nil {
 		t.Fatalf("execute init: %v", err)
@@ -150,16 +155,18 @@ func TestInitCommandRejectsExistingRepositoryWithoutChangingDurableState(t *test
 		t.Fatalf("read existing repository state: %v", err)
 	}
 	var output bytes.Buffer
-	command := newRootCommandWithLifecycle(
-		&output,
-		func() (*resolve.ResolveTool, error) {
-			t.Fatal("init command requested a persistent tool")
-			return nil, nil
-		},
-		func() (*repository.Repository, error) {
-			return repository.InitializeRepository(stateDir)
-		},
-	)
+	repoProvider := func() (*repository.Repository, error) {
+		t.Fatal("init command requested repository provider")
+		return nil, nil
+	}
+	toolProvider := func() (*resolve.ResolveTool, error) {
+		t.Fatal("init command requested a persistent tool")
+		return nil, nil
+	}
+	initProvider := func() (*repository.Repository, error) {
+		return repository.InitializeRepository(stateDir)
+	}
+	command := newRootCommandWithLifecycle(&output, repoProvider, toolProvider, initProvider)
 	command.SetArgs([]string{"init"})
 	if err := command.Execute(); !errors.Is(err, repository.ErrRepositoryAlreadyInitialized) {
 		t.Fatalf("execute init error = %v, want ErrRepositoryAlreadyInitialized", err)

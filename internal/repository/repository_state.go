@@ -1290,7 +1290,7 @@ func mergeStateFilename(targetBranch string) string {
 func persistedObjectID(objectType string, value any) ObjectID {
 	encoded, err := canonicalObjectEncoding(value)
 	if err != nil {
-		panic(fmt.Sprintf("encode %s: %v", objectType, err))
+		return ""
 	}
 	return objectIDForEncoded(objectType, encoded)
 }

@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/autonomous-bits/spool/internal/repository"
-	"github.com/autonomous-bits/spool/internal/repository/branch"
 	"github.com/autonomous-bits/spool/internal/resolve"
 )
 
@@ -167,7 +166,7 @@ func TestDiffCLIRequiresBothBranchSelectors(t *testing.T) {
 
 func TestDiffCLIAndMCPRejectUnreachableCommitWithSameCategory(t *testing.T) {
 	repo := repository.NewSeedRepository()
-	if _, err := repo.CreateBranch("feature", branch.Source{Branch: "main"}); err != nil {
+	if _, err := repo.CreateBranch("feature", repository.BranchSource{Branch: "main"}); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
 	}
 	feature, err := repo.AdvanceBranch("feature")

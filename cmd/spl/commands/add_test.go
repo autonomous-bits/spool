@@ -2,7 +2,6 @@ package commands
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -32,8 +31,8 @@ func TestAddCLIAndMCPStageEquivalentBatch(t *testing.T) {
 
 	cliRepo := repository.NewSeedRepository()
 	var output bytes.Buffer
-	command := NewAddCommand(func() (*resolve.ResolveTool, error) {
-		return resolve.NewResolveTool(cliRepo), nil
+	command := NewAddCommand(func() (*repository.Repository, error) {
+		return cliRepo, nil
 	})
 	command.SetOut(&output)
 	command.SetArgs([]string{"--branch", "main", "--batch", batchPath})
@@ -46,11 +45,11 @@ func TestAddCLIAndMCPStageEquivalentBatch(t *testing.T) {
 	}
 
 	mcpRepo := repository.NewSeedRepository()
-	mcpResult, err := resolve.NewResolveTool(mcpRepo).SPLStageMutationBatch(context.Background(), repository.StageMutationRequest{
+	mcpResult, err := mcpRepo.StageMutationBatch(repository.StageMutationRequest{
 		Branch: "main", Operations: operations,
 	})
 	if err != nil {
-		t.Fatalf("SPLStageMutationBatch: %v", err)
+		t.Fatalf("StageMutationBatch: %v", err)
 	}
 	if !reflect.DeepEqual(cliResult, mcpResult) {
 		t.Fatalf("CLI result %#v does not match MCP result %#v", cliResult, mcpResult)
@@ -59,8 +58,8 @@ func TestAddCLIAndMCPStageEquivalentBatch(t *testing.T) {
 
 func TestAddCLIHelpDescribesEnrichedMutations(t *testing.T) {
 	var output bytes.Buffer
-	command := NewAddCommand(func() (*resolve.ResolveTool, error) {
-		return resolve.NewResolveTool(repository.NewSeedRepository()), nil
+	command := NewAddCommand(func() (*repository.Repository, error) {
+		return repository.NewSeedRepository(), nil
 	})
 	command.SetOut(&output)
 	command.SetArgs([]string{"--help"})
@@ -120,7 +119,7 @@ func TestCLIEnrichedMutationBatchReturnsTypedNodeAndEdgeFields(t *testing.T) {
 	}
 
 	var addOutput bytes.Buffer
-	add := NewAddCommand(func() (*resolve.ResolveTool, error) { return tool, nil })
+	add := NewAddCommand(func() (*repository.Repository, error) { return repo, nil })
 	add.SetOut(&addOutput)
 	add.SetArgs([]string{"--branch", "main", "--batch", batchPath})
 	if err := add.Execute(); err != nil {
@@ -135,7 +134,7 @@ func TestCLIEnrichedMutationBatchReturnsTypedNodeAndEdgeFields(t *testing.T) {
 	}
 
 	var commitOutput bytes.Buffer
-	commit := NewCommitCommand(func() (*resolve.ResolveTool, error) { return tool, nil })
+	commit := NewCommitCommand(func() (*repository.Repository, error) { return repo, nil })
 	commit.SetOut(&commitOutput)
 	commit.SetArgs([]string{"--branch", "main"})
 	if err := commit.Execute(); err != nil {
@@ -214,8 +213,8 @@ func TestAddCLIAcceptsExistingNodeUpdatesAndDeletes(t *testing.T) {
 			if err := os.WriteFile(batchPath, data, 0o600); err != nil {
 				t.Fatalf("write batch: %v", err)
 			}
-			command := NewAddCommand(func() (*resolve.ResolveTool, error) {
-				return resolve.NewResolveTool(repository.NewSeedRepository()), nil
+			command := NewAddCommand(func() (*repository.Repository, error) {
+				return repository.NewSeedRepository(), nil
 			})
 			command.SetOut(&bytes.Buffer{})
 			command.SetArgs([]string{"--branch", "main", "--batch", batchPath})
@@ -248,8 +247,8 @@ func TestAddCLIRejectsInvalidBatchesWithoutReplacingStagedSet(t *testing.T) {
 		if err := os.WriteFile(batchPath, data, 0o600); err != nil {
 			t.Fatalf("write batch: %v", err)
 		}
-		command := NewAddCommand(func() (*resolve.ResolveTool, error) {
-			return resolve.NewResolveTool(repo), nil
+		command := NewAddCommand(func() (*repository.Repository, error) {
+			return repo, nil
 		})
 		command.SetOut(&bytes.Buffer{})
 		command.SetArgs([]string{"--branch", "main", "--batch", batchPath})

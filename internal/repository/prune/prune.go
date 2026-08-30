@@ -4,13 +4,15 @@ package prune
 import (
 	"context"
 	"errors"
+
+	"github.com/autonomous-bits/spool/internal/repository/branch"
 )
 
 var (
 	// ErrBranchRequired reports a prune request without a branch.
 	ErrBranchRequired = errors.New("branch is required")
 	// ErrBranchNotFound reports a requested branch that does not exist.
-	ErrBranchNotFound = errors.New("branch not found")
+	ErrBranchNotFound = branch.ErrNotFound
 	// ErrProtectedBranch reports an attempt to prune a protected default branch without force override.
 	ErrProtectedBranch = errors.New("cannot prune protected branch without force")
 	// ErrUncommittedStagedChanges reports an attempt to prune a branch with uncommitted staged mutations.

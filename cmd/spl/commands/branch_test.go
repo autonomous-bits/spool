@@ -2,69 +2,44 @@ package commands
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
-	"reflect"
 	"testing"
 
 	"github.com/autonomous-bits/spool/internal/repository"
-	"github.com/autonomous-bits/spool/internal/repository/branch"
-	"github.com/autonomous-bits/spool/internal/resolve"
 )
 
-func TestCreateBranchCLIAndMCPReturnEquivalentPayloads(t *testing.T) {
-	cliTool := resolve.NewResolveTool(repository.NewSeedRepository())
+func TestCreateBranchCLIWithBranchSource(t *testing.T) {
+	repo := repository.NewSeedRepository()
 	var output bytes.Buffer
-	if err := runBranchCommand([]string{"create", "from-branch", "--from-branch", "main"}, &output, cliTool); err != nil {
+	if err := runBranchCommand([]string{"create", "from-branch", "--from-branch", "main"}, &output, repo); err != nil {
 		t.Fatalf("run branch CLI: %v", err)
 	}
-	var cliResult branch.CreateResult
+	var cliResult repository.BranchCreateResult
 	if err := json.Unmarshal(output.Bytes(), &cliResult); err != nil {
 		t.Fatalf("decode CLI result: %v", err)
 	}
-
-	mcpTool := resolve.NewResolveTool(repository.NewSeedRepository())
-	mcpResult, err := mcpTool.SPLCreateBranch(context.Background(), branch.CreateRequest{
-		Name:   "from-branch",
-		Source: branch.Source{Branch: "main"},
-	})
-	if err != nil {
-		t.Fatalf("SPLCreateBranch: %v", err)
-	}
-	if !reflect.DeepEqual(cliResult, mcpResult) {
-		t.Fatalf("CLI result %#v does not match MCP result %#v", cliResult, mcpResult)
+	if cliResult.Name != "from-branch" || cliResult.Commit == "" {
+		t.Fatalf("unexpected CLI result: %#v", cliResult)
 	}
 }
 
-func TestCreateBranchCLIAndMCPSupportCommitSource(t *testing.T) {
-	cliTool := resolve.NewResolveTool(repository.NewSeedRepository())
-	source, err := cliTool.SPLResolve(context.Background(), resolve.ResolveRequest{
-		Selector: resolve.SnapshotSelector{Branch: "main"},
-		NodeID:   repository.SeedNodeID,
-	})
+func TestCreateBranchCLIWithCommitSource(t *testing.T) {
+	repo := repository.NewSeedRepository()
+	mainHead, err := repo.PinBranch("main")
 	if err != nil {
-		t.Fatalf("resolve source commit: %v", err)
+		t.Fatalf("pin main branch: %v", err)
 	}
 	var output bytes.Buffer
-	if err := runBranchCommand([]string{"create", "from-commit", "--from-commit", source.Snapshot.Commit}, &output, cliTool); err != nil {
+	if err := runBranchCommand([]string{"create", "from-commit", "--from-commit", string(mainHead)}, &output, repo); err != nil {
 		t.Fatalf("run branch CLI: %v", err)
 	}
-	var cliResult branch.CreateResult
+	var cliResult repository.BranchCreateResult
 	if err := json.Unmarshal(output.Bytes(), &cliResult); err != nil {
 		t.Fatalf("decode CLI result: %v", err)
 	}
-
-	mcpTool := resolve.NewResolveTool(repository.NewSeedRepository())
-	mcpResult, err := mcpTool.SPLCreateBranch(context.Background(), branch.CreateRequest{
-		Name:   "from-commit",
-		Source: branch.Source{Commit: source.Snapshot.Commit},
-	})
-	if err != nil {
-		t.Fatalf("SPLCreateBranch: %v", err)
-	}
-	if !reflect.DeepEqual(cliResult, mcpResult) {
-		t.Fatalf("CLI result %#v does not match MCP result %#v", cliResult, mcpResult)
+	if cliResult.Name != "from-commit" || cliResult.Commit != string(mainHead) {
+		t.Fatalf("unexpected CLI result: %#v, want commit %q", cliResult, mainHead)
 	}
 }
 
@@ -74,14 +49,14 @@ func TestCreateBranchCLIRejectsInvalidOrUnresolvedSources(t *testing.T) {
 		args []string
 		want error
 	}{
-		{name: "neither source", args: []string{"create", "feature"}, want: branch.ErrMissingSource},
-		{name: "both sources", args: []string{"create", "feature", "--from-branch", "main", "--from-commit", "missing"}, want: branch.ErrAmbiguousSource},
-		{name: "missing source", args: []string{"create", "feature", "--from-branch", "missing"}, want: branch.ErrSourceNotFound},
+		{name: "neither source", args: []string{"create", "feature"}, want: repository.ErrBranchMissingSource},
+		{name: "both sources", args: []string{"create", "feature", "--from-branch", "main", "--from-commit", "missing"}, want: repository.ErrBranchAmbiguousSource},
+		{name: "missing source", args: []string{"create", "feature", "--from-branch", "missing"}, want: repository.ErrBranchSourceNotFound},
 	}
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
 			var output bytes.Buffer
-			err := runBranchCommand(testCase.args, &output, resolve.NewResolveTool(repository.NewSeedRepository()))
+			err := runBranchCommand(testCase.args, &output, repository.NewSeedRepository())
 			if !errors.Is(err, testCase.want) {
 				t.Fatalf("run branch CLI error = %v, want %v", err, testCase.want)
 			}
@@ -97,10 +72,10 @@ func TestCreateBranchCLIRejectsMissingSourceBeforeDuplicateName(t *testing.T) {
 	err := runBranchCommand(
 		[]string{"create", "main", "--from-branch", "missing"},
 		&output,
-		resolve.NewResolveTool(repository.NewSeedRepository()),
+		repository.NewSeedRepository(),
 	)
-	if !errors.Is(err, branch.ErrSourceNotFound) {
-		t.Fatalf("run branch CLI error = %v, want ErrSourceNotFound", err)
+	if !errors.Is(err, repository.ErrBranchSourceNotFound) {
+		t.Fatalf("run branch CLI error = %v, want ErrBranchSourceNotFound", err)
 	}
 }
 
@@ -109,74 +84,53 @@ func TestCreateBranchCLIRejectsDuplicateName(t *testing.T) {
 	err := runBranchCommand(
 		[]string{"create", "main", "--from-branch", "main"},
 		&output,
-		resolve.NewResolveTool(repository.NewSeedRepository()),
+		repository.NewSeedRepository(),
 	)
-	if !errors.Is(err, branch.ErrAlreadyExists) {
-		t.Fatalf("run branch CLI error = %v, want ErrAlreadyExists", err)
-	}
-
-}
-
-func TestListBranchesCLIAndMCPReturnEquivalentPayloads(t *testing.T) {
-	cliRepo := repository.NewSeedRepository()
-	if _, err := cliRepo.CreateBranch("zebra", branch.Source{Branch: "main"}); err != nil {
-		t.Fatalf("CreateBranch zebra: %v", err)
-	}
-
-	if _, err := cliRepo.CreateBranch("alpha", branch.Source{Branch: "main"}); err != nil {
-		t.Fatalf("CreateBranch alpha: %v", err)
-	}
-	var output bytes.Buffer
-	if err := runBranchCommand([]string{"list"}, &output, resolve.NewResolveTool(cliRepo)); err != nil {
-		t.Fatalf("run branch CLI: %v", err)
-	}
-	var cliResult branch.ListResult
-	if err := json.Unmarshal(output.Bytes(), &cliResult); err != nil {
-		t.Fatalf("decode CLI result: %v", err)
-	}
-
-	mcpRepo := repository.NewSeedRepository()
-	if _, err := mcpRepo.CreateBranch("zebra", branch.Source{Branch: "main"}); err != nil {
-		t.Fatalf("CreateBranch zebra: %v", err)
-	}
-	if _, err := mcpRepo.CreateBranch("alpha", branch.Source{Branch: "main"}); err != nil {
-		t.Fatalf("CreateBranch alpha: %v", err)
-	}
-	mcpResult, err := resolve.NewResolveTool(mcpRepo).SPLListBranches(context.Background())
-	if err != nil {
-		t.Fatalf("SPLListBranches: %v", err)
-	}
-	if !reflect.DeepEqual(cliResult, mcpResult) {
-		t.Fatalf("CLI result %#v does not match MCP result %#v", cliResult, mcpResult)
+	if !errors.Is(err, repository.ErrBranchAlreadyExists) {
+		t.Fatalf("run branch CLI error = %v, want ErrBranchAlreadyExists", err)
 	}
 }
 
-func TestDeleteBranchCLIAndMCPReturnEquivalentPayloads(t *testing.T) {
-	cliRepo := repository.NewSeedRepository()
-	if _, err := cliRepo.CreateBranch("feature", branch.Source{Branch: "main"}); err != nil {
-		t.Fatalf("CreateBranch: %v", err)
+func TestListBranchesCLIReturnsSortedBranchNames(t *testing.T) {
+	repo := repository.NewSeedRepository()
+	if _, err := repo.CreateBranch("zebra", repository.BranchSource{Branch: "main"}); err != nil {
+		t.Fatalf("CreateBranch zebra: %v", err)
+	}
+	if _, err := repo.CreateBranch("alpha", repository.BranchSource{Branch: "main"}); err != nil {
+		t.Fatalf("CreateBranch alpha: %v", err)
 	}
 	var output bytes.Buffer
-	if err := runBranchCommand([]string{"delete", "feature"}, &output, resolve.NewResolveTool(cliRepo)); err != nil {
+	if err := runBranchCommand([]string{"list"}, &output, repo); err != nil {
 		t.Fatalf("run branch CLI: %v", err)
 	}
-	var cliResult branch.DeleteResult
+	var cliResult repository.BranchListResult
 	if err := json.Unmarshal(output.Bytes(), &cliResult); err != nil {
 		t.Fatalf("decode CLI result: %v", err)
 	}
+	want := []string{"alpha", "main", "zebra"}
+	if len(cliResult.Branches) != len(want) || cliResult.Branches[0] != "alpha" || cliResult.Branches[1] != "main" || cliResult.Branches[2] != "zebra" {
+		t.Fatalf("branches = %#v, want %#v", cliResult.Branches, want)
+	}
+}
 
-	mcpRepo := repository.NewSeedRepository()
-	if _, err := mcpRepo.CreateBranch("feature", branch.Source{Branch: "main"}); err != nil {
+func TestDeleteBranchCLIDeletesExistingBranch(t *testing.T) {
+	repo := repository.NewSeedRepository()
+	if _, err := repo.CreateBranch("feature", repository.BranchSource{Branch: "main"}); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
 	}
-	mcpResult, err := resolve.NewResolveTool(mcpRepo).SPLDeleteBranch(
-		context.Background(), branch.DeleteRequest{Name: "feature"},
-	)
-	if err != nil {
-		t.Fatalf("SPLDeleteBranch: %v", err)
+	var output bytes.Buffer
+	if err := runBranchCommand([]string{"delete", "feature"}, &output, repo); err != nil {
+		t.Fatalf("run branch CLI: %v", err)
 	}
-	if !reflect.DeepEqual(cliResult, mcpResult) {
-		t.Fatalf("CLI result %#v does not match MCP result %#v", cliResult, mcpResult)
+	var cliResult repository.BranchDeleteResult
+	if err := json.Unmarshal(output.Bytes(), &cliResult); err != nil {
+		t.Fatalf("decode CLI result: %v", err)
+	}
+	if cliResult.Name != "feature" {
+		t.Fatalf("result = %#v, want name feature", cliResult)
+	}
+	if _, err := repo.PinBranch("feature"); !errors.Is(err, repository.ErrBranchNotFound) {
+		t.Fatalf("PinBranch after delete error = %v, want ErrBranchNotFound", err)
 	}
 }
 
@@ -185,18 +139,17 @@ func TestDeleteBranchCLIRejectsDefaultAndMissingBranches(t *testing.T) {
 		name string
 		want error
 	}{
-		{name: "main", want: branch.ErrDefaultProtected},
-		{name: "missing", want: branch.ErrNotFound},
+		{name: "main", want: repository.ErrDefaultBranchProtected},
+		{name: "missing", want: repository.ErrBranchNotFound},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			var output bytes.Buffer
 			err := runBranchCommand(
-				[]string{"delete", testCase.name}, &output, resolve.NewResolveTool(repository.NewSeedRepository()),
+				[]string{"delete", testCase.name}, &output, repository.NewSeedRepository(),
 			)
 			if !errors.Is(err, testCase.want) {
 				t.Fatalf("run branch CLI error = %v, want %v", err, testCase.want)
 			}
-
 			if output.Len() != 0 {
 				t.Fatalf("CLI wrote success output: %q", output.String())
 			}
@@ -204,8 +157,10 @@ func TestDeleteBranchCLIRejectsDefaultAndMissingBranches(t *testing.T) {
 	}
 }
 
-func runBranchCommand(args []string, output *bytes.Buffer, tool *resolve.ResolveTool) error {
-	command := NewBranchCommand(tool)
+func runBranchCommand(args []string, output *bytes.Buffer, repo *repository.Repository) error {
+	command := NewBranchCommand(func() (*repository.Repository, error) {
+		return repo, nil
+	})
 	command.SetOut(output)
 	command.SetArgs(args)
 	return command.Execute()

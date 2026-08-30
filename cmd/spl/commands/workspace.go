@@ -8,7 +8,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/autonomous-bits/spool/internal/repository/initialization"
+	"github.com/autonomous-bits/spool/internal/repository"
 	workspacepkg "github.com/autonomous-bits/spool/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -129,7 +129,7 @@ func newWorkspaceInitCommand(registryRoot func() (string, error)) *cobra.Command
 				if err != nil {
 					return err
 				}
-				repo, err := initialization.Initialize(stateDir)
+				repo, err := repository.InitializeRepository(stateDir)
 				if err != nil {
 					return fmt.Errorf("initialize workspace state: %w", err)
 				}
