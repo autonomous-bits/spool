@@ -8,6 +8,8 @@ generated from commits since the preceding `v*` tag. Commits prefixed with `docs
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-08-30
+
 ### Added
 
 - `spl cherry-pick` command to selectively transplant individual historical commit deltas onto a target branch with dry-run preview, 3-way property merging, and strict referential integrity preflight validation.
