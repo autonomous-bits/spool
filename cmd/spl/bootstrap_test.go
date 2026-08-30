@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/autonomous-bits/spool/internal/repository"
+	"github.com/pelletier/go-toml/v2"
 )
 
 func TestRepositoryStateDirFromArgs(t *testing.T) {
@@ -130,8 +131,21 @@ func writeRegistry(t *testing.T, root, id, stateDir string) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatalf("create registry directory: %v", err)
 	}
-	contents := "version = 1\n\n[workspaces.storefront]\nid = \"" + id + "\"\nstate_dir = \"" + stateDir + "\"\n"
-	if err := os.WriteFile(filepath.Join(root, "registry.toml"), []byte(contents), 0o600); err != nil {
+	catalog := struct {
+		Version    int `toml:"version"`
+		Workspaces map[string]struct {
+			ID       string `toml:"id"`
+			StateDir string `toml:"state_dir"`
+		} `toml:"workspaces"`
+	}{Version: 1, Workspaces: map[string]struct {
+		ID       string `toml:"id"`
+		StateDir string `toml:"state_dir"`
+	}{"storefront": {ID: id, StateDir: stateDir}}}
+	contents, err := toml.Marshal(catalog)
+	if err != nil {
+		t.Fatalf("encode registry: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "registry.toml"), contents, 0o600); err != nil {
 		t.Fatalf("write registry: %v", err)
 	}
 }

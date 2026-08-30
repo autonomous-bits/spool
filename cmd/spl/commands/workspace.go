@@ -10,6 +10,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const maxWorkspaceIdentityAttempts = 8
+
 // NewWorkspaceCommandDefault creates the explicit central workspace
 // provisioning commands.
 func NewWorkspaceCommandDefault() *cobra.Command {
@@ -49,13 +51,24 @@ func newWorkspaceInitCommand(registryRoot func() (string, error)) *cobra.Command
 				if _, exists := registry.Workspaces[name]; exists {
 					return fmt.Errorf("%w: %q", repository.ErrWorkspaceExists, name)
 				}
-				id, err := repository.NewWorkspaceID()
-				if err != nil {
-					return err
+				var id repository.WorkspaceID
+				var stateDir string
+				for attempt := 0; attempt < maxWorkspaceIdentityAttempts; attempt++ {
+					id, err = repository.NewWorkspaceID()
+					if err != nil {
+						return err
+					}
+					stateDir, err = repository.RepositoryWorkspacePath(root, id)
+					if err != nil {
+						return err
+					}
+					if workspaceIdentityAvailable(*registry, id, stateDir) {
+						break
+					}
+					id = ""
 				}
-				stateDir, err := repository.RepositoryWorkspacePath(root, id)
-				if err != nil {
-					return err
+				if id == "" {
+					return fmt.Errorf("generate workspace identity: could not find a unique ID after %d attempts", maxWorkspaceIdentityAttempts)
 				}
 				repo, err := repository.InitializeRepository(stateDir)
 				if err != nil {
@@ -78,6 +91,15 @@ func newWorkspaceInitCommand(registryRoot func() (string, error)) *cobra.Command
 			}{Name: string(name), ID: string(created.ID), StateDir: created.StateDir})
 		},
 	}
+}
+
+func workspaceIdentityAvailable(registry repository.WorkspaceRegistry, id repository.WorkspaceID, stateDir string) bool {
+	for _, workspace := range registry.Workspaces {
+		if workspace.ID == id || workspace.StateDir == stateDir {
+			return false
+		}
+	}
+	return true
 }
 
 func newWorkspaceAttachCommand(registryRoot func() (string, error)) *cobra.Command {

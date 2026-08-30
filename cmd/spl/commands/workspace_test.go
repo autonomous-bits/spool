@@ -57,3 +57,20 @@ func TestWorkspaceCommandExcludesLegacyLifecycleCommands(t *testing.T) {
 		}
 	}
 }
+
+func TestWorkspaceIdentityAvailableRejectsExistingIdentityAndStateDirectory(t *testing.T) {
+	registry := repository.WorkspaceRegistry{
+		Workspaces: map[repository.WorkspaceName]repository.Workspace{
+			"existing": {ID: "ws_00000001", StateDir: "/workspace/repos/ws_00000001"},
+		},
+	}
+	if workspaceIdentityAvailable(registry, "ws_00000001", "/workspace/repos/ws_00000001") {
+		t.Fatal("existing workspace identity was accepted")
+	}
+	if workspaceIdentityAvailable(registry, "ws_00000002", "/workspace/repos/ws_00000001") {
+		t.Fatal("existing workspace state directory was accepted")
+	}
+	if !workspaceIdentityAvailable(registry, "ws_00000002", "/workspace/repos/ws_00000002") {
+		t.Fatal("unique workspace identity was rejected")
+	}
+}

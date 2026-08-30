@@ -18,6 +18,7 @@ type (
 var (
 	ErrWorkspaceNotRegistered          = workspace.ErrWorkspaceNotRegistered
 	ErrWorkspaceExists                 = workspace.ErrWorkspaceExists
+	ErrWorkspaceInvalidRegistry        = workspace.ErrInvalidRegistry
 	ErrWorkspaceInvalidName            = workspace.ErrInvalidName
 	ErrWorkspaceInvalidID              = workspace.ErrInvalidID
 	ErrWorkspaceInvalidStorageRoot     = workspace.ErrInvalidStorageRoot

@@ -15,6 +15,7 @@ const registryFilename = "registry.toml"
 var (
 	ErrWorkspaceNotRegistered = errors.New("workspace is not registered")
 	ErrWorkspaceExists        = errors.New("workspace already exists")
+	ErrInvalidRegistry        = errors.New("workspace registry is invalid")
 )
 
 // Registry is the central detached-state catalog. Names are used solely by
@@ -95,6 +96,7 @@ func FindWorkspaceByID(root string, id ID) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	var stateDir string
 	for _, workspace := range catalog.Workspaces {
 		if workspace.ID != id {
 			continue
@@ -102,7 +104,13 @@ func FindWorkspaceByID(root string, id ID) (string, error) {
 		if !filepath.IsAbs(workspace.StateDir) {
 			return "", fmt.Errorf("workspace identity %q has invalid state directory", id)
 		}
-		return filepath.Clean(workspace.StateDir), nil
+		if stateDir != "" {
+			return "", fmt.Errorf("%w: workspace identity %q appears more than once", ErrInvalidRegistry, id)
+		}
+		stateDir = filepath.Clean(workspace.StateDir)
+	}
+	if stateDir != "" {
+		return stateDir, nil
 	}
 	return "", fmt.Errorf("%w: workspace identity %q is not registered", ErrWorkspaceNotRegistered, id)
 }
