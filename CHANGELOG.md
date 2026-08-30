@@ -8,6 +8,14 @@ generated from commits since the preceding `v*` tag. Commits prefixed with `docs
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-08-30
+
+### Changed
+
+- Workspace setup now uses explicit portable repository manifests and central
+  detached workspace state instead of legacy host-path and active-workspace
+  resolution.
+
 ## [0.0.8] - 2026-08-30
 
 ### Added
