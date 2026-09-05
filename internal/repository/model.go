@@ -367,6 +367,8 @@ func normalizeCanonicalObject(value any) (any, error) {
 		return value.Normalize()
 	case Edge:
 		return value.Normalize()
+	case graphcontract.Commit:
+		return value.Normalize()
 	case SchemaSnapshot:
 		return value.Normalize()
 	default:
@@ -380,6 +382,8 @@ func canonicalObjectEncoding(value any) ([]byte, error) {
 		return graphcontract.MarshalNode(value)
 	case Edge:
 		return graphcontract.MarshalEdge(value)
+	case graphcontract.Commit:
+		return graphcontract.MarshalCommit(value)
 	}
 	normalized, err := normalizeCanonicalObject(value)
 	if err != nil {

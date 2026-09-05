@@ -8,6 +8,12 @@ generated from commits since the preceding `v*` tag. Commits prefixed with `docs
 
 ## [Unreleased]
 
+### Changed
+
+- Commit objects now use the public `graphcontract` canonical CBOR contract.
+  Existing repository state is intentionally unsupported because commit object
+  identifiers may differ.
+
 ## [1.3.0] - 2026-09-05
 
 ### Added

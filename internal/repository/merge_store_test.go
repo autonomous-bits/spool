@@ -114,6 +114,11 @@ func TestApplyCleanBoundMergeMovesTargetToReachableMergeCommit(t *testing.T) {
 	if len(merged.Parents) != 2 || merged.Parents[0] != targetCommit || merged.Parents[1] != sourceCommit {
 		t.Fatalf("merge parents = %#v, want [%q %q]", merged.Parents, targetCommit, sourceCommit)
 	}
+	reordered := merged.Clone()
+	reordered.Parents[0], reordered.Parents[1] = reordered.Parents[1], reordered.Parents[0]
+	if reorderedID := repo.objectID("commit", reordered); reorderedID == mergedCommit {
+		t.Fatal("reordered merge parents have the same content-addressed ID")
+	}
 	if got := repo.branches["feature"]; got != sourceCommit {
 		t.Fatalf("feature head = %q, want %q", got, sourceCommit)
 	}

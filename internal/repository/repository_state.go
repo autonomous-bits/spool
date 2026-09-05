@@ -38,7 +38,10 @@ type persistedRepository struct {
 	StagedMutations map[string]StagedMutationSet `json:"stagedMutations,omitempty"`
 }
 
-const repositoryFormatVersion = 1
+// repositoryFormatVersion 2 introduces canonical graphcontract commit records.
+// Version 1 repositories are intentionally unsupported because their commit
+// object IDs use a different canonical representation.
+const repositoryFormatVersion = 2
 
 type repositoryConfig struct {
 	FormatVersion            int    `toml:"format_version"`

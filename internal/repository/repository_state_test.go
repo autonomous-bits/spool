@@ -189,6 +189,16 @@ func TestOpenRepositoryRejectsNewTargetWithoutCreatingState(t *testing.T) {
 	}
 }
 
+func TestOpenRepositoryRejectsPreviousRepositoryFormat(t *testing.T) {
+	stateDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(stateDir, "config.toml"), []byte("format_version = 1\ndefault_branch = 'main'\n"), 0o600); err != nil {
+		t.Fatalf("write version 1 config: %v", err)
+	}
+	if _, err := OpenRepository(stateDir); err == nil {
+		t.Fatal("OpenRepository accepted version 1 repository state")
+	}
+}
+
 func FuzzPersistedRepositoryValidation(f *testing.F) {
 	f.Add([]byte(`{"defaultBranch":"main","activeBranch":"main","branches":{}}`))
 	f.Add([]byte(`{"branches":[]}`))
@@ -345,6 +355,14 @@ func TestCleanMergePersistsTargetRefAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ApplyCleanBoundMerge: %v", err)
 	}
+	beforeRestart, ok := repo.commits[merged]
+	if !ok {
+		t.Fatalf("merge commit %q was not stored", merged)
+	}
+	beforeRestart = beforeRestart.Clone()
+	if want := []ObjectID{target, source}; !reflect.DeepEqual(beforeRestart.Parents, want) {
+		t.Fatalf("merge parent order = %#v, want %#v", beforeRestart.Parents, want)
+	}
 	if err := repo.Close(); err != nil {
 		t.Fatalf("Close before restart: %v", err)
 	}
@@ -355,6 +373,16 @@ func TestCleanMergePersistsTargetRefAcrossRestart(t *testing.T) {
 	closeTestRepository(t, reopened)
 	if got := reopened.branches["main"]; got != merged {
 		t.Fatalf("durable main head = %q, want %q", got, merged)
+	}
+	reopenedCommit, ok := reopened.commits[merged]
+	if !ok {
+		t.Fatalf("reopened merge commit %q was not loaded", merged)
+	}
+	if !reopenedCommit.Equal(beforeRestart) {
+		t.Fatalf("reopened merge commit = %#v, want %#v", reopenedCommit, beforeRestart)
+	}
+	if want := []ObjectID{target, source}; !reflect.DeepEqual(reopenedCommit.Parents, want) {
+		t.Fatalf("reopened merge parent order = %#v, want %#v", reopenedCommit.Parents, want)
 	}
 }
 

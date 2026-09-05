@@ -5,14 +5,17 @@ import (
 	"encoding/hex"
 	"errors"
 	"math"
+	"slices"
 	"testing"
+	"time"
 
 	"github.com/fxamacker/cbor/v2"
 )
 
 const (
-	goldenNodeCBOR = "a401666e6f64652d310273436f6d7061746962696c697479207469746c650382684465636973696f6e6b526571756972656d656e7404a1686d65746164617461a201636d617007a26161a201646c6973740682a20166737472696e6705656669727374a101646e756c6c617aa10165666c6f6174"
-	goldenEdgeCBOR = "a50166656467652d3102666e6f64652d3103666e6f64652d32046a444550454e44535f4f4e05a166776569676874a20167696e74656765720303"
+	goldenNodeCBOR        = "a401666e6f64652d310273436f6d7061746962696c697479207469746c650382684465636973696f6e6b526571756972656d656e7404a1686d65746164617461a201636d617007a26161a201646c6973740682a20166737472696e6705656669727374a101646e756c6c617aa10165666c6f6174"
+	goldenEdgeCBOR        = "a50166656467652d3102666e6f64652d3103666e6f64652d32046a444550454e44535f4f4e05a166776569676874a20167696e74656765720303"
+	goldenMergeCommitCBOR = "a5016a736e617073686f742d3102826d7461726765742d706172656e746d736f757263652d706172656e74036d6d6572676520666561747572650465616c696365051a6a9c7bc8"
 )
 
 func TestCanonicalCBORGoldenVectors(t *testing.T) {
@@ -188,5 +191,89 @@ func TestConstructorsNormalizeGraphObjects(t *testing.T) {
 	}
 	if math.Signbit(edge.Properties["weight"].Float) {
 		t.Fatal("NewEdge retained negative zero")
+	}
+}
+
+func TestCanonicalMergeCommitGoldenVector(t *testing.T) {
+	merge := Commit{
+		Snapshot: "snapshot-1",
+		Parents:  []ObjectID{"target-parent", "source-parent"},
+		Message:  "merge feature",
+		Author:   "alice",
+		Time:     time.Date(2026, time.September, 5, 21, 30, 0, 123456000, time.FixedZone("UTC+1", 3600)),
+	}
+
+	data, err := MarshalCommit(merge)
+	if err != nil {
+		t.Fatalf("MarshalCommit: %v", err)
+	}
+	if got := hex.EncodeToString(data); got != goldenMergeCommitCBOR {
+		t.Fatalf("merge commit CBOR = %s, want %s", got, goldenMergeCommitCBOR)
+	}
+	decoded, err := UnmarshalCommit(data)
+	if err != nil {
+		t.Fatalf("UnmarshalCommit: %v", err)
+	}
+	if !decoded.Equal(merge) {
+		t.Fatalf("decoded merge = %#v, want semantic equality with %#v", decoded, merge)
+	}
+	if want := []ObjectID{"target-parent", "source-parent"}; !slices.Equal(decoded.Parents, want) {
+		t.Fatalf("decoded parent order = %#v, want %#v", decoded.Parents, want)
+	}
+
+	reordered := merge.Clone()
+	reordered.Parents[0], reordered.Parents[1] = reordered.Parents[1], reordered.Parents[0]
+	reorderedData, err := MarshalCommit(reordered)
+	if err != nil {
+		t.Fatalf("MarshalCommit reordered: %v", err)
+	}
+	if bytes.Equal(data, reorderedData) {
+		t.Fatal("reordered merge parents have identical canonical CBOR")
+	}
+
+	cloned := merge.Clone()
+	cloned.Parents[0] = "changed-parent"
+	if merge.Parents[0] == cloned.Parents[0] {
+		t.Fatal("Clone shares the parent slice")
+	}
+
+	generic, err := cbor.Marshal(merge)
+	if err != nil {
+		t.Fatalf("cbor.Marshal merge: %v", err)
+	}
+	if !bytes.Equal(generic, data) {
+		t.Fatal("cbor.Marshal merge bytes differ from MarshalCommit")
+	}
+
+	nonCanonical, err := canonicalCBOR.Marshal(commitCBOR{
+		Snapshot: merge.Snapshot, Message: merge.Message, Author: merge.Author, Time: merge.Time.UTC(),
+	})
+	if err != nil {
+		t.Fatalf("marshal non-canonical merge: %v", err)
+	}
+	if _, err := UnmarshalCommit(nonCanonical); !errors.Is(err, ErrInvalidCanonicalCBOR) {
+		t.Fatalf("UnmarshalCommit non-canonical error = %v, want ErrInvalidCanonicalCBOR", err)
+	}
+	if _, err := NewCommit("", nil, "", "", time.Time{}); !errors.Is(err, ErrInvalidCommit) {
+		t.Fatalf("NewCommit missing snapshot error = %v, want ErrInvalidCommit", err)
+	}
+	duplicateParents, err := NewCommit("snapshot-1", []ObjectID{"same-parent", "same-parent"}, "", "", time.Time{})
+	if err != nil {
+		t.Fatalf("NewCommit duplicate parents: %v", err)
+	}
+	if want := []ObjectID{"same-parent", "same-parent"}; !slices.Equal(duplicateParents.Parents, want) {
+		t.Fatalf("duplicate parents = %#v, want %#v", duplicateParents.Parents, want)
+	}
+
+	withoutParents, err := MarshalCommit(Commit{Snapshot: "snapshot-1"})
+	if err != nil {
+		t.Fatalf("MarshalCommit without parents: %v", err)
+	}
+	withEmptyParents, err := MarshalCommit(Commit{Snapshot: "snapshot-1", Parents: []ObjectID{}})
+	if err != nil {
+		t.Fatalf("MarshalCommit with empty parents: %v", err)
+	}
+	if !bytes.Equal(withoutParents, withEmptyParents) {
+		t.Fatal("commits with absent and empty parents have distinct canonical CBOR")
 	}
 }

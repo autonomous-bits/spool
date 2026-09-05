@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/autonomous-bits/spool/graphcontract"
 	"github.com/autonomous-bits/spool/internal/repository/branch"
 	"github.com/fxamacker/cbor/v2"
 	"github.com/gofrs/flock"
@@ -93,7 +94,7 @@ type (
 )
 
 // ObjectID is the content-derived identifier of a durable repository object.
-type ObjectID string
+type ObjectID = graphcontract.ObjectID
 
 // Resolution is an immutable view of a node resolved from a pinned commit.
 type Resolution struct {
@@ -150,13 +151,9 @@ type GraphSnapshot struct {
 // graphSnapshot remains an internal compatibility alias.
 type graphSnapshot = GraphSnapshot
 
-type commit struct {
-	Snapshot ObjectID   `cbor:"1,keyasint"`
-	Parents  []ObjectID `cbor:"2,keyasint"`
-	Message  string     `cbor:"3,keyasint"`
-	Author   string     `cbor:"4,keyasint"`
-	Time     time.Time  `cbor:"5,keyasint"`
-}
+// commit is the repository's compatibility alias for the public canonical
+// graph contract commit record.
+type commit = graphcontract.Commit
 
 // Repository provides concurrency-safe access to durable graph, branch, and merge state.
 type Repository struct {
@@ -268,7 +265,7 @@ func (r *Repository) newCommit(snapshot ObjectID, parents []ObjectID, author, me
 		Parents:  append([]ObjectID(nil), parents...),
 		Message:  message,
 		Author:   author,
-		Time:     r.now().UTC(),
+		Time:     r.now().UTC().Truncate(time.Second),
 	}
 }
 

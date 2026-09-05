@@ -50,7 +50,7 @@ func TestMutableControlFilesSurviveRestart(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(stateDir, "repository.json")); !os.IsNotExist(err) {
 		t.Fatalf("repository.json exists: %v", err)
 	}
-	if data, err := os.ReadFile(filepath.Join(stateDir, "config.toml")); err != nil || !strings.Contains(string(data), "format_version = 1") || !strings.Contains(string(data), `default_branch = 'main'`) || !strings.Contains(string(data), "reflog_retention_inventory = true") {
+	if data, err := os.ReadFile(filepath.Join(stateDir, "config.toml")); err != nil || !strings.Contains(string(data), "format_version = 2") || !strings.Contains(string(data), `default_branch = 'main'`) || !strings.Contains(string(data), "reflog_retention_inventory = true") {
 		t.Fatalf("config.toml = %q, %v", data, err)
 	}
 	if data, err := os.ReadFile(filepath.Join(stateDir, "HEAD")); err != nil || string(data) != "feature\n" {
