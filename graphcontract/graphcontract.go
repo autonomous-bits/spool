@@ -8,6 +8,7 @@ import (
 	"math"
 	"reflect"
 	"sort"
+	"time"
 
 	"github.com/fxamacker/cbor/v2"
 )
@@ -19,12 +20,18 @@ var (
 	// ErrInvalidCanonicalCBOR reports CBOR that does not encode a normalized
 	// graph contract value in its canonical representation.
 	ErrInvalidCanonicalCBOR = errors.New("invalid canonical CBOR")
+	// ErrInvalidCommit reports a commit record without its required snapshot or
+	// with an empty parent identifier.
+	ErrInvalidCommit = errors.New("invalid commit")
 )
 
 var canonicalCBOR, _ = cbor.CanonicalEncOptions().EncMode()
 
 // PropertyKind identifies the concrete value carried by a PropertyValue.
 type PropertyKind string
+
+// ObjectID is a content-derived identifier for an immutable graph object.
+type ObjectID string
 
 const (
 	PropertyNull    PropertyKind = "null"
@@ -380,6 +387,114 @@ func (e Edge) Clone() Edge {
 	return cloned
 }
 
+// Commit is an immutable record that assigns a graph snapshot to a point in
+// the ordered commit DAG. Parents are identity-bearing: their order and
+// repetition are preserved exactly.
+type Commit struct {
+	Snapshot ObjectID   `json:"snapshot" cbor:"1,keyasint"`
+	Parents  []ObjectID `json:"parents" cbor:"2,keyasint"`
+	Message  string     `json:"message" cbor:"3,keyasint"`
+	Author   string     `json:"author" cbor:"4,keyasint"`
+	Time     time.Time  `json:"time" cbor:"5,keyasint"`
+}
+
+// commitCBOR prevents Commit.MarshalCBOR from recursively dispatching while
+// retaining the exact field tags of Commit.
+type commitCBOR Commit
+
+// NewCommit constructs a normalized commit record.
+func NewCommit(snapshot ObjectID, parents []ObjectID, author, message string, timestamp time.Time) (Commit, error) {
+	return Commit{
+		Snapshot: snapshot,
+		Parents:  parents,
+		Author:   author,
+		Message:  message,
+		Time:     timestamp,
+	}.Normalize()
+}
+
+// Normalize returns the canonical commit representation. It normalizes time
+// to UTC whole seconds, the precision represented by canonical CBOR, and
+// defensively copies parents without changing their order.
+func (c Commit) Normalize() (Commit, error) {
+	if c.Snapshot == "" {
+		return Commit{}, fmt.Errorf("%w: snapshot is required", ErrInvalidCommit)
+	}
+	normalized := Commit{
+		Snapshot: c.Snapshot,
+		Message:  c.Message,
+		Author:   c.Author,
+		Time:     c.Time.UTC().Truncate(time.Second),
+	}
+	if len(c.Parents) == 0 {
+		return normalized, nil
+	}
+	normalized.Parents = make([]ObjectID, len(c.Parents))
+	for i, parent := range c.Parents {
+		if parent == "" {
+			return Commit{}, fmt.Errorf("%w: parent %d is required", ErrInvalidCommit, i)
+		}
+		normalized.Parents[i] = parent
+	}
+	return normalized, nil
+}
+
+// MarshalCBOR returns the normalized, canonical CBOR encoding of c. Omitted
+// and explicitly empty parent collections have one encoding.
+func (c Commit) MarshalCBOR() ([]byte, error) {
+	normalized, err := c.Normalize()
+	if err != nil {
+		return nil, err
+	}
+	parents := normalized.Parents
+	if parents == nil {
+		parents = []ObjectID{}
+	}
+	return canonicalCBOR.Marshal(commitCBOR{
+		Snapshot: normalized.Snapshot,
+		Parents:  parents,
+		Message:  normalized.Message,
+		Author:   normalized.Author,
+		Time:     normalized.Time,
+	})
+}
+
+// UnmarshalCBOR decodes and verifies canonical CBOR for c.
+func (c *Commit) UnmarshalCBOR(data []byte) error {
+	decoded, err := UnmarshalCommit(data)
+	if err != nil {
+		return err
+	}
+	*c = decoded
+	return nil
+}
+
+// Equal reports semantic equality after canonical normalization.
+func (c Commit) Equal(other Commit) bool {
+	normalized, err := c.Normalize()
+	if err != nil {
+		return false
+	}
+	otherNormalized, err := other.Normalize()
+	return err == nil && reflect.DeepEqual(canonicalCommitParents(normalized), canonicalCommitParents(otherNormalized))
+}
+
+func canonicalCommitParents(commit Commit) Commit {
+	if commit.Parents == nil {
+		commit.Parents = []ObjectID{}
+	}
+	return commit
+}
+
+// Clone returns a deep copy of c.
+func (c Commit) Clone() Commit {
+	cloned := c
+	if c.Parents != nil {
+		cloned.Parents = append([]ObjectID(nil), c.Parents...)
+	}
+	return cloned
+}
+
 // MarshalPropertyValue returns the normalized, canonical CBOR encoding of v.
 func MarshalPropertyValue(v PropertyValue) ([]byte, error) {
 	return v.MarshalCBOR()
@@ -393,6 +508,11 @@ func MarshalNode(n Node) ([]byte, error) {
 // MarshalEdge returns the normalized, canonical CBOR encoding of e.
 func MarshalEdge(e Edge) ([]byte, error) {
 	return e.MarshalCBOR()
+}
+
+// MarshalCommit returns the normalized, canonical CBOR encoding of c.
+func MarshalCommit(c Commit) ([]byte, error) {
+	return c.MarshalCBOR()
 }
 
 // UnmarshalPropertyValue decodes and verifies canonical CBOR for a property value.
@@ -442,6 +562,23 @@ func UnmarshalEdge(data []byte) (Edge, error) {
 	canonical, err := canonicalCBOR.Marshal(normalized)
 	if err != nil || !bytes.Equal(data, canonical) {
 		return Edge{}, fmt.Errorf("%w: edge", ErrInvalidCanonicalCBOR)
+	}
+	return normalized, nil
+}
+
+// UnmarshalCommit decodes and verifies canonical CBOR for a commit record.
+func UnmarshalCommit(data []byte) (Commit, error) {
+	var commit commitCBOR
+	if err := cbor.Unmarshal(data, &commit); err != nil {
+		return Commit{}, fmt.Errorf("%w: decode commit: %v", ErrInvalidCanonicalCBOR, err)
+	}
+	normalized, err := Commit(commit).Normalize()
+	if err != nil {
+		return Commit{}, err
+	}
+	canonical, err := normalized.MarshalCBOR()
+	if err != nil || !bytes.Equal(data, canonical) {
+		return Commit{}, fmt.Errorf("%w: commit", ErrInvalidCanonicalCBOR)
 	}
 	return normalized, nil
 }
