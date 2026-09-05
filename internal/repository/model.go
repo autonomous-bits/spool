@@ -57,15 +57,31 @@ const (
 	PropertyMap     = graphcontract.PropertyMap
 )
 
-var (
-	NullPropertyValue    = graphcontract.NullPropertyValue
-	BoolPropertyValue    = graphcontract.BoolPropertyValue
-	IntegerPropertyValue = graphcontract.IntegerPropertyValue
-	FloatPropertyValue   = graphcontract.FloatPropertyValue
-	StringPropertyValue  = graphcontract.StringPropertyValue
-	ListPropertyValue    = graphcontract.ListPropertyValue
-	MapPropertyValue     = graphcontract.MapPropertyValue
-)
+func NullPropertyValue() PropertyValue { return graphcontract.NullPropertyValue() }
+
+func BoolPropertyValue(value bool) PropertyValue {
+	return graphcontract.BoolPropertyValue(value)
+}
+
+func IntegerPropertyValue(value int64) PropertyValue {
+	return graphcontract.IntegerPropertyValue(value)
+}
+
+func FloatPropertyValue(value float64) PropertyValue {
+	return graphcontract.FloatPropertyValue(value)
+}
+
+func StringPropertyValue(value string) PropertyValue {
+	return graphcontract.StringPropertyValue(value)
+}
+
+func ListPropertyValue(value []PropertyValue) PropertyValue {
+	return graphcontract.ListPropertyValue(value)
+}
+
+func MapPropertyValue(value map[string]PropertyValue) PropertyValue {
+	return graphcontract.MapPropertyValue(value)
+}
 
 func canonicalNodeCollections(node Node) Node {
 	if node.Labels == nil {

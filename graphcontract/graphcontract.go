@@ -382,29 +382,17 @@ func (e Edge) Clone() Edge {
 
 // MarshalPropertyValue returns the normalized, canonical CBOR encoding of v.
 func MarshalPropertyValue(v PropertyValue) ([]byte, error) {
-	normalized, err := v.Normalize()
-	if err != nil {
-		return nil, err
-	}
-	return canonicalCBOR.Marshal(normalized)
+	return v.MarshalCBOR()
 }
 
 // MarshalNode returns the normalized, canonical CBOR encoding of n.
 func MarshalNode(n Node) ([]byte, error) {
-	normalized, err := n.Normalize()
-	if err != nil {
-		return nil, err
-	}
-	return canonicalCBOR.Marshal(normalized)
+	return n.MarshalCBOR()
 }
 
 // MarshalEdge returns the normalized, canonical CBOR encoding of e.
 func MarshalEdge(e Edge) ([]byte, error) {
-	normalized, err := e.Normalize()
-	if err != nil {
-		return nil, err
-	}
-	return canonicalCBOR.Marshal(normalized)
+	return e.MarshalCBOR()
 }
 
 // UnmarshalPropertyValue decodes and verifies canonical CBOR for a property value.
