@@ -8,6 +8,8 @@ generated from commits since the preceding `v*` tag. Commits prefixed with `docs
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-09-05
+
 ### Changed
 
 - Commit objects now use the public `graphcontract` canonical CBOR contract.
