@@ -202,7 +202,7 @@ func mergeNode(id string, base, source, target Node, baseOK, sourceOK, targetOK 
 	if resolved, value, present := mergeExistence("node", id, base, source, target, baseOK, sourceOK, targetOK, func(a, b Node) bool { return a.Equal(b) }, conflicts); resolved {
 		return value, present
 	}
-	result := target.clone()
+	result := target.Clone()
 	result.Title = mergeStringField("node", id, "title", base.Title, source.Title, target.Title, conflicts)
 	result.Labels = mergeValueField("node", id, "labels", base.Labels, source.Labels, target.Labels, conflicts)
 	result.Properties = mergeProperties("node", id, base.Properties, source.Properties, target.Properties, conflicts)
@@ -213,7 +213,7 @@ func mergeEdge(id string, base, source, target Edge, baseOK, sourceOK, targetOK 
 	if resolved, value, present := mergeExistence("edge", id, base, source, target, baseOK, sourceOK, targetOK, func(a, b Edge) bool { return a.Equal(b) }, conflicts); resolved {
 		return value, present
 	}
-	result := target.clone()
+	result := target.Clone()
 	result.Source = mergeStringField("edge", id, "source", base.Source, source.Source, target.Source, conflicts)
 	result.Target = mergeStringField("edge", id, "target", base.Target, source.Target, target.Target, conflicts)
 	result.Type = mergeStringField("edge", id, "type", base.Type, source.Type, target.Type, conflicts)
@@ -262,25 +262,25 @@ func mergeProperties(entity, id string, base, source, target map[string]Property
 		targetValue, targetOK := target[key]
 		if sourceOK == targetOK && (!sourceOK || sourceValue.Equal(targetValue)) {
 			if targetOK {
-				result[key] = targetValue.clone()
+				result[key] = targetValue.Clone()
 			}
 			continue
 		}
 		if sourceOK == baseOK && (!sourceOK || sourceValue.Equal(baseValue)) {
 			if targetOK {
-				result[key] = targetValue.clone()
+				result[key] = targetValue.Clone()
 			}
 			continue
 		}
 		if targetOK == baseOK && (!targetOK || targetValue.Equal(baseValue)) {
 			if sourceOK {
-				result[key] = sourceValue.clone()
+				result[key] = sourceValue.Clone()
 			}
 			continue
 		}
 		*conflicts = append(*conflicts, MergeConflict{Category: "structural", Entity: entity, ID: id, Field: "properties." + key})
 		if targetOK {
-			result[key] = targetValue.clone()
+			result[key] = targetValue.Clone()
 		}
 	}
 	if len(result) == 0 {

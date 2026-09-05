@@ -675,7 +675,7 @@ func sortedNodeIDs(nodes map[string]Node) []string {
 func cloneNodes(source map[string]Node) map[string]Node {
 	result := make(map[string]Node, len(source))
 	for id, value := range source {
-		result[id] = value.clone()
+		result[id] = value.Clone()
 	}
 	return result
 }
@@ -683,7 +683,7 @@ func cloneNodes(source map[string]Node) map[string]Node {
 func cloneEdges(source map[string]Edge) map[string]Edge {
 	result := make(map[string]Edge, len(source))
 	for id, value := range source {
-		result[id] = value.clone()
+		result[id] = value.Clone()
 	}
 	return result
 }
@@ -768,7 +768,7 @@ func cloneProperties(source map[string]PropertyValue) map[string]PropertyValue {
 	}
 	result := make(map[string]PropertyValue, len(source))
 	for key, value := range source {
-		result[key] = value.clone()
+		result[key] = value.Clone()
 	}
 	return result
 }

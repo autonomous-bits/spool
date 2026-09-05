@@ -438,7 +438,7 @@ func (r *Repository) historyEntryContextLocked(ctx context.Context, id ObjectID,
 		}
 		beforeEdge, exists := beforeEdges[edgeID]
 		if (!exists || !beforeEdge.Equal(edge)) && (edge.ID == entityID || edge.Source == entityID || edge.Target == entityID || (exists && (beforeEdge.Source == entityID || beforeEdge.Target == entityID))) {
-			entry.EdgeAdditions = append(entry.EdgeAdditions, edge.clone())
+			entry.EdgeAdditions = append(entry.EdgeAdditions, edge.Clone())
 			affects = true
 		}
 	}
@@ -448,7 +448,7 @@ func (r *Repository) historyEntryContextLocked(ctx context.Context, id ObjectID,
 		}
 		afterEdge, exists := afterEdges[edgeID]
 		if (!exists || !afterEdge.Equal(edge)) && (edge.ID == entityID || edge.Source == entityID || edge.Target == entityID || (exists && (afterEdge.Source == entityID || afterEdge.Target == entityID))) {
-			entry.EdgeRemovals = append(entry.EdgeRemovals, edge.clone())
+			entry.EdgeRemovals = append(entry.EdgeRemovals, edge.Clone())
 			affects = true
 		}
 	}

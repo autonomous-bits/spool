@@ -248,7 +248,7 @@ func (r *Repository) diffChangesContextLocked(ctx context.Context, base, target 
 func diffNodeChangesContext(ctx context.Context, base, target map[string]Node, filter DiffFilter) ([]DiffEntry, error) {
 	return diffEntriesContext(ctx, base, target, filter.NodeIDs, filter.NodeTitleSubstr,
 		func(node Node) DiffEntry {
-			node = node.clone()
+			node = node.Clone()
 			return DiffEntry{Entity: "node", ID: node.ID, Node: &node}
 		},
 		func(left, right Node) bool { return left.Equal(right) },
@@ -261,7 +261,7 @@ func diffEdgeChangesContext(ctx context.Context, base, target map[string]Edge, f
 	}
 	return diffEntriesContext(ctx, base, target, filter.EdgeIDs, "",
 		func(edge Edge) DiffEntry {
-			edge = edge.clone()
+			edge = edge.Clone()
 			return DiffEntry{Entity: "edge", ID: edge.ID, Edge: &edge}
 		},
 		func(left, right Edge) bool { return left.Equal(right) },
@@ -407,7 +407,7 @@ func (r *Repository) diffContextContextLocked(ctx context.Context, base, target 
 		}
 		if _, isChanged := changed["node:"+id]; !isChanged {
 			if _, related := related[id]; related {
-				value := node.clone()
+				value := node.Clone()
 				context = append(context, DiffContext{Entity: "node", ID: id, Node: &value})
 			}
 		}
@@ -418,7 +418,7 @@ func (r *Repository) diffContextContextLocked(ctx context.Context, base, target 
 		}
 		if _, isChanged := changed["edge:"+id]; !isChanged {
 			if _, isContext := contextEdges[id]; isContext {
-				value := edge.clone()
+				value := edge.Clone()
 				context = append(context, DiffContext{Entity: "edge", ID: id, Edge: &value})
 			}
 		}
