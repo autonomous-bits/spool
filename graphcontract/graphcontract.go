@@ -52,6 +52,10 @@ type PropertyValue struct {
 	Map     map[string]PropertyValue `json:"map,omitempty" cbor:"7,keyasint,omitempty"`
 }
 
+// propertyValueCBOR prevents PropertyValue.MarshalCBOR from recursively
+// dispatching while retaining the exact field tags of PropertyValue.
+type propertyValueCBOR PropertyValue
+
 // NullPropertyValue returns the canonical null property value.
 func NullPropertyValue() PropertyValue { return PropertyValue{Kind: PropertyNull} }
 
@@ -139,6 +143,15 @@ func (v PropertyValue) Normalize() (PropertyValue, error) {
 	return normalized, nil
 }
 
+// MarshalCBOR returns the normalized, canonical CBOR encoding of v.
+func (v PropertyValue) MarshalCBOR() ([]byte, error) {
+	normalized, err := v.Normalize()
+	if err != nil {
+		return nil, err
+	}
+	return canonicalCBOR.Marshal(propertyValueCBOR(normalized))
+}
+
 // Equal reports semantic equality after canonical normalization.
 func (v PropertyValue) Equal(other PropertyValue) bool {
 	normalized, err := v.Normalize()
@@ -191,19 +204,23 @@ func NewNode(id, title string, labels []string, properties map[string]PropertyVa
 	return Node{ID: id, Title: title, Labels: labels, Properties: properties}.Normalize()
 }
 
-// MarshalCBOR ensures omitted and explicitly empty collections have one
-// canonical encoding without changing their in-memory representation.
+// MarshalCBOR returns the normalized, canonical CBOR encoding of n. Omitted
+// and explicitly empty collections have one encoding.
 func (n Node) MarshalCBOR() ([]byte, error) {
-	labels := n.Labels
+	normalized, err := n.Normalize()
+	if err != nil {
+		return nil, err
+	}
+	labels := normalized.Labels
 	if labels == nil {
 		labels = []string{}
 	}
-	properties := n.Properties
+	properties := normalized.Properties
 	if properties == nil {
 		properties = map[string]PropertyValue{}
 	}
 	return canonicalCBOR.Marshal(nodeCBOR{
-		ID: n.ID, Title: n.Title, Labels: labels, Properties: properties,
+		ID: normalized.ID, Title: normalized.Title, Labels: labels, Properties: properties,
 	})
 }
 
@@ -299,15 +316,19 @@ func NewEdge(id, source, target, edgeType string, properties map[string]Property
 	return Edge{ID: id, Source: source, Target: target, Type: edgeType, Properties: properties}.Normalize()
 }
 
-// MarshalCBOR ensures omitted and explicitly empty properties have one
-// canonical encoding without changing their in-memory representation.
+// MarshalCBOR returns the normalized, canonical CBOR encoding of e. Omitted
+// and explicitly empty properties have one encoding.
 func (e Edge) MarshalCBOR() ([]byte, error) {
-	properties := e.Properties
+	normalized, err := e.Normalize()
+	if err != nil {
+		return nil, err
+	}
+	properties := normalized.Properties
 	if properties == nil {
 		properties = map[string]PropertyValue{}
 	}
 	return canonicalCBOR.Marshal(edgeCBOR{
-		ID: e.ID, Source: e.Source, Target: e.Target, Type: e.Type, Properties: properties,
+		ID: normalized.ID, Source: normalized.Source, Target: normalized.Target, Type: normalized.Type, Properties: properties,
 	})
 }
 

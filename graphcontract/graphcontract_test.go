@@ -1,6 +1,7 @@
 package graphcontract
 
 import (
+	"bytes"
 	"encoding/hex"
 	"errors"
 	"math"
@@ -69,7 +70,7 @@ func TestCanonicalCBORGoldenVectors(t *testing.T) {
 		t.Fatalf("decoded edge = %#v, want semantic equality with %#v", decodedEdge, edge)
 	}
 
-	nonCanonical, err := cbor.Marshal(Node{ID: "node-1", Labels: []string{"Requirement", "Decision"}})
+	nonCanonical, err := canonicalCBOR.Marshal(nodeCBOR{ID: "node-1", Labels: []string{"Requirement", "Decision"}})
 	if err != nil {
 		t.Fatalf("marshal non-canonical node: %v", err)
 	}
@@ -106,6 +107,62 @@ func TestCanonicalCBORCollapsesAbsentCollections(t *testing.T) {
 	}
 	if string(withoutProperties) != string(withEmptyProperties) {
 		t.Fatal("edges with absent and empty properties have distinct canonical CBOR")
+	}
+}
+
+func TestStandardCBORMarshalMatchesCanonicalContract(t *testing.T) {
+	property := PropertyValue{Kind: PropertyString, String: "first", Integer: 99}
+	genericProperty, err := cbor.Marshal(property)
+	if err != nil {
+		t.Fatalf("marshal property with cbor: %v", err)
+	}
+	canonicalProperty, err := MarshalPropertyValue(property)
+	if err != nil {
+		t.Fatalf("MarshalPropertyValue: %v", err)
+	}
+	if !bytes.Equal(genericProperty, canonicalProperty) {
+		t.Fatal("cbor.Marshal property bytes differ from MarshalPropertyValue")
+	}
+	if _, err := UnmarshalPropertyValue(genericProperty); err != nil {
+		t.Fatalf("UnmarshalPropertyValue generic bytes: %v", err)
+	}
+
+	node := Node{
+		ID: "node-1", Labels: []string{"Requirement", "Decision", "Requirement"},
+		Properties: map[string]PropertyValue{"priority": property},
+	}
+	genericNode, err := cbor.Marshal(node)
+	if err != nil {
+		t.Fatalf("marshal node with cbor: %v", err)
+	}
+	canonicalNode, err := MarshalNode(node)
+	if err != nil {
+		t.Fatalf("MarshalNode: %v", err)
+	}
+	if !bytes.Equal(genericNode, canonicalNode) {
+		t.Fatal("cbor.Marshal node bytes differ from MarshalNode")
+	}
+	if _, err := UnmarshalNode(genericNode); err != nil {
+		t.Fatalf("UnmarshalNode generic bytes: %v", err)
+	}
+
+	edge := Edge{
+		ID: "edge-1", Source: "node-1", Target: "node-2", Type: "DEPENDS_ON",
+		Properties: map[string]PropertyValue{"weight": FloatPropertyValue(math.Copysign(0, -1))},
+	}
+	genericEdge, err := cbor.Marshal(edge)
+	if err != nil {
+		t.Fatalf("marshal edge with cbor: %v", err)
+	}
+	canonicalEdge, err := MarshalEdge(edge)
+	if err != nil {
+		t.Fatalf("MarshalEdge: %v", err)
+	}
+	if !bytes.Equal(genericEdge, canonicalEdge) {
+		t.Fatal("cbor.Marshal edge bytes differ from MarshalEdge")
+	}
+	if _, err := UnmarshalEdge(genericEdge); err != nil {
+		t.Fatalf("UnmarshalEdge generic bytes: %v", err)
 	}
 }
 
