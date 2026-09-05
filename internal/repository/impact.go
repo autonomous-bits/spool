@@ -198,7 +198,7 @@ func cloneImpactNodes(ctx context.Context, source map[string]Node) (map[string]N
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		result[id] = node.clone()
+		result[id] = node.Clone()
 	}
 	return result, nil
 }
@@ -209,7 +209,7 @@ func cloneImpactEdges(ctx context.Context, source map[string]Edge) (map[string]E
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		result[id] = edge.clone()
+		result[id] = edge.Clone()
 	}
 	return result, nil
 }
@@ -338,7 +338,7 @@ func traverseImpactContext(ctx context.Context, nodes map[string]Node, edges map
 				return impacts, exhausted, err
 			}
 			levelImpacts = append(levelImpacts, ImpactEntry{
-				Node: nodes[current.id].clone(), Path: current.path, Distance: len(current.path) - 1,
+				Node: nodes[current.id].Clone(), Path: current.path, Distance: len(current.path) - 1,
 			})
 			if len(current.path)-1 == maxDepth {
 				continue

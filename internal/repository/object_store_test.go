@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/autonomous-bits/spool/graphcontract"
 	"github.com/fxamacker/cbor/v2"
 )
 
@@ -131,6 +132,7 @@ func TestDurableRepositorySeedsLooseObjectCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create durable repository: %v", err)
 	}
+
 	t.Cleanup(func() {
 		if err := repo.Close(); err != nil {
 			t.Errorf("close repository: %v", err)
@@ -145,5 +147,22 @@ func TestDurableRepositorySeedsLooseObjectCache(t *testing.T) {
 	}
 	if _, ok := repo.objects[nodeID]; !ok {
 		t.Fatal("loose-object read did not restore repository object cache")
+	}
+}
+
+func TestGraphContractNodeObjectIDGolden(t *testing.T) {
+	node := graphcontract.Node{
+		ID:     "node-1",
+		Title:  "Compatibility title",
+		Labels: []string{"Requirement", "Decision", "Requirement"},
+		Properties: map[string]graphcontract.PropertyValue{
+			"priority": graphcontract.IntegerPropertyValue(3),
+			"owner":    graphcontract.StringPropertyValue("spool"),
+		},
+	}
+	repo := newTestSeedRepository(t)
+	const wantObjectID ObjectID = "e3d7e45ee069fff83b4ee2af1cb63e71e11961b0802f54af6bf7626e5ea7baaa"
+	if got := repo.objectID("node", node); got != wantObjectID {
+		t.Fatalf("node object ID = %s, want %s", got, wantObjectID)
 	}
 }

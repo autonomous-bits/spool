@@ -397,7 +397,7 @@ func applySourceResolution(conflict MergeConflict, nodes map[string]Node, edges 
 		source, exists := sourceNodes[conflict.ID]
 		if conflict.Field == "existence" {
 			if exists {
-				nodes[conflict.ID] = source.clone()
+				nodes[conflict.ID] = source.Clone()
 			} else {
 				delete(nodes, conflict.ID)
 			}
@@ -418,7 +418,7 @@ func applySourceResolution(conflict MergeConflict, nodes map[string]Node, edges 
 					if node.Properties == nil {
 						node.Properties = make(map[string]PropertyValue)
 					}
-					node.Properties[key] = value.clone()
+					node.Properties[key] = value.Clone()
 				} else {
 					delete(node.Properties, key)
 				}
@@ -431,7 +431,7 @@ func applySourceResolution(conflict MergeConflict, nodes map[string]Node, edges 
 		source, exists := sourceEdges[conflict.ID]
 		if conflict.Field == "existence" {
 			if exists {
-				edges[conflict.ID] = source.clone()
+				edges[conflict.ID] = source.Clone()
 			} else {
 				delete(edges, conflict.ID)
 			}
@@ -454,7 +454,7 @@ func applySourceResolution(conflict MergeConflict, nodes map[string]Node, edges 
 					if edge.Properties == nil {
 						edge.Properties = make(map[string]PropertyValue)
 					}
-					edge.Properties[key] = value.clone()
+					edge.Properties[key] = value.Clone()
 				} else {
 					delete(edge.Properties, key)
 				}

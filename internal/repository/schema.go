@@ -16,6 +16,11 @@ var (
 	ErrInvalidSchemaTOML = errors.New("invalid schema TOML")
 )
 
+type propertyBudget struct {
+	entries int
+	bytes   int
+}
+
 // DecodeSchemaTOML decodes a schema definition from TOML and returns its
 // normalized canonical representation. Unknown keys are rejected so a typo
 // cannot silently weaken validation.

@@ -12,9 +12,9 @@ func TestMergeNodeCombinesIndependentFields(t *testing.T) {
 		ID: "node", Title: "base", Labels: []string{"Base"},
 		Properties: map[string]PropertyValue{"priority": IntegerPropertyValue(1)},
 	}
-	source := base.clone()
+	source := base.Clone()
 	source.Title = "source title"
-	target := base.clone()
+	target := base.Clone()
 	target.Properties["priority"] = IntegerPropertyValue(2)
 	target.Properties["owner"] = StringPropertyValue("target")
 
@@ -36,7 +36,7 @@ func TestMergeNodeCombinesIndependentFields(t *testing.T) {
 
 func TestMergeNodeReportsOverlappingPropertyConflict(t *testing.T) {
 	base := Node{ID: "node", Title: "base", Properties: map[string]PropertyValue{"priority": IntegerPropertyValue(1)}}
-	source, target := base.clone(), base.clone()
+	source, target := base.Clone(), base.Clone()
 	source.Properties["priority"] = IntegerPropertyValue(2)
 	target.Properties["priority"] = IntegerPropertyValue(3)
 
