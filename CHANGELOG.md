@@ -8,6 +8,13 @@ generated from commits since the preceding `v*` tag. Commits prefixed with `docs
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-09-05
+
+### Added
+
+- Public `graphcontract` package providing the canonical graph domain types and
+  deterministic CBOR serialization for downstream Go integrations.
+
 ## [1.2.0] - 2026-08-30
 
 ### Added
