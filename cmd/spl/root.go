@@ -80,6 +80,7 @@ func newRootCommandWithLifecycle(
 	root.AddCommand(commands.NewCherryPickCommand(repoProvider))
 	root.AddCommand(commands.NewWorkspaceCommandDefault())
 	root.AddCommand(commands.NewRemoteCommand(repoProvider))
+	root.AddCommand(commands.NewPushCommand(repoProvider))
 	root.AddCommand(commands.NewVersionCommand())
 	return root
 }
