@@ -116,7 +116,7 @@ func (r *Repository) previewMergeLocked(sourceBranch, targetBranch string) (merg
 		graphcontract.SortMergeConflicts(conflicts)
 	}
 	for index := range conflicts {
-		if conflicts[index].Paths == nil {
+		if len(conflicts[index].Paths) == 0 {
 			conflicts[index].Paths = graphcontract.MergeConflictPaths(conflicts[index])
 		}
 		conflictID, err := graphcontract.MergeConflictID(conflicts[index])

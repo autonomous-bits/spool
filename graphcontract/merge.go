@@ -58,7 +58,7 @@ func ThreeWayMerge(
 
 	SortMergeConflicts(conflicts)
 	for i := range conflicts {
-		if conflicts[i].Paths == nil {
+		if len(conflicts[i].Paths) == 0 {
 			conflicts[i].Paths = MergeConflictPaths(conflicts[i])
 		}
 		conflictID, err := MergeConflictID(conflicts[i])
@@ -120,7 +120,7 @@ func mergeNode(id string, base, source, target Node, baseOK, sourceOK, targetOK 
 	}
 	result := target.Clone()
 	result.Title = mergeStringField("node", id, "title", base.Title, source.Title, target.Title, conflicts)
-	result.Labels = mergeValueField("node", id, "labels", base.Labels, source.Labels, target.Labels, conflicts)
+	result.Labels = mergeLabelsField("node", id, "labels", base.Labels, source.Labels, target.Labels, conflicts)
 	result.Properties = mergeProperties("node", id, base.Properties, source.Properties, target.Properties, conflicts)
 	return result, true
 }
@@ -167,6 +167,28 @@ func mergeValueField[T any](entity, id, field string, base, source, target T, co
 	}
 	*conflicts = append(*conflicts, MergeConflict{Category: "structural", Entity: entity, ID: id, Field: field})
 	return target
+}
+
+// mergeLabelsField merges a node's label collection, treating nil and empty
+// slices as equivalent so that representation differences alone (e.g. an
+// unset vs explicitly-empty label list) never produce a false conflict.
+func mergeLabelsField(entity, id, field string, base, source, target []string, conflicts *[]MergeConflict) []string {
+	normalizedBase, normalizedSource, normalizedTarget := normalizeLabels(base), normalizeLabels(source), normalizeLabels(target)
+	if reflect.DeepEqual(normalizedSource, normalizedTarget) || reflect.DeepEqual(normalizedSource, normalizedBase) {
+		return target
+	}
+	if reflect.DeepEqual(normalizedTarget, normalizedBase) {
+		return source
+	}
+	*conflicts = append(*conflicts, MergeConflict{Category: "structural", Entity: entity, ID: id, Field: field})
+	return target
+}
+
+func normalizeLabels(labels []string) []string {
+	if labels == nil {
+		return []string{}
+	}
+	return labels
 }
 
 func mergeProperties(entity, id string, base, source, target map[string]PropertyValue, conflicts *[]MergeConflict) map[string]PropertyValue {

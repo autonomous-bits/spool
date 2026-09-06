@@ -151,7 +151,7 @@ func (r *Repository) previewCherryPickLocked(request CherryPickRequest) (cherryP
 
 	graphcontract.SortMergeConflicts(conflicts)
 	for i := range conflicts {
-		if conflicts[i].Paths == nil {
+		if len(conflicts[i].Paths) == 0 {
 			conflicts[i].Paths = graphcontract.MergeConflictPaths(conflicts[i])
 		}
 		conflictID, err := graphcontract.MergeConflictID(conflicts[i])

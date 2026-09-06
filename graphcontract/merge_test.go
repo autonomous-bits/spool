@@ -273,6 +273,63 @@ func TestThreeWayMerge(t *testing.T) {
 			},
 		},
 		{
+			name: "nil versus empty labels do not report a false conflict",
+			run: func(t *testing.T) {
+				baseNode := mustNode(t, "node-1", "Base", nil, nil)
+				sourceNode := baseNode.Clone()
+				sourceNode.Labels = []string{}
+				targetNode := baseNode.Clone()
+
+				runMergeFixture(t, mergeFixture{
+					baseNodes: map[string]graphcontract.Node{
+						"node-1": baseNode,
+					},
+					sourceNodes: map[string]graphcontract.Node{
+						"node-1": sourceNode,
+					},
+					targetNodes: map[string]graphcontract.Node{
+						"node-1": targetNode,
+					},
+					wantClean: true,
+					wantNodes: map[string]graphcontract.Node{
+						"node-1": targetNode,
+					},
+				})
+			},
+		},
+		{
+			name: "empty conflict paths default the same as nil paths",
+			run: func(t *testing.T) {
+				baseNode := mustNode(t, "node-1", "Base", []string{"Thing"}, nil)
+				sourceNode := baseNode.Clone()
+				sourceNode.Title = "Source"
+				targetNode := baseNode.Clone()
+				targetNode.Title = "Target"
+
+				result := runMergeFixture(t, mergeFixture{
+					baseNodes: map[string]graphcontract.Node{
+						"node-1": baseNode,
+					},
+					sourceNodes: map[string]graphcontract.Node{
+						"node-1": sourceNode,
+					},
+					targetNodes: map[string]graphcontract.Node{
+						"node-1": targetNode,
+					},
+					wantClean: false,
+					wantNodes: map[string]graphcontract.Node{
+						"node-1": targetNode,
+					},
+					wantConflicts: []graphcontract.MergeConflict{
+						{Category: "structural", Entity: "node", ID: "node-1", Field: "title", Paths: []string{"node/node-1/title"}},
+					},
+				})
+				if len(result.Conflicts) != 1 || len(result.Conflicts[0].Paths) == 0 {
+					t.Fatalf("conflicts = %#v, want a single conflict with a defaulted, non-empty Paths", result.Conflicts)
+				}
+			},
+		},
+		{
 			name: "schema root merge and conflict",
 			run: func(t *testing.T) {
 				tests := []struct {
