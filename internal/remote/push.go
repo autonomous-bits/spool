@@ -50,10 +50,12 @@ type PushResult struct {
 // NonFastForwardError reports that Rack rejected a push because the
 // supplied BaseCommit is no longer the branch's actual head. ActualHead is
 // Rack's current wire head commit ID for the branch; Guidance is a
-// human-readable message from Rack explaining the rejection.
+// human-readable message from Rack explaining the rejection; CorrelationID
+// is the value Rack's audit log recorded for this request.
 type NonFastForwardError struct {
-	ActualHead string
-	Guidance   string
+	ActualHead    string
+	Guidance      string
+	CorrelationID string
 }
 
 func (e *NonFastForwardError) Error() string {
@@ -66,14 +68,6 @@ func (e *NonFastForwardError) Error() string {
 // ErrPushRejected reports that Rack rejected a push for a reason other than
 // a non-fast-forward base (e.g. a malformed pack or invalid metadata).
 var ErrPushRejected = errors.New("rack rejected the push")
-
-// pushErrorEnvelope mirrors Rack's JSON error body shape:
-// {"error": "...", "message": "...", "currentHead": "..."}.
-type pushErrorEnvelope struct {
-	Error       string `json:"error"`
-	Message     string `json:"message"`
-	CurrentHead string `json:"currentHead,omitempty"`
-}
 
 // push POSTs a multipart/form-data push request (a JSON `metadata` part
 // followed by a binary `pack` part, matching the part order Rack's gateway
@@ -144,6 +138,7 @@ func (c *Client) push(ctx context.Context, endpoint, repoID string, authMode Aut
 			request.Header.Set("Authorization", "Bearer "+credential)
 		}
 	}
+	c.setCorrelationHeader(request)
 
 	response, err := client.Do(request)
 	if err != nil {
@@ -159,17 +154,14 @@ func (c *Client) push(ctx context.Context, endpoint, repoID string, authMode Aut
 		}
 		return result, nil
 	case http.StatusConflict:
-		var envelope pushErrorEnvelope
-		_ = json.NewDecoder(response.Body).Decode(&envelope)
-		return PushResult{}, &NonFastForwardError{ActualHead: envelope.CurrentHead, Guidance: envelope.Message}
+		rackErr := decodeRackErrorFromResponse(response, credential)
+		return PushResult{}, &NonFastForwardError{ActualHead: rackErr.CurrentHead, Guidance: rackErr.Message, CorrelationID: rackErr.CorrelationID}
 	default:
-		var envelope pushErrorEnvelope
-		_ = json.NewDecoder(response.Body).Decode(&envelope)
-		message := envelope.Message
-		if message == "" {
-			message = fmt.Sprintf("push returned status %d", response.StatusCode)
+		rackErr := decodeRackErrorFromResponse(response, credential)
+		if rackErr.Message == "" {
+			rackErr.Message = fmt.Sprintf("push returned status %d", response.StatusCode)
 		}
-		return PushResult{}, fmt.Errorf("%w: %s", ErrPushRejected, Redact(message, credential))
+		return PushResult{}, fmt.Errorf("%w: %w", ErrPushRejected, rackErr)
 	}
 }
 

@@ -60,14 +60,15 @@ func NewPullCommand(repoProvider func() (*repository.Repository, error)) *cobra.
 				var diverged *remote.DivergedError
 				if errors.As(err, &diverged) {
 					return json.NewEncoder(command.OutOrStdout()).Encode(pullResult{
-						Branch:     branchName,
-						Pulled:     false,
-						Diverged:   true,
-						ActualHead: diverged.ActualHead,
-						Message:    diverged.Guidance,
+						Branch:        branchName,
+						Pulled:        false,
+						Diverged:      true,
+						ActualHead:    diverged.ActualHead,
+						Message:       diverged.Guidance,
+						CorrelationID: diverged.CorrelationID,
 					})
 				}
-				return fmt.Errorf("pull from rack: %w", err)
+				return writeRemoteErrorEnvelope(command, "pull from rack", err, credential)
 			}
 			if pulled.UpToDate {
 				return json.NewEncoder(command.OutOrStdout()).Encode(pullResult{
@@ -106,4 +107,5 @@ type pullResult struct {
 	CommitsInstalled int    `json:"commitsInstalled,omitempty"`
 	HeadCommit       string `json:"headCommit,omitempty"`
 	Message          string `json:"message,omitempty"`
+	CorrelationID    string `json:"correlationId,omitempty"`
 }

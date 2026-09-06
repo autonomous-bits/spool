@@ -67,14 +67,15 @@ func NewPushCommand(repoProvider func() (*repository.Repository, error)) *cobra.
 				var nffErr *remote.NonFastForwardError
 				if errors.As(err, &nffErr) {
 					return json.NewEncoder(command.OutOrStdout()).Encode(pushResult{
-						Branch:     branchName,
-						Pushed:     false,
-						Rejected:   true,
-						ActualHead: nffErr.ActualHead,
-						Message:    nffErr.Guidance,
+						Branch:        branchName,
+						Pushed:        false,
+						Rejected:      true,
+						ActualHead:    nffErr.ActualHead,
+						Message:       nffErr.Guidance,
+						CorrelationID: nffErr.CorrelationID,
 					})
 				}
-				return fmt.Errorf("push to rack: %w", err)
+				return writeRemoteErrorEnvelope(command, "push to rack", err, credential)
 			}
 
 			return json.NewEncoder(command.OutOrStdout()).Encode(pushResult{
@@ -92,13 +93,14 @@ func NewPushCommand(repoProvider func() (*repository.Repository, error)) *cobra.
 }
 
 type pushResult struct {
-	Branch      string `json:"branch"`
-	Pushed      bool   `json:"pushed"`
-	CommitsSent int    `json:"commitsSent,omitempty"`
-	HeadCommit  string `json:"headCommit,omitempty"`
-	Rejected    bool   `json:"rejected,omitempty"`
-	ActualHead  string `json:"actualHead,omitempty"`
-	Message     string `json:"message,omitempty"`
+	Branch        string `json:"branch"`
+	Pushed        bool   `json:"pushed"`
+	CommitsSent   int    `json:"commitsSent,omitempty"`
+	HeadCommit    string `json:"headCommit,omitempty"`
+	Rejected      bool   `json:"rejected,omitempty"`
+	ActualHead    string `json:"actualHead,omitempty"`
+	Message       string `json:"message,omitempty"`
+	CorrelationID string `json:"correlationId,omitempty"`
 }
 
 func toRemotePushCommits(commits []repository.PushCommitRecord) []remote.PushCommitRecord {

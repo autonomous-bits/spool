@@ -146,6 +146,78 @@ func TestPushUnreachableRemote(t *testing.T) {
 	}
 }
 
+func TestPushSendsCorrelationIDHeader(t *testing.T) {
+	var received string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received = r.Header.Get(CorrelationIDHeader)
+		decodeMultipartPush(t, r)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(PushResult{Branch: "main", HeadCommit: "abc123"})
+	}))
+	defer server.Close()
+
+	client := NewClient()
+	if _, err := Push(context.Background(), client, Config{Endpoint: server.URL, RepoID: "acme", AuthMode: AuthModeBearer}, "", testPushRequest()); err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+	if received == "" {
+		t.Fatal("push request did not include a correlation ID header")
+	}
+	if received != client.CorrelationID {
+		t.Fatalf("correlation ID header = %q, want client.CorrelationID = %q", received, client.CorrelationID)
+	}
+}
+
+func TestPushNonFastForwardSurfacesCorrelationID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		decodeMultipartPush(t, r)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"error":         "conflict",
+			"message":       "branch has moved",
+			"currentHead":   "def456",
+			"correlationId": "corr-conflict",
+		})
+	}))
+	defer server.Close()
+
+	_, err := Push(context.Background(), NewClient(), Config{Endpoint: server.URL, RepoID: "acme", AuthMode: AuthModeBearer}, "", testPushRequest())
+	var nffErr *NonFastForwardError
+	if !errors.As(err, &nffErr) {
+		t.Fatalf("err = %v, want *NonFastForwardError", err)
+	}
+	if nffErr.CorrelationID != "corr-conflict" {
+		t.Fatalf("nffErr.CorrelationID = %q, want corr-conflict", nffErr.CorrelationID)
+	}
+}
+
+func TestPushBadRequestWrapsRackErrorWithCorrelationID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		decodeMultipartPush(t, r)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"error":         "bad_request",
+			"message":       "packHash must be 64 lowercase hex characters",
+			"correlationId": "corr-bad-request",
+		})
+	}))
+	defer server.Close()
+
+	_, err := Push(context.Background(), NewClient(), Config{Endpoint: server.URL, RepoID: "acme", AuthMode: AuthModeBearer}, "", testPushRequest())
+	if !errors.Is(err, ErrPushRejected) {
+		t.Fatalf("err = %v, want ErrPushRejected", err)
+	}
+	var rackErr *RackError
+	if !errors.As(err, &rackErr) {
+		t.Fatalf("err = %v, want *RackError", err)
+	}
+	if rackErr.Code != "bad_request" || rackErr.CorrelationID != "corr-bad-request" {
+		t.Fatalf("rackErr = %#v", rackErr)
+	}
+}
+
 func TestPushCredentialNeverAppearsInErrorText(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		decodeMultipartPush(t, r)

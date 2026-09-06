@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // healthzTimeout bounds a single /healthz probe so a stalled or unreachable
@@ -34,14 +37,89 @@ type healthzGraphcontractInfo struct {
 	PackManifestFormatVersion *uint32 `json:"packManifestFormatVersion,omitempty"`
 }
 
-// Client performs read-only HTTP calls against a configured Rack endpoint.
+// CorrelationIDHeader is the HTTP header the CLI attaches to every outbound
+// Rack request, and that Rack's audit log records, so an operator can
+// correlate a single CLI invocation's requests (healthz, push, pull, ...)
+// with the audit events it produced remotely.
+const CorrelationIDHeader = "X-Correlation-Id"
+
+// Client performs HTTP calls against a configured Rack endpoint.
 type Client struct {
 	HTTPClient *http.Client
+	// CorrelationID is sent as CorrelationIDHeader on every request this
+	// Client issues. Callers should construct one Client per CLI command
+	// invocation (via NewClient) and reuse it for every remote call that
+	// invocation makes, so Rack's audit log can be correlated end to end.
+	CorrelationID string
 }
 
-// NewClient returns a Client with a bounded default timeout.
+// NewClient returns a Client with a bounded default timeout and a freshly
+// generated CorrelationID.
 func NewClient() *Client {
-	return &Client{HTTPClient: &http.Client{Timeout: healthzTimeout}}
+	return &Client{HTTPClient: &http.Client{Timeout: healthzTimeout}, CorrelationID: newCorrelationID()}
+}
+
+// newCorrelationID returns a new random UUIDv4 string for use as a Client's
+// CorrelationID.
+func newCorrelationID() string {
+	return uuid.NewString()
+}
+
+// setCorrelationHeader attaches c's CorrelationID to request, generating one
+// on the fly if the Client was constructed without NewClient (e.g. a bare
+// Client{} in a test) so every request still carries the header.
+func (c *Client) setCorrelationHeader(request *http.Request) {
+	correlationID := c.CorrelationID
+	if correlationID == "" {
+		correlationID = newCorrelationID()
+	}
+	request.Header.Set(CorrelationIDHeader, correlationID)
+}
+
+// RackError is the decoded form of Rack's JSON error envelope:
+//
+//	{"error": "...", "message": "...", "correlationId": "...", "currentHead": "..."}
+//
+// Code is a stable, machine-readable identifier; Message is a human-readable
+// description; CorrelationID lets an operator match this failure against
+// Rack's audit log; CurrentHead, when present, is the branch's actual wire
+// head commit ID (populated on conflict/non-fast-forward responses).
+type RackError struct {
+	Code          string `json:"error"`
+	Message       string `json:"message"`
+	CorrelationID string `json:"correlationId,omitempty"`
+	CurrentHead   string `json:"currentHead,omitempty"`
+}
+
+// Error implements the error interface, preferring the human-readable
+// message but falling back to the machine-readable code.
+func (e *RackError) Error() string {
+	if e.Message != "" {
+		return e.Message
+	}
+	if e.Code != "" {
+		return e.Code
+	}
+	return "rack returned an error"
+}
+
+// decodeRackError best-effort decodes a non-2xx Rack HTTP response body as a
+// RackError. A malformed or empty body simply yields a RackError with empty
+// fields rather than an error, since the HTTP status code alone is still
+// meaningful to callers.
+func decodeRackError(body io.Reader) RackError {
+	var envelope RackError
+	_ = json.NewDecoder(body).Decode(&envelope)
+	return envelope
+}
+
+// decodeRackErrorFromResponse decodes response's body as a RackError and
+// redacts credential from its message, so a Rack error that happens to echo
+// back a caller-supplied credential never leaks it further.
+func decodeRackErrorFromResponse(response *http.Response, credential string) *RackError {
+	envelope := decodeRackError(response.Body)
+	envelope.Message = Redact(envelope.Message, credential)
+	return &envelope
 }
 
 // fetchHealthz calls GET {endpoint}/healthz and decodes its JSON body.
@@ -64,13 +142,18 @@ func (c *Client) fetchHealthz(ctx context.Context, endpoint string, authMode Aut
 			request.Header.Set("Authorization", "Bearer "+credential)
 		}
 	}
+	c.setCorrelationHeader(request)
 	response, err := client.Do(request)
 	if err != nil {
 		return healthzResponse{}, fmt.Errorf("%w: %s", ErrRemoteUnreachable, Redact(err.Error(), credential))
 	}
 	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
-		return healthzResponse{}, fmt.Errorf("%w: healthz returned status %d", ErrRemoteUnreachable, response.StatusCode)
+		rackErr := decodeRackErrorFromResponse(response, credential)
+		if rackErr.Message == "" {
+			rackErr.Message = fmt.Sprintf("healthz returned status %d", response.StatusCode)
+		}
+		return healthzResponse{}, fmt.Errorf("%w: %w", ErrRemoteUnreachable, rackErr)
 	}
 	var decoded healthzResponse
 	if err := json.NewDecoder(response.Body).Decode(&decoded); err != nil {
