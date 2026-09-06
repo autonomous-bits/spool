@@ -28,6 +28,14 @@ generated from commits since the preceding `v*` tag. Commits prefixed with `docs
   forward rejection without attempting to merge or retry. Only linear,
   fast-forward push ranges are supported; merge-commit and remote-branch-
   tracking support are tracked separately.
+- `spl push --reconcile` flag that automatically handles a non-fast-forward
+  push rejection: it fetches Rack's complete current history for the
+  branch, rebases the branch's independent local changes onto it with the
+  graph merge engine as a single-parent, fast-forward-eligible commit, and
+  retries the push. Merge conflicts leave both the branch and a dedicated
+  `reconcile/<branch>` branch untouched and are reported instead of
+  retried, so they can be resolved with the existing `spl merge`
+  subcommands before retrying.
 - Public `graphcontract` merge APIs exposing deterministic three-way graph
   merge simulation (`ThreeWayMerge`, `MergeResult`, `MergeChange`,
   `MergeConflict`, and conflict finalization helpers), enabling downstream
