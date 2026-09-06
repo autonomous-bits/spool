@@ -214,6 +214,75 @@ func TestPullBadRequestWrapsErrPullRejected(t *testing.T) {
 	}
 }
 
+func TestPullSendsCorrelationIDHeader(t *testing.T) {
+	envelope := buildTestPullEnvelope(t, "abc123", [][]byte{[]byte("pack-one")})
+	var received string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received = r.Header.Get(CorrelationIDHeader)
+		writeZstdPullResponse(t, w, envelope)
+	}))
+	defer server.Close()
+
+	client := NewClient()
+	if _, err := Pull(context.Background(), client, Config{Endpoint: server.URL, RepoID: "acme", AuthMode: AuthModeBearer}, "", "main", ""); err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+	if received == "" {
+		t.Fatal("pull request did not include a correlation ID header")
+	}
+	if received != client.CorrelationID {
+		t.Fatalf("correlation ID header = %q, want client.CorrelationID = %q", received, client.CorrelationID)
+	}
+}
+
+func TestPullDivergedSurfacesCorrelationID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"error":         "conflict",
+			"message":       "known commit is not an ancestor of the remote branch head",
+			"currentHead":   "def456",
+			"correlationId": "corr-diverged",
+		})
+	}))
+	defer server.Close()
+
+	_, err := Pull(context.Background(), NewClient(), Config{Endpoint: server.URL, RepoID: "acme", AuthMode: AuthModeBearer}, "", "main", "stale-commit")
+	var diverged *DivergedError
+	if !errors.As(err, &diverged) {
+		t.Fatalf("err = %v, want *DivergedError", err)
+	}
+	if diverged.CorrelationID != "corr-diverged" {
+		t.Fatalf("diverged.CorrelationID = %q, want corr-diverged", diverged.CorrelationID)
+	}
+}
+
+func TestPullBadRequestWrapsRackErrorWithCorrelationID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"error":         "bad_request",
+			"message":       "branch query parameter is required",
+			"correlationId": "corr-pull-bad-request",
+		})
+	}))
+	defer server.Close()
+
+	_, err := Pull(context.Background(), NewClient(), Config{Endpoint: server.URL, RepoID: "acme", AuthMode: AuthModeBearer}, "", "", "")
+	if !errors.Is(err, ErrPullRejected) {
+		t.Fatalf("err = %v, want ErrPullRejected", err)
+	}
+	var rackErr *RackError
+	if !errors.As(err, &rackErr) {
+		t.Fatalf("err = %v, want *RackError", err)
+	}
+	if rackErr.Code != "bad_request" || rackErr.CorrelationID != "corr-pull-bad-request" {
+		t.Fatalf("rackErr = %#v", rackErr)
+	}
+}
+
 func TestPullUnreachableRemote(t *testing.T) {
 	_, err := Pull(context.Background(), NewClient(), Config{Endpoint: "http://127.0.0.1:1", RepoID: "acme", AuthMode: AuthModeBearer}, "", "main", "")
 	if !errors.Is(err, ErrRemoteUnreachable) {

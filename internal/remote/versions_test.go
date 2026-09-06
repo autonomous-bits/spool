@@ -3,6 +3,7 @@ package remote
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -104,6 +105,51 @@ func TestNegotiateVersionsSendsBearerAuthorizationHeader(t *testing.T) {
 	}
 	if receivedAuth != "Bearer secret-token" {
 		t.Fatalf("Authorization header = %q, want Bearer secret-token", receivedAuth)
+	}
+}
+
+func TestNegotiateVersionsSendsCorrelationIDHeader(t *testing.T) {
+	var received string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received = r.Header.Get(CorrelationIDHeader)
+		_ = json.NewEncoder(w).Encode(map[string]string{})
+	}))
+	defer server.Close()
+
+	client := NewClient()
+	if _, err := NegotiateVersions(context.Background(), client, Config{Endpoint: server.URL, RepoID: "acme", AuthMode: AuthModeBearer}, ""); err != nil {
+		t.Fatalf("NegotiateVersions: %v", err)
+	}
+	if received == "" {
+		t.Fatal("healthz request did not include a correlation ID header")
+	}
+	if received != client.CorrelationID {
+		t.Fatalf("correlation ID header = %q, want client.CorrelationID = %q", received, client.CorrelationID)
+	}
+}
+
+func TestNegotiateVersionsUnreachableWrapsRackErrorWithCorrelationID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"error":         "internal_error",
+			"message":       "unexpected failure",
+			"correlationId": "corr-500",
+		})
+	}))
+	defer server.Close()
+
+	_, err := NegotiateVersions(context.Background(), NewClient(), Config{Endpoint: server.URL, RepoID: "acme", AuthMode: AuthModeBearer}, "")
+	if !errors.Is(err, ErrRemoteUnreachable) {
+		t.Fatalf("err = %v, want ErrRemoteUnreachable", err)
+	}
+	var rackErr *RackError
+	if !errors.As(err, &rackErr) {
+		t.Fatalf("err = %v, want *RackError", err)
+	}
+	if rackErr.Code != "internal_error" || rackErr.CorrelationID != "corr-500" {
+		t.Fatalf("rackErr = %#v", rackErr)
 	}
 }
 

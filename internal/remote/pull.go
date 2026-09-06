@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -95,10 +94,12 @@ type PullResult struct {
 
 // DivergedError reports that the caller's supplied known commit is not an
 // ancestor of Rack's current branch head. ActualHead is Rack's current wire
-// head commit ID for the branch.
+// head commit ID for the branch. CorrelationID is the value Rack's audit
+// log recorded for this request.
 type DivergedError struct {
-	ActualHead string
-	Guidance   string
+	ActualHead    string
+	Guidance      string
+	CorrelationID string
 }
 
 func (e *DivergedError) Error() string {
@@ -106,14 +107,6 @@ func (e *DivergedError) Error() string {
 		return e.Guidance
 	}
 	return fmt.Sprintf("pull diverged: remote head is %s", e.ActualHead)
-}
-
-// pullErrorEnvelope mirrors Rack's JSON error body shape:
-// {"error": "...", "message": "...", "currentHead": "..."}.
-type pullErrorEnvelope struct {
-	Error       string `json:"error"`
-	Message     string `json:"message"`
-	CurrentHead string `json:"currentHead,omitempty"`
 }
 
 // pull calls GET {endpoint}/api/v1/repos/{repoID}/pull?branch=...&knownCommit=...
@@ -142,6 +135,7 @@ func (c *Client) pull(ctx context.Context, endpoint, repoID string, authMode Aut
 			request.Header.Set("Authorization", "Bearer "+credential)
 		}
 	}
+	c.setCorrelationHeader(request)
 
 	response, err := client.Do(request)
 	if err != nil {
@@ -155,19 +149,17 @@ func (c *Client) pull(ctx context.Context, endpoint, repoID string, authMode Aut
 	case http.StatusOK:
 		return decodePullResponse(response)
 	case http.StatusConflict:
-		var envelope pullErrorEnvelope
-		_ = json.NewDecoder(response.Body).Decode(&envelope)
-		return PullResult{}, &DivergedError{ActualHead: envelope.CurrentHead, Guidance: envelope.Message}
+		rackErr := decodeRackErrorFromResponse(response, credential)
+		return PullResult{}, &DivergedError{ActualHead: rackErr.CurrentHead, Guidance: rackErr.Message, CorrelationID: rackErr.CorrelationID}
 	case http.StatusNotFound:
-		return PullResult{}, ErrPullBranchNotFound
+		rackErr := decodeRackErrorFromResponse(response, credential)
+		return PullResult{}, fmt.Errorf("%w: %w", ErrPullBranchNotFound, rackErr)
 	default:
-		var envelope pullErrorEnvelope
-		_ = json.NewDecoder(response.Body).Decode(&envelope)
-		message := envelope.Message
-		if message == "" {
-			message = fmt.Sprintf("pull returned status %d", response.StatusCode)
+		rackErr := decodeRackErrorFromResponse(response, credential)
+		if rackErr.Message == "" {
+			rackErr.Message = fmt.Sprintf("pull returned status %d", response.StatusCode)
 		}
-		return PullResult{}, fmt.Errorf("%w: %s", ErrPullRejected, Redact(message, credential))
+		return PullResult{}, fmt.Errorf("%w: %w", ErrPullRejected, rackErr)
 	}
 }
 
