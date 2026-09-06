@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/autonomous-bits/spool/graphcontract"
+	"github.com/autonomous-bits/spool/internal/remote"
 	"github.com/autonomous-bits/spool/internal/repository/branch"
 	"github.com/fxamacker/cbor/v2"
 	"github.com/gofrs/flock"
@@ -169,6 +170,7 @@ type Repository struct {
 	mergeLeases                     map[string]string
 	mergeTransactions               map[string]mergeTransaction
 	mergeStateDir                   string
+	remote                          *remote.Config
 	persistStateFn                  func(string, string, *mergeTransaction) error
 	persistRepositoryFn             func() error
 	appendReflogFn                  func(string, ObjectID, ObjectID, string) error
