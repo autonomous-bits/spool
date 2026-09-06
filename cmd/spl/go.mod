@@ -1,6 +1,6 @@
 module github.com/autonomous-bits/spool/cmd/spl
 
-go 1.26.1
+go 1.26.6
 
 require (
 	github.com/autonomous-bits/spool v0.0.0
