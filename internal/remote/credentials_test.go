@@ -80,3 +80,15 @@ func TestResolveCredentialWithNoSourcesConfiguredReportsNotFound(t *testing.T) {
 		t.Fatalf("ResolveCredential error = %v, want ErrCredentialNotFound", err)
 	}
 }
+
+func TestResolveCredentialDefaultsGetenvToOSGetenvWhenNil(t *testing.T) {
+	t.Setenv("SPOOL_RACK_TOKEN", "from-real-os-env")
+	opts := ResolveOptions{Keychain: fakeKeychain{err: ErrCredentialNotFound}}
+	credential, err := ResolveCredential("acme-prod", AuthModeBearer, opts)
+	if err != nil {
+		t.Fatalf("ResolveCredential: %v", err)
+	}
+	if credential.Value != "from-real-os-env" || credential.Source != CredentialSourceEnv {
+		t.Fatalf("credential = %#v, want os.Getenv value", credential)
+	}
+}

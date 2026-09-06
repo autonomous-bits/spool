@@ -99,6 +99,48 @@ func TestConfigValidateRejectsWhitespaceInRepoID(t *testing.T) {
 	}
 }
 
+func TestConfigValidateRejectsLeadingOrTrailingWhitespaceInEndpoint(t *testing.T) {
+	cfg := validConfig()
+	cfg.Endpoint = " https://rack.example.com"
+	if err := cfg.Validate(); !errors.Is(err, ErrInvalidConfig) {
+		t.Fatalf("Validate = %v, want ErrInvalidConfig", err)
+	}
+}
+
+func TestConfigValidateRejectsLeadingOrTrailingWhitespaceInRepoID(t *testing.T) {
+	cfg := validConfig()
+	cfg.RepoID = " acme-prod"
+	if err := cfg.Validate(); !errors.Is(err, ErrInvalidConfig) {
+		t.Fatalf("Validate = %v, want ErrInvalidConfig", err)
+	}
+}
+
+func TestConfigValidateRejectsEndpointWithQueryOrFragment(t *testing.T) {
+	for _, endpoint := range []string{
+		"https://rack.example.com/?token=super-secret",
+		"https://rack.example.com/#fragment",
+	} {
+		cfg := validConfig()
+		cfg.Endpoint = endpoint
+		if err := cfg.Validate(); !errors.Is(err, ErrInvalidConfig) {
+			t.Fatalf("Validate(%q) = %v, want ErrInvalidConfig", endpoint, err)
+		}
+	}
+}
+
+func TestConfigValidateAcceptsRepoIDsThatMerelyContainSecretPrefixSubstrings(t *testing.T) {
+	// These must not be flagged: the secret-prefix heuristic matches
+	// credential-shaped tokens at a boundary, not any substring occurrence,
+	// so ordinary identifiers that happen to contain a prefix are accepted.
+	for _, repoID := range []string{"akiametrics", "eyjafjallajokull"} {
+		cfg := validConfig()
+		cfg.RepoID = repoID
+		if err := cfg.Validate(); err != nil {
+			t.Fatalf("Validate(%q) = %v, want nil", repoID, err)
+		}
+	}
+}
+
 func TestEnvVarMapsAuthModes(t *testing.T) {
 	bearer, err := EnvVar(AuthModeBearer)
 	if err != nil || bearer != "SPOOL_RACK_TOKEN" {

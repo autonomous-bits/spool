@@ -37,3 +37,28 @@ func TestLooksLikeSecretDetectsKnownPrefixes(t *testing.T) {
 		}
 	}
 }
+
+func TestLooksLikeSecretMatchesRealTokenCasingNotOrdinaryWords(t *testing.T) {
+	// Real AWS access key IDs always start with the literal uppercase
+	// "AKIA", and real JWTs always start with the literal "eyJ" (lowercase
+	// e/y, uppercase J). Ordinary lowercase words that merely start with the
+	// same letters, or identifiers where the prefix appears mid-string, must
+	// not be flagged.
+	cases := map[string]bool{
+		"akiametrics":          false,
+		"eyjafjallajokull":     false,
+		"my-akia-service":      false,
+		"AKIAIOSFODNN7EXAMPLE": true,
+	}
+	for value, want := range cases {
+		if got := looksLikeSecret(value); got != want {
+			t.Fatalf("looksLikeSecret(%q) = %v, want %v", value, got, want)
+		}
+	}
+}
+
+func TestLooksLikeSecretDetectsBearerPhrase(t *testing.T) {
+	if !looksLikeSecret("Authorization: Bearer some-token-value") {
+		t.Fatal("looksLikeSecret(bearer phrase) = false, want true")
+	}
+}

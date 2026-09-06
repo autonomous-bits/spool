@@ -47,7 +47,10 @@ type Config struct {
 // configuration. It rejects missing fields, malformed endpoints, unsupported
 // auth modes, and values that look like pasted-in credentials.
 func (c Config) Validate() error {
-	endpoint := strings.TrimSpace(c.Endpoint)
+	if c.Endpoint != strings.TrimSpace(c.Endpoint) {
+		return fmt.Errorf("%w: endpoint must not have leading or trailing whitespace", ErrInvalidConfig)
+	}
+	endpoint := c.Endpoint
 	if endpoint == "" {
 		return fmt.Errorf("%w: endpoint is required", ErrInvalidConfig)
 	}
@@ -64,11 +67,17 @@ func (c Config) Validate() error {
 	if parsed.User != nil {
 		return fmt.Errorf("%w: endpoint", ErrSecretLikeValue)
 	}
+	if parsed.RawQuery != "" || parsed.Fragment != "" || parsed.RawFragment != "" {
+		return fmt.Errorf("%w: endpoint must not include query or fragment components", ErrInvalidConfig)
+	}
 	if looksLikeSecret(endpoint) {
 		return fmt.Errorf("%w: endpoint", ErrSecretLikeValue)
 	}
 
-	repoID := strings.TrimSpace(c.RepoID)
+	if c.RepoID != strings.TrimSpace(c.RepoID) {
+		return fmt.Errorf("%w: repo_id must not have leading or trailing whitespace", ErrInvalidConfig)
+	}
+	repoID := c.RepoID
 	if repoID == "" {
 		return fmt.Errorf("%w: repo_id is required", ErrInvalidConfig)
 	}

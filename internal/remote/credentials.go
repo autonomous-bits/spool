@@ -3,6 +3,7 @@ package remote
 import (
 	"errors"
 	"fmt"
+	"os"
 )
 
 // CredentialSource identifies where a resolved credential came from.
@@ -74,10 +75,8 @@ func ResolveCredential(repoID string, mode AuthMode, opts ResolveOptions) (Crede
 		}
 	}
 
-	if opts.Getenv != nil {
-		if value := opts.Getenv(envVar); value != "" {
-			return Credential{Value: value, Source: CredentialSourceEnv}, nil
-		}
+	if value := getenv(opts.Getenv)(envVar); value != "" {
+		return Credential{Value: value, Source: CredentialSourceEnv}, nil
 	}
 
 	if opts.Prompt != nil {
@@ -101,4 +100,14 @@ func authModeLabel(mode AuthMode) string {
 		return "API key"
 	}
 	return "bearer token"
+}
+
+// getenv returns fn, or os.Getenv if fn is nil, so ResolveCredential's
+// environment-variable fallback matches ResolveOptions.Getenv's documented
+// default without every caller needing to wire os.Getenv explicitly.
+func getenv(fn func(string) string) func(string) string {
+	if fn != nil {
+		return fn
+	}
+	return os.Getenv
 }
