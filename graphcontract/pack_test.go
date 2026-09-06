@@ -346,7 +346,9 @@ func TestDecompressPackedObjectRejectsCorruption(t *testing.T) {
 			t.Fatalf("create zstd encoder: %v", err)
 		}
 		malformedCompressed := encoder.EncodeAll(malformed, nil)
-		encoder.Close()
+		if err := encoder.Close(); err != nil {
+			t.Fatalf("close zstd encoder: %v", err)
+		}
 
 		badEntry := fixture.Entry
 		badEntry.CompressedSize = uint64(len(malformedCompressed))
