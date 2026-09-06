@@ -1,11 +1,11 @@
 package remote
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"strings"
@@ -84,8 +84,9 @@ func (c *Client) push(ctx context.Context, endpoint, repoID string, authMode Aut
 		client = &http.Client{Timeout: pushTimeout}
 	}
 
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
+	pipeReader, pipeWriter := io.Pipe()
+	writer := multipart.NewWriter(pipeWriter)
+	contentType := writer.FormDataContentType()
 
 	metadata := struct {
 		Branch       string             `json:"branch"`
@@ -102,30 +103,40 @@ func (c *Client) push(ctx context.Context, endpoint, repoID string, authMode Aut
 		PackFormat:   req.PackFormat,
 		Commits:      req.Commits,
 	}
-	metadataPart, err := writer.CreateFormField("metadata")
-	if err != nil {
-		return PushResult{}, fmt.Errorf("build push request: %w", err)
-	}
-	if err := json.NewEncoder(metadataPart).Encode(metadata); err != nil {
-		return PushResult{}, fmt.Errorf("encode push metadata: %w", err)
-	}
-	packPart, err := writer.CreateFormFile("pack", "pack.cbor")
-	if err != nil {
-		return PushResult{}, fmt.Errorf("build push request: %w", err)
-	}
-	if _, err := packPart.Write(req.PackData); err != nil {
-		return PushResult{}, fmt.Errorf("write push pack: %w", err)
-	}
-	if err := writer.Close(); err != nil {
-		return PushResult{}, fmt.Errorf("build push request: %w", err)
-	}
+
+	// The multipart body is streamed directly into the HTTP request via a
+	// pipe rather than buffered into memory first, so a large pack does not
+	// require holding two full copies of it in RAM (req.PackData plus a
+	// buffered request body). Any build failure here (or the transport
+	// abandoning the body on its own connection failure) closes the pipe
+	// with an error, which client.Do below surfaces as its own error.
+	go func() {
+		err := func() error {
+			metadataPart, err := writer.CreateFormField("metadata")
+			if err != nil {
+				return fmt.Errorf("build push request: %w", err)
+			}
+			if err := json.NewEncoder(metadataPart).Encode(metadata); err != nil {
+				return fmt.Errorf("encode push metadata: %w", err)
+			}
+			packPart, err := writer.CreateFormFile("pack", "pack.cbor")
+			if err != nil {
+				return fmt.Errorf("build push request: %w", err)
+			}
+			if _, err := packPart.Write(req.PackData); err != nil {
+				return fmt.Errorf("write push pack: %w", err)
+			}
+			return writer.Close()
+		}()
+		_ = pipeWriter.CloseWithError(err)
+	}()
 
 	target := strings.TrimRight(endpoint, "/") + "/api/v1/repos/" + repoID + "/push"
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, target, &body)
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, target, pipeReader)
 	if err != nil {
 		return PushResult{}, fmt.Errorf("build push request: %w", err)
 	}
-	request.Header.Set("Content-Type", writer.FormDataContentType())
+	request.Header.Set("Content-Type", contentType)
 	if credential != "" {
 		if authMode == AuthModeAPIKey {
 			request.Header.Set("X-Api-Key", credential)

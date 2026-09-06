@@ -220,7 +220,7 @@ func (r *Repository) BuildPushPack(ctx context.Context, branch, baseCommit strin
 		Objects: make([]pushPackObject, 0, len(objects)),
 	}
 	for _, object := range objects {
-		frame.Objects = append(frame.Objects, pushPackObject{ID: object.ID, Data: object.Data})
+		frame.Objects = append(frame.Objects, pushPackObject(object))
 	}
 	packData, err := pushCanonicalCBOR.Marshal(frame)
 	if err != nil {

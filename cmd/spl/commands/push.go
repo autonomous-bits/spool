@@ -74,7 +74,7 @@ func NewPushCommand(repoProvider func() (*repository.Repository, error)) *cobra.
 						Message:    nffErr.Guidance,
 					})
 				}
-				return fmt.Errorf("push to rack: %s", remote.Redact(err.Error(), credential))
+				return fmt.Errorf("push to rack: %w", err)
 			}
 
 			return json.NewEncoder(command.OutOrStdout()).Encode(pushResult{
