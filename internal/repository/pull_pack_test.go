@@ -175,6 +175,39 @@ func TestInstallPullPackRejectsTamperedObjectHash(t *testing.T) {
 	}
 }
 
+func TestInstallPullPackRejectsTamperedTarget(t *testing.T) {
+	ctx := context.Background()
+	source := newTestSeedRepository(t)
+	dest := newTestSeedRepository(t)
+
+	seedPack, err := source.BuildPushPack(ctx, "main", "")
+	if err != nil {
+		t.Fatalf("BuildPushPack (seed): %v", err)
+	}
+	commitTestMutation(t, source, "pull-node-1", "First", "alice", "first commit")
+	pack, err := source.BuildPushPack(ctx, "main", seedPack.TargetCommit)
+	if err != nil {
+		t.Fatalf("BuildPushPack: %v", err)
+	}
+
+	var frame pushPackFrame
+	if err := cbor.Unmarshal(pack.PackData, &frame); err != nil {
+		t.Fatalf("decode pack: %v", err)
+	}
+	// Declare a bogus target that does not match the recomputed wire ID of
+	// the commit actually carried in the pack's Commits list.
+	frame.Target.ID = frame.Target.ID + "-tampered"
+	tampered, err := pushCanonicalCBOR.Marshal(frame)
+	if err != nil {
+		t.Fatalf("re-marshal tampered pack: %v", err)
+	}
+
+	_, err = dest.InstallPullPack(ctx, "main", [][]byte{tampered}, pack.TargetCommit)
+	if err == nil {
+		t.Fatal("expected an error for tampered pack target, got nil")
+	}
+}
+
 func TestInstallPullPackNoPacksIsNoOp(t *testing.T) {
 	ctx := context.Background()
 	dest := newTestSeedRepository(t)

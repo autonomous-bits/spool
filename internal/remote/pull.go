@@ -32,6 +32,11 @@ const (
 	pullEnvelopeMagic      = "SRPL"
 	pullEnvelopeFormatV2   = uint32(2)
 	pullEnvelopeHeaderSize = 16
+	// pullPackFormatV2 identifies a canonical Rack push/pull pack frame,
+	// matching Rack's sync.PackFormatV2 and internal/repository's
+	// PushPackFormatV2. Every pack declared by a v2 pull manifest must use
+	// this format.
+	pullPackFormatV2 = uint32(2)
 )
 
 // ErrInvalidPullEnvelope indicates Rack's pull response body was malformed,
@@ -216,6 +221,9 @@ func decodePullEnvelope(data []byte) (head string, packs [][]byte, err error) {
 	packs = make([][]byte, len(manifest.Packs))
 	offset := manifestEnd
 	for i, pack := range manifest.Packs {
+		if pack.Format != pullPackFormatV2 {
+			return "", nil, fmt.Errorf("%w: pack %d has unsupported format %d", ErrInvalidPullEnvelope, i, pack.Format)
+		}
 		if pack.Length > uint64(len(data)-offset) {
 			return "", nil, fmt.Errorf("%w: pack %d length exceeds envelope", ErrInvalidPullEnvelope, i)
 		}

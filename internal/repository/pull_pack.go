@@ -228,8 +228,9 @@ func (r *Repository) InstallPullPack(ctx context.Context, branch string, packs [
 			lastWireID = wireID
 			installed++
 		}
-		if frame.Target.ID != "" && i == len(frames)-1 {
-			lastWireID = frame.Target.ID
+		if frame.Target.ID != "" && frame.Target.ID != lastWireID {
+			restore()
+			return InstallPullResult{}, fmt.Errorf("%w: pack %d declared target %q does not match computed head %q", ErrPullInvalidPack, i, frame.Target.ID, lastWireID)
 		}
 	}
 
@@ -238,16 +239,16 @@ func (r *Repository) InstallPullPack(ctx context.Context, branch string, packs [
 		return InstallPullResult{}, fmt.Errorf("%w: installed head %q does not match expected head %q", ErrPullInvalidPack, lastWireID, expectedHead)
 	}
 
-	if err := r.ensureBranchHeadProjectionsLocked(); err != nil {
-		restore()
-		return InstallPullResult{}, fmt.Errorf("repository: pin pulled snapshot: %w", err)
-	}
-	r.branches[branch] = currentLocalHead
-
 	packErr := r.objectBatch.publish()
 	if packErr != nil && !packPublicationCommitted(packErr) {
 		restore()
 		return InstallPullResult{}, fmt.Errorf("repository: publish pulled immutable objects: %w", packErr)
+	}
+
+	r.branches[branch] = currentLocalHead
+	if err := r.ensureBranchHeadProjectionsLocked(); err != nil {
+		restore()
+		return InstallPullResult{}, fmt.Errorf("repository: pin pulled snapshot: %w", err)
 	}
 
 	refErr := r.writeRefLocked(branch, head, currentLocalHead, "pull")

@@ -20,6 +20,14 @@ import (
 // boundaries, leaving PackFrameV2 decoding to internal/repository).
 func buildTestPullEnvelope(t *testing.T, head string, packs [][]byte) []byte {
 	t.Helper()
+	return buildTestPullEnvelopeWithFormat(t, head, packs, 2)
+}
+
+// buildTestPullEnvelopeWithFormat is buildTestPullEnvelope but lets the
+// caller override every pack's declared manifest Format field, to exercise
+// pack-format validation.
+func buildTestPullEnvelopeWithFormat(t *testing.T, head string, packs [][]byte, packFormat uint32) []byte {
+	t.Helper()
 	manifest := pullManifestV2{
 		Version: pullEnvelopeFormatV2,
 		Head:    head,
@@ -28,7 +36,7 @@ func buildTestPullEnvelope(t *testing.T, head string, packs [][]byte) []byte {
 	for i, pack := range packs {
 		manifest.Packs[i] = pullPackManifestV2{
 			Hash:   pullContentID(pack),
-			Format: 2,
+			Format: packFormat,
 			Length: uint64(len(pack)),
 		}
 	}
@@ -128,6 +136,21 @@ func TestPullTamperedPackHashRejected(t *testing.T) {
 	// Flip a byte inside the pack payload (after the header+manifest) so its
 	// content no longer matches the manifest's declared hash.
 	envelope[len(envelope)-1] ^= 0xFF
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeZstdPullResponse(t, w, envelope)
+	}))
+	defer server.Close()
+
+	_, err := Pull(context.Background(), NewClient(), Config{Endpoint: server.URL, RepoID: "acme", AuthMode: AuthModeBearer}, "", "main", "")
+	if !errors.Is(err, ErrInvalidPullEnvelope) {
+		t.Fatalf("err = %v, want ErrInvalidPullEnvelope", err)
+	}
+}
+
+func TestPullUnsupportedPackFormatRejected(t *testing.T) {
+	packs := [][]byte{[]byte("pack-one")}
+	envelope := buildTestPullEnvelopeWithFormat(t, "deadbeef", packs, 99)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		writeZstdPullResponse(t, w, envelope)
