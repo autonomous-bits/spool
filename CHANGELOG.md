@@ -16,12 +16,13 @@ generated from commits since the preceding `v*` tag. Commits prefixed with `docs
   and normalization, schema validation, and stable normalized violations,
   enabling downstream integrations to share Spool's schema semantics.
 
+## [1.4.0] - 2026-09-06
+
 ### Added
 
-- Public `graphcontract` schema TOML parser, canonical schema CBOR objects, and
-  graph validator with stable normalized violation categories. Versioned
-  interoperability fixtures for graph, migration, and merge candidates are
-  available to downstream integrations.
+- Public `graphcontract` schema APIs for canonical schema CBOR, TOML parsing
+  and normalization, schema validation, and stable normalized violations are
+  available on the original Go module path for downstream integrations.
 
 ## [2.0.0] - 2026-09-05
 
