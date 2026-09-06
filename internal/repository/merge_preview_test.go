@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/autonomous-bits/spool/graphcontract"
 	"github.com/autonomous-bits/spool/internal/repository/branch"
 )
 
@@ -18,8 +19,21 @@ func TestMergeNodeCombinesIndependentFields(t *testing.T) {
 	target.Properties["priority"] = IntegerPropertyValue(2)
 	target.Properties["owner"] = StringPropertyValue("target")
 
-	var conflicts []MergeConflict
-	merged, present := mergeNode("node", base, source, target, true, true, true, &conflicts)
+	result, err := graphcontract.ThreeWayMerge(
+		map[string]Node{"node": base},
+		map[string]Node{"node": source},
+		map[string]Node{"node": target},
+		nil,
+		nil,
+		nil,
+		"",
+		"",
+		"",
+	)
+	if err != nil {
+		t.Fatalf("ThreeWayMerge: %v", err)
+	}
+	merged, present := result.Nodes["node"]
 	if !present {
 		t.Fatal("merged node is absent")
 	}
@@ -29,8 +43,8 @@ func TestMergeNodeCombinesIndependentFields(t *testing.T) {
 	if !merged.Properties["priority"].Equal(target.Properties["priority"]) || !merged.Properties["owner"].Equal(target.Properties["owner"]) {
 		t.Fatalf("properties = %#v, want target properties", merged.Properties)
 	}
-	if len(conflicts) != 0 {
-		t.Fatalf("conflicts = %#v", conflicts)
+	if len(result.Conflicts) != 0 {
+		t.Fatalf("conflicts = %#v", result.Conflicts)
 	}
 }
 
@@ -40,8 +54,21 @@ func TestMergeNodeReportsOverlappingPropertyConflict(t *testing.T) {
 	source.Properties["priority"] = IntegerPropertyValue(2)
 	target.Properties["priority"] = IntegerPropertyValue(3)
 
-	var conflicts []MergeConflict
-	_, _ = mergeNode("node", base, source, target, true, true, true, &conflicts)
+	result, err := graphcontract.ThreeWayMerge(
+		map[string]Node{"node": base},
+		map[string]Node{"node": source},
+		map[string]Node{"node": target},
+		nil,
+		nil,
+		nil,
+		"",
+		"",
+		"",
+	)
+	if err != nil {
+		t.Fatalf("ThreeWayMerge: %v", err)
+	}
+	conflicts := result.Conflicts
 	if len(conflicts) != 1 || conflicts[0].Category != "structural" || conflicts[0].Entity != "node" ||
 		conflicts[0].ID != "node" || conflicts[0].Field != "properties.priority" {
 		t.Fatalf("conflicts = %#v", conflicts)
