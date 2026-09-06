@@ -81,6 +81,7 @@ func newRootCommandWithLifecycle(
 	root.AddCommand(commands.NewWorkspaceCommandDefault())
 	root.AddCommand(commands.NewRemoteCommand(repoProvider))
 	root.AddCommand(commands.NewPushCommand(repoProvider))
+	root.AddCommand(commands.NewPullCommand(repoProvider))
 	root.AddCommand(commands.NewVersionCommand())
 	return root
 }
