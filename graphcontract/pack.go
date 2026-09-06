@@ -291,17 +291,17 @@ func ObjectIDForEncoded(objectType string, encoded []byte) ObjectID {
 func DecodePackedObjectEnvelope(data []byte, id ObjectID) (objectType string, objectData []byte, err error) {
 	var envelope packObjectEnvelope
 	if err := cbor.Unmarshal(data, &envelope); err != nil {
-		return "", nil, fmt.Errorf("decode object envelope: %v", err)
+		return "", nil, &PackCorruptionError{Object: id, Detail: fmt.Sprintf("decode object envelope: %v", err)}
 	}
 	canonical, err := canonicalCBOR.Marshal(envelope)
 	if err != nil || !bytes.Equal(data, canonical) {
-		return "", nil, fmt.Errorf("non-canonical object envelope for %s", id)
+		return "", nil, &PackCorruptionError{Object: id, Detail: "non-canonical object envelope"}
 	}
 	if envelope.Type == "" {
-		return "", nil, fmt.Errorf("empty object type for %s", id)
+		return "", nil, &PackCorruptionError{Object: id, Detail: "empty object type"}
 	}
 	if ObjectIDForEncoded(envelope.Type, envelope.Data) != id {
-		return "", nil, fmt.Errorf("object hash mismatch for %s", id)
+		return "", nil, &PackCorruptionError{Object: id, Detail: "object hash mismatch"}
 	}
 	return envelope.Type, append([]byte(nil), envelope.Data...), nil
 }
@@ -309,22 +309,25 @@ func DecodePackedObjectEnvelope(data []byte, id ObjectID) (objectType string, ob
 // DecompressPackedObject validates a packed entry's CRC32, decompresses its
 // zstd-compressed envelope, verifies the decompressed size, and decodes and
 // verifies its canonical object envelope. It returns the object's type and
-// canonical bytes.
+// canonical bytes. Decompression is streamed and bounded to
+// entry.UncompressedSize+1 bytes so a corrupt or hostile entry cannot force
+// unbounded memory allocation before the size check runs.
 func DecompressPackedObject(entry PackIndexEntry, compressed []byte) (objectType string, objectData []byte, err error) {
 	if crc32.ChecksumIEEE(compressed) != entry.CRC32 {
-		return "", nil, errors.New("compressed entry CRC does not match")
+		return "", nil, &PackCorruptionError{Object: entry.Object, Offset: entry.Offset, Detail: "compressed entry CRC does not match"}
 	}
-	decoder, err := zstd.NewReader(nil)
+	decoder, err := zstd.NewReader(bytes.NewReader(compressed))
 	if err != nil {
 		return "", nil, fmt.Errorf("create zstd decoder: %w", err)
 	}
 	defer decoder.Close()
-	envelope, err := decoder.DecodeAll(compressed, nil)
+	limited := io.LimitReader(decoder, int64(entry.UncompressedSize)+1)
+	envelope, err := io.ReadAll(limited)
 	if err != nil {
-		return "", nil, fmt.Errorf("decompress entry: %v", err)
+		return "", nil, &PackCorruptionError{Object: entry.Object, Offset: entry.Offset, Detail: fmt.Sprintf("decompress entry: %v", err)}
 	}
 	if uint64(len(envelope)) != entry.UncompressedSize {
-		return "", nil, errors.New("uncompressed entry size does not match")
+		return "", nil, &PackCorruptionError{Object: entry.Object, Offset: entry.Offset, Detail: "uncompressed entry size does not match"}
 	}
 	return DecodePackedObjectEnvelope(envelope, entry.Object)
 }
