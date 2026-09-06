@@ -1,0 +1,7 @@
+{
+  "format_version": 1,
+  "name": "bad-magic",
+  "pack_base64": "WFhYWAAAAAIAAAABKLUv/QQAoQAAogFkbm9kZQJLeyJpZCI6Im4xIn04gJwO",
+  "failure_stage": "validate_header",
+  "error": "pack storage is corrupt"
+}

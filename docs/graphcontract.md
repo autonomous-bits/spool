@@ -1,8 +1,14 @@
 # Graph contract interoperability
 
 `github.com/autonomous-bits/spool/graphcontract` is Spool's public,
-dependency-light canonical graph contract. Rack must pin **`v2.1.0` or later**,
-the first release containing the schema API and interoperability fixtures.
+dependency-light canonical graph contract. Rack must pin **`v2.1.0` or
+later**, the first release containing the schema API and interoperability
+fixtures; a subsequent release adds the full object, commit, and invalid-pack
+conformance fixture sets described below (see `CHANGELOG.md` for the exact
+version). Before Rack upgrades its pinned Spool dependency, it executes these
+shared contract fixtures in Rack CI, and Spool runs the same fixtures as
+compatibility tests in Spool CI, so neither system owns a divergent
+interpretation.
 
 The package exports canonical `PropertyValue`, `Node`, `Edge`, and `Commit`
 objects; `SchemaSnapshot`, `NodeLabelRule`, `EdgeTypeRule`, `PropertyRule`,
@@ -69,7 +75,45 @@ On-disk pack layout, the sidecar index file's binary encoding, pack
 generation/reader lifecycle, and GC orchestration remain
 `internal/repository` implementation details; only the pure pack container
 format and its verification are part of this contract. Fixtures for the pack
-format are under `graphcontract/testdata/pack/v1/`.
+format are under `graphcontract/testdata/pack/v1/`, including
+`invalid-bad-magic.json` and `invalid-truncated-header.json`, which prove a
+pack stream with a corrupted magic header or one truncated below
+`PackHeaderSize` is rejected with `ErrPackCorrupt` before any packed object
+is read.
+
+## Object fixtures
+
+Versioned canonical-object fixtures are under
+`graphcontract/testdata/objects/v1/`. Each fixture either carries a `node` or
+`edge` `value` plus its expected `canonical_cbor_hex` and content-derived
+`object_id` (computed via `ObjectIDForEncoded("node", ...)` or
+`ObjectIDForEncoded("edge", ...)`), or an `error` describing why the value
+must be rejected. Version 1 covers every `PropertyValue` kind (null, bool,
+integer, float, string, list, map, including nested collections),
+label deduplication and sorting, values with absent versus explicitly empty
+collections, an unknown property kind (`ErrInvalidPropertyValue`), and
+non-canonical CBOR for both `Node` and `Edge` (`ErrInvalidCanonicalCBOR`).
+
+## Commit fixtures
+
+Versioned commit fixtures are under `graphcontract/testdata/commits/v1/`.
+Each fixture carries a `commit` (snapshot, parents, message, author, time)
+plus its expected `canonical_cbor_hex` and `object_id`
+(`ObjectIDForEncoded("commit", ...)`), or an `error` for commits that must
+be rejected. Version 1 covers a root commit (no parents), a linear commit
+(one parent), a merge commit (two parents, order preserved), invalid commits
+missing a snapshot or carrying an empty parent ID (`ErrInvalidCommit`), and
+non-canonical CBOR (`ErrInvalidCanonicalCBOR`).
+
+## Fixture manifest
+
+`graphcontract/testdata/MANIFEST.json` is the single, language-agnostic index
+of every fixture set (schema, pack, objects, commits): its directory,
+`format_version`, and a short description. A second repository's
+conformance runner — such as Rack's — reads this manifest to discover and
+iterate every fixture set without hardcoding per-language paths, and Spool's
+own `TestFixtureManifestListsEveryFixtureSet` proves every listed directory
+exists and stays non-empty.
 
 ## Snapshot roots
 

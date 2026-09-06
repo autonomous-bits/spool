@@ -1,0 +1,13 @@
+{
+  "format_version": 1,
+  "object_type": "node",
+  "value": {
+    "id": "node-1",
+    "title": "Node",
+    "labels": [],
+    "properties": {
+      "bad": {"kind": "bogus"}
+    }
+  },
+  "error": "invalid property value"
+}

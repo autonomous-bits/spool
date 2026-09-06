@@ -1,0 +1,25 @@
+{
+  "format_version": 1,
+  "object_type": "node",
+  "value": {
+    "id": "person-alice",
+    "title": "Alice",
+    "labels": ["Person", "Ephemeral", "Person"],
+    "properties": {
+      "active": {"kind": "bool", "bool": true},
+      "age": {"kind": "integer", "integer": 41},
+      "score": {"kind": "float", "float": 0},
+      "handle": {"kind": "string", "string": "alice"},
+      "note": {"kind": "null"},
+      "tags": {
+        "kind": "list",
+        "list": [
+          {"kind": "string", "string": "friend"},
+          {"kind": "map", "map": {"nested": {"kind": "bool", "bool": true}}}
+        ]
+      }
+    }
+  },
+  "canonical_cbor_hex": "a4016c706572736f6e2d616c6963650265416c696365038269457068656d6572616c66506572736f6e04a663616765a20167696e7465676572031829646e6f7465a101646e756c6c6474616773a201646c6973740682a20166737472696e670566667269656e64a201636d617007a1666e6573746564a20164626f6f6c02f56573636f7265a10165666c6f617466616374697665a20164626f6f6c02f56668616e646c65a20166737472696e670565616c696365",
+  "object_id": "2fd2c3b9f1219aedaf6f49120478ef9b6979341e6394beee235201ec9f4f1940"
+}

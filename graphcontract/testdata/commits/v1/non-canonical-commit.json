@@ -1,0 +1,6 @@
+{
+  "format_version": 1,
+  "candidate": "non-canonical",
+  "canonical_cbor_hex": "a40162616102f603616d046161",
+  "error": "invalid canonical CBOR"
+}

@@ -1,0 +1,31 @@
+{
+  "format_version": 1,
+  "package": "github.com/autonomous-bits/spool/graphcontract",
+  "description": "Versioned, Rack-consumable graphcontract conformance fixture sets. Each set is self-contained under testdata/<name>/v<format_version>/ and is exercised by a Go test in this package; a second repository (Rack) may load the same JSON fixtures directly to prove parity without depending on Spool's Go test internals.",
+  "fixture_sets": [
+    {
+      "name": "schema",
+      "directory": "testdata/schema/v1",
+      "format_version": 1,
+      "description": "Schema TOML normalization and graph/migration/merge candidate validation, valid and invalid, with stable SchemaViolation fixtures."
+    },
+    {
+      "name": "pack",
+      "directory": "testdata/pack/v1",
+      "format_version": 1,
+      "description": "Immutable pack container format: a valid round-trippable packed object, plus malformed pack streams (bad magic, truncated header) rejected with stable ErrPackCorrupt."
+    },
+    {
+      "name": "objects",
+      "directory": "testdata/objects/v1",
+      "format_version": 1,
+      "description": "Canonical Node and Edge encoding covering every PropertyValue kind, minimal (collection-absent) values, invalid property kinds, and non-canonical CBOR rejection, each with its content-derived ObjectID."
+    },
+    {
+      "name": "commits",
+      "directory": "testdata/commits/v1",
+      "format_version": 1,
+      "description": "Canonical Commit encoding for linear (single-parent) and merge (multi-parent) commits, invalid commits (missing snapshot, empty parent ID), and non-canonical CBOR rejection."
+    }
+  ]
+}
