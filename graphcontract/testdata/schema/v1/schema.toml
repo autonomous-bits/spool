@@ -1,0 +1,22 @@
+version = 2
+global_invariants = ["acyclic", "no-self-loop"]
+
+[[node]]
+label = "Other"
+
+[[node]]
+label = "Person"
+natural_key = ["external_id"]
+natural_key_unique = true
+[[node.property]]
+key = "external_id"
+required = true
+types = ["integer", "float"]
+
+[[edge]]
+type = "KNOWS"
+source_labels = ["Person"]
+target_labels = ["Person"]
+[edge.cardinality]
+source_max = 1
+target_max = 1

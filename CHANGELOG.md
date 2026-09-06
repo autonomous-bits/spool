@@ -8,6 +8,13 @@ generated from commits since the preceding `v*` tag. Commits prefixed with `docs
 
 ## [Unreleased]
 
+### Added
+
+- Public `graphcontract` schema TOML parser, canonical schema CBOR objects, and
+  graph validator with stable normalized violation categories. Versioned
+  interoperability fixtures for graph, migration, and merge candidates are
+  available to downstream integrations.
+
 ## [2.0.0] - 2026-09-05
 
 ### Changed

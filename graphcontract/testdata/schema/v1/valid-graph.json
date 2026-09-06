@@ -1,0 +1,45 @@
+{
+  "format_version": 1,
+  "candidate": "graph",
+  "schema": "schema.toml",
+  "nodes": {
+    "alice": {
+      "id": "alice",
+      "title": "Alice",
+      "labels": ["Person", "Ephemeral"],
+      "properties": {
+        "external_id": {"kind": "integer", "integer": 1},
+        "profile": {
+          "kind": "map",
+          "map": {
+            "score": {"kind": "float", "float": 1},
+            "tags": {
+              "kind": "list",
+              "list": [
+                {"kind": "string", "string": "friend"},
+                {"kind": "map", "map": {"nested": {"kind": "bool", "bool": true}}}
+              ]
+            }
+          }
+        }
+      }
+    },
+    "bob": {
+      "id": "bob",
+      "title": "Bob",
+      "labels": ["Person"],
+      "properties": {
+        "external_id": {"kind": "float", "float": 1}
+      }
+    }
+  },
+  "edges": {
+    "knows-alice-bob": {
+      "id": "knows-alice-bob",
+      "source": "alice",
+      "target": "bob",
+      "type": "KNOWS"
+    }
+  },
+  "violations": []
+}
