@@ -71,3 +71,23 @@ generation/reader lifecycle, and GC orchestration remain
 format and its verification are part of this contract. Fixtures for the pack
 format are under `graphcontract/testdata/pack/v1/`.
 
+## Snapshot roots
+
+`graphcontract` also exports the canonical graph snapshot root: `Snapshot`,
+the immutable, content-addressed root set for one graph version, referencing
+the node, edge, incoming-adjacency, outgoing-adjacency, and schema tree
+roots, plus their entity counts. `NewSnapshot` constructs a normalized
+value, and `MarshalSnapshot`/`UnmarshalSnapshot` provide canonical CBOR
+encoding with round-trip byte-identity verification (`ErrInvalidCanonicalCBOR`
+on non-canonical input), matching the `Node`/`Edge`/`Commit` conventions.
+
+A `Snapshot`'s content-derived `ObjectID` is computed the same way as every
+other graph object: `ObjectIDForEncoded("graph-snapshot", encoded)` over its
+canonical CBOR encoding. `Snapshot` has no nested collections to sort or
+deduplicate, so `Normalize` is a defensive copy; `Equal` and `Clone` follow
+the same semantics as the other canonical types.
+
+Building, storing, and reconstructing the node/edge/adjacency/schema trees
+that a `Snapshot` references remains `internal/repository` implementation
+detail; only the canonical root-set record itself is part of this contract.
+
