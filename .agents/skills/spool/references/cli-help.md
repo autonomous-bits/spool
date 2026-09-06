@@ -340,6 +340,7 @@ then an environment variable (`SPOOL_RACK_TOKEN` for `bearer`, `SPOOL_RACK_API_K
 ```sh
 spl push --branch main
 spl push --branch main --base-commit <last-known-wire-commit-id>
+spl push --branch main --reconcile
 ```
 
 `push` requires `--branch` and a configured Rack remote (`remote set`). It builds a native pack
@@ -352,11 +353,23 @@ rejection's `actualHead`); omit it to push the entire branch history.
 `push` only supports linear, fast-forward history: it fails with an error if any commit in the
 range being pushed has more than one parent. If the branch is already at `--base-commit`, it
 reports `{"pushed": false}` without contacting the remote. If Rack rejects the push because the
-branch has moved (a non-fast-forward conflict), `push` reports `{"pushed": false, "rejected":
-true, "actualHead": "..."}` with Rack's guidance message rather than attempting to merge or
-retry — reconciling a rejected push is out of scope for this command. Credentials are resolved the
-same way as other remote commands, but unlike `remote show`'s best-effort probe, `push` fails if no
-credential can be resolved, since pushing is a state-changing operation.
+branch has moved (a non-fast-forward conflict) and `--reconcile` was not set, `push` reports
+`{"pushed": false, "rejected": true, "actualHead": "..."}` with Rack's guidance message rather
+than attempting to merge or retry.
+
+With `--reconcile`, a non-fast-forward rejection is instead handled automatically: `push` fetches
+Rack's complete current history for `--branch` (a full pull, ignoring any local knowledge of
+Rack's state) into a local reconciliation branch named `reconcile/<branch>`, rebases `--branch`'s
+independent local changes onto it with the graph merge engine (the same three-way merge `spl
+merge preview` uses), and retries the push with the resulting fast-forward-eligible single-parent
+commit. A successful reconciled push reports `{"pushed": true, "reconciled": true, ...}`. If the
+merge finds conflicts, `push` leaves both `--branch` and `reconcile/<branch>` untouched — no
+retry is attempted — and reports `{"reconciled": false, "conflicted": true, "reconciliationBranch":
+"reconcile/<branch>", "conflicts": [...]}`; resolve the conflicts with `spl merge
+preview/apply/conflicts/resolve/finalize` against `--branch` and `reconcile/<branch>`, then retry
+`spl push --branch <branch> --reconcile`. Credentials are resolved the same way as other remote
+commands, but unlike `remote show`'s best-effort probe, `push` fails if no credential can be
+resolved, since pushing is a state-changing operation.
 
 ## Pull
 
