@@ -45,6 +45,7 @@ repository discovery.
 | `fsck`, `gc`, `prune` | Check integrity, maintain objects, and remove ephemeral graph data |
 | `workspace init/attach` | Provision central detached state and bind repository manifests |
 | `remote set/show/remove` | Configure a non-secret Rack remote and check graphcontract version compatibility |
+| `push` | Push local commits to the configured Rack remote over the native push protocol |
 | `version` | Print Spool release version and build information as JSON |
 | `completion`, `help` | Generate shell completion and inspect command help |
 
@@ -333,6 +334,29 @@ Credentials are never read from or written to `.spl/config.toml`. When a command
 resolved in this order: the OS keychain/secret store (service `spool-rack`, account = repo-id),
 then an environment variable (`SPOOL_RACK_TOKEN` for `bearer`, `SPOOL_RACK_API_KEY` for
 `api_key`), then an interactive TTY prompt with hidden input.
+
+## Push
+
+```sh
+spl push --branch main
+spl push --branch main --base-commit <last-known-wire-commit-id>
+```
+
+`push` requires `--branch` and a configured Rack remote (`remote set`). It builds a native pack
+from every commit reachable from `--branch` that Rack does not yet have, recomputing the Rack
+wire-format commit chain (canonical CBOR, BLAKE3 content addressing) from local history on every
+invocation — there is no persisted local-to-wire commit mapping yet. `--base-commit` is the last
+wire commit ID Rack is known to have for this branch (e.g. a prior push's `headCommit`, or a
+rejection's `actualHead`); omit it to push the entire branch history.
+
+`push` only supports linear, fast-forward history: it fails with an error if any commit in the
+range being pushed has more than one parent. If the branch is already at `--base-commit`, it
+reports `{"pushed": false}` without contacting the remote. If Rack rejects the push because the
+branch has moved (a non-fast-forward conflict), `push` reports `{"pushed": false, "rejected":
+true, "actualHead": "..."}` with Rack's guidance message rather than attempting to merge or
+retry — reconciling a rejected push is out of scope for this command. Credentials are resolved the
+same way as other remote commands, but unlike `remote show`'s best-effort probe, `push` fails if no
+credential can be resolved, since pushing is a state-changing operation.
 
 ## Version
 

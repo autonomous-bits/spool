@@ -10,6 +10,14 @@ generated from commits since the preceding `v*` tag. Commits prefixed with `docs
 
 ### Added
 
+- `spl push` CLI command that pushes verified local native commits and packs
+  to a repository's configured Rack remote over the native (non-JSON) push
+  protocol: it recomputes the Rack wire-format commit chain from local
+  history, builds a canonical CBOR pack, and sends it as a multipart
+  request, reporting a clean "nothing to push" result or Rack's non-fast-
+  forward rejection without attempting to merge or retry. Only linear,
+  fast-forward push ranges are supported; merge-commit and remote-branch-
+  tracking support are tracked separately.
 - Public `graphcontract` merge APIs exposing deterministic three-way graph
   merge simulation (`ThreeWayMerge`, `MergeResult`, `MergeChange`,
   `MergeConflict`, and conflict finalization helpers), enabling downstream
