@@ -44,8 +44,8 @@ func TestPushReconcileRetriesAfterCleanMerge(t *testing.T) {
 	var correlationIDs []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		correlationIDs = append(correlationIDs, r.Header.Get(remote.CorrelationIDHeader))
-		switch {
-		case r.Method == http.MethodGet:
+		switch r.Method {
+		case http.MethodGet:
 			if got := r.URL.Query().Get("knownCommit"); got != "" {
 				t.Fatalf("pull knownCommit = %q, want empty (full history fetch)", got)
 			}
