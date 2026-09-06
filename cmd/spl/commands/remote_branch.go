@@ -94,6 +94,8 @@ func newRemoteBranchCreateCommand(repoProvider func() (*repository.Repository, e
 	}
 	command.Flags().StringVar(&sourceBranch, "from-branch", "", "existing remote branch to use as the source")
 	command.Flags().StringVar(&sourceCommit, "from-commit", "", "existing remote commit to use as the source")
+	command.MarkFlagsOneRequired("from-branch", "from-commit")
+	command.MarkFlagsMutuallyExclusive("from-branch", "from-commit")
 	return command
 }
 

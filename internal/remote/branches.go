@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -56,7 +57,27 @@ var (
 	// ErrBranchRejected reports that Rack rejected a branch lifecycle
 	// request for a reason other than the typed cases above.
 	ErrBranchRejected = errors.New("rack rejected the branch request")
+	// ErrBranchSourceRequired reports a branch creation request that named
+	// neither a source branch nor a source commit.
+	ErrBranchSourceRequired = errors.New("branch source is required")
+	// ErrBranchSourceAmbiguous reports a branch creation request that named
+	// both a source branch and a source commit.
+	ErrBranchSourceAmbiguous = errors.New("branch source must identify a branch or commit, not both")
 )
+
+// validate reports whether req identifies exactly one of SourceBranch or
+// SourceCommit, matching the wire contract's "exactly one of" requirement.
+func (req BranchCreateRequest) validate() error {
+	hasBranch, hasCommit := req.SourceBranch != "", req.SourceCommit != ""
+	switch {
+	case !hasBranch && !hasCommit:
+		return ErrBranchSourceRequired
+	case hasBranch && hasCommit:
+		return ErrBranchSourceAmbiguous
+	default:
+		return nil
+	}
+}
 
 // ProtectedBranchError reports that Rack refused to delete a branch because
 // it is the repository's protected default branch. CorrelationID lets an
@@ -116,6 +137,9 @@ func (c *Client) newBranchRequest(ctx context.Context, method, target string, au
 
 // createBranch calls POST {endpoint}/api/v1/repos/{repoID}/branches.
 func (c *Client) createBranch(ctx context.Context, endpoint, repoID string, authMode AuthMode, credential string, req BranchCreateRequest) (BranchResult, error) {
+	if err := req.validate(); err != nil {
+		return BranchResult{}, err
+	}
 	body, err := json.Marshal(req)
 	if err != nil {
 		return BranchResult{}, fmt.Errorf("encode branch create request: %w", err)
@@ -205,8 +229,11 @@ func (c *Client) defaultBranch(ctx context.Context, endpoint, repoID string, aut
 }
 
 // deleteBranch calls DELETE {endpoint}/api/v1/repos/{repoID}/branches/{name}.
+// name is percent-escaped as a single path segment so a ref-like branch name
+// containing slashes (e.g. "feature/foo") is not misinterpreted as multiple
+// path segments by Rack's router.
 func (c *Client) deleteBranch(ctx context.Context, endpoint, repoID string, authMode AuthMode, credential string, name string) error {
-	request, err := c.newBranchRequest(ctx, http.MethodDelete, branchesEndpoint(endpoint, repoID)+"/"+strings.TrimPrefix(name, "/"), authMode, credential, nil)
+	request, err := c.newBranchRequest(ctx, http.MethodDelete, branchesEndpoint(endpoint, repoID)+"/"+url.PathEscape(name), authMode, credential, nil)
 	if err != nil {
 		return err
 	}

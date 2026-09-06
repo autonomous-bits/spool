@@ -68,6 +68,32 @@ func TestCreateBranchSourceNotFound(t *testing.T) {
 	}
 }
 
+func TestCreateBranchRejectsMissingSourceWithoutContactingServer(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("server should not be contacted when the request fails local validation")
+	}))
+	defer server.Close()
+
+	_, err := CreateBranch(context.Background(), NewClient(), Config{Endpoint: server.URL, RepoID: "acme", AuthMode: AuthModeBearer}, "",
+		BranchCreateRequest{Name: "feature"})
+	if !errors.Is(err, ErrBranchSourceRequired) {
+		t.Fatalf("err = %v, want ErrBranchSourceRequired", err)
+	}
+}
+
+func TestCreateBranchRejectsAmbiguousSourceWithoutContactingServer(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("server should not be contacted when the request fails local validation")
+	}))
+	defer server.Close()
+
+	_, err := CreateBranch(context.Background(), NewClient(), Config{Endpoint: server.URL, RepoID: "acme", AuthMode: AuthModeBearer}, "",
+		BranchCreateRequest{Name: "feature", SourceBranch: "main", SourceCommit: "abc123"})
+	if !errors.Is(err, ErrBranchSourceAmbiguous) {
+		t.Fatalf("err = %v, want ErrBranchSourceAmbiguous", err)
+	}
+}
+
 func TestListBranchesSuccess(t *testing.T) {
 	var gotPath string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -161,6 +187,26 @@ func TestDeleteBranchProtectedReturnsTypedError(t *testing.T) {
 	}
 	if protectedErr.Guidance != "default branch cannot be deleted" || protectedErr.CorrelationID != "corr-protected" {
 		t.Fatalf("protectedErr = %#v", protectedErr)
+	}
+}
+
+func TestDeleteBranchEscapesSlashInName(t *testing.T) {
+	var gotPath, gotRawPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotRawPath = r.URL.Path, r.URL.EscapedPath()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	err := DeleteBranch(context.Background(), NewClient(), Config{Endpoint: server.URL, RepoID: "acme", AuthMode: AuthModeBearer}, "", "feature/foo")
+	if err != nil {
+		t.Fatalf("DeleteBranch: %v", err)
+	}
+	if gotPath != "/api/v1/repos/acme/branches/feature/foo" {
+		t.Fatalf("decoded path = %q", gotPath)
+	}
+	if gotRawPath != "/api/v1/repos/acme/branches/feature%2Ffoo" {
+		t.Fatalf("raw path = %q, want branch name to be a single escaped path segment", gotRawPath)
 	}
 }
 

@@ -101,6 +101,26 @@ func TestRemoteBranchCreateWithoutConfiguredRemoteFails(t *testing.T) {
 	}
 }
 
+func TestRemoteBranchCreateRequiresExactlyOneSourceFlag(t *testing.T) {
+	tests := map[string][]string{
+		"neither flag set": {"create", "feature"},
+		"both flags set":   {"create", "feature", "--from-branch", "main", "--from-commit", "abc123"},
+	}
+	for name, args := range tests {
+		t.Run(name, func(t *testing.T) {
+			repo := newTestSeedRepository(t)
+			var output bytes.Buffer
+			command := newRemoteBranchCommand(func() (*repository.Repository, error) { return repo, nil })
+			command.SetOut(&output)
+			command.SetErr(&output)
+			command.SetArgs(args)
+			if err := command.Execute(); err == nil {
+				t.Fatal("Execute() err = nil, want an error requiring exactly one of --from-branch/--from-commit")
+			}
+		})
+	}
+}
+
 func TestRemoteBranchListReportsBranches(t *testing.T) {
 	repo := newTestSeedRepository(t)
 	var gotPath string

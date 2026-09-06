@@ -110,10 +110,26 @@ func (r *Repository) RemoteBranchTracking(localBranch string) (RemoteBranchTrack
 	return tracking, ok, nil
 }
 
+// ErrInvalidRemoteBranchTracking reports that a caller attempted to record
+// remote-branch tracking metadata with an invalid local branch name, remote
+// branch name, or head commit. Persisting an invalid entry would make the
+// repository fail to reopen (loadControlState rejects invalid entries), so
+// SetRemoteBranchTracking validates before ever touching durable state.
+var ErrInvalidRemoteBranchTracking = errors.New("remote branch tracking entry is invalid")
+
 // SetRemoteBranchTracking durably records that localBranch tracks
 // remoteBranch at remoteHeadCommit, overwriting any prior tracking entry for
 // localBranch.
 func (r *Repository) SetRemoteBranchTracking(localBranch, remoteBranch, remoteHeadCommit string) error {
+	if !validRefName(localBranch) {
+		return fmt.Errorf("%w: local branch %q", ErrInvalidRemoteBranchTracking, localBranch)
+	}
+	if !validRefName(remoteBranch) {
+		return fmt.Errorf("%w: remote branch %q", ErrInvalidRemoteBranchTracking, remoteBranch)
+	}
+	if remoteHeadCommit == "" {
+		return fmt.Errorf("%w: remote head commit is required for local branch %q", ErrInvalidRemoteBranchTracking, localBranch)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := r.ensureOpenLocked(); err != nil {

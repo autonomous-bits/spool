@@ -402,8 +402,8 @@ func (r *Repository) loadControlState() (bool, error) {
 		}
 	}
 	for localBranch, tracking := range config.RemoteBranches {
-		if !validRefName(localBranch) || tracking.RemoteBranch == "" {
-			return false, fmt.Errorf("decode repository configuration: invalid durable repository: invalid remote branch tracking entry")
+		if !validRefName(localBranch) || !validRefName(tracking.RemoteBranch) || tracking.RemoteHeadCommit == "" {
+			return false, fmt.Errorf("decode repository configuration: invalid durable repository: invalid remote branch tracking entry for local branch %q", localBranch)
 		}
 	}
 	head, err := readControlValue(r.headPath())
