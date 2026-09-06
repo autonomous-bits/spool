@@ -8,6 +8,16 @@ generated from commits since the preceding `v*` tag. Commits prefixed with `docs
 
 ## [Unreleased]
 
+### Added
+
+- Public `graphcontract` pack APIs exposing the immutable pack container
+  format (`PackID`, `PackManifest`, `PackIndexEntry`, `PackHeader`, and
+  related errors) and full packed-object integrity verification
+  (`ValidatePackHeader`, `ValidatePackManifest`, `ValidatePackIndexEntry`,
+  `ValidatePackEntries`, `DecompressPackedObject`), enabling downstream
+  integrations to verify native Spool packs without depending on
+  `internal/repository`.
+
 ## [2.1.0] - 2026-09-06
 
 ### Added

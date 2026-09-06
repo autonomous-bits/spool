@@ -7,15 +7,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"hash/crc32"
 	"io"
 	"math"
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 
-	"github.com/klauspost/compress/zstd"
+	"github.com/autonomous-bits/spool/graphcontract"
 )
 
 const (
@@ -220,33 +218,15 @@ func (binaryPackIndexStore) Write(path string, metadata packIndexMetadata, entri
 }
 
 func validatePackIndexMetadata(metadata packIndexMetadata) error {
-	if metadata.Version != PackIndexFormatVersion {
-		return &UnsupportedPackVersionError{Format: "pack index", Version: metadata.Version}
-	}
-	if !validPackID(metadata.Pack) {
-		return &PackCorruptionError{Pack: metadata.Pack, Detail: "invalid pack ID"}
-	}
-	return nil
+	return graphcontract.ValidatePackIndexMetadata(metadata)
 }
 
 func validatePackIndexEntry(packID PackID, entry PackIndexEntry) error {
-	if !validLooseObjectID(entry.Object) {
-		return &PackCorruptionError{Pack: packID, Object: entry.Object, Offset: entry.Offset, Detail: "invalid object ID"}
-	}
-	if entry.Offset < packHeaderSize || entry.CompressedSize == 0 || entry.UncompressedSize == 0 ||
-		entry.Offset > math.MaxInt64 || entry.CompressedSize > math.MaxInt64 || entry.UncompressedSize > math.MaxInt64 ||
-		entry.Offset > math.MaxUint64-entry.CompressedSize {
-		return &PackCorruptionError{Pack: packID, Object: entry.Object, Offset: entry.Offset, Detail: "invalid object entry bounds"}
-	}
-	return nil
+	return graphcontract.ValidatePackIndexEntry(packID, entry)
 }
 
 func validPackID(id PackID) bool {
-	if len(id) != 32 {
-		return false
-	}
-	_, err := hex.DecodeString(string(id))
-	return err == nil && strings.ToLower(string(id)) == string(id)
+	return graphcontract.ValidPackID(id)
 }
 
 func (s *looseObjectStore) packDirectory() string {
@@ -331,29 +311,7 @@ func (s *looseObjectStore) readPackManifest() (PackManifest, error) {
 }
 
 func validatePackManifest(manifest PackManifest) error {
-	if manifest.Version != PackManifestFormatVersion {
-		return &UnsupportedPackVersionError{Format: "pack manifest", Version: manifest.Version}
-	}
-	if manifest.Packs == nil {
-		return &PackCorruptionError{Detail: "manifest packs must be an array"}
-	}
-	seen := make(map[PackID]struct{}, len(manifest.Packs))
-	for _, metadata := range manifest.Packs {
-		if !validPackID(metadata.ID) {
-			return &PackCorruptionError{Pack: metadata.ID, Detail: "manifest has an invalid pack ID"}
-		}
-		if metadata.Version != PackFormatVersion {
-			return &UnsupportedPackVersionError{Format: "pack", Version: metadata.Version}
-		}
-		if metadata.Compression != PackCompressionZstd {
-			return &PackCorruptionError{Pack: metadata.ID, Detail: "manifest has an unsupported compression"}
-		}
-		if _, duplicate := seen[metadata.ID]; duplicate {
-			return &PackCorruptionError{Pack: metadata.ID, Detail: "manifest lists a pack more than once"}
-		}
-		seen[metadata.ID] = struct{}{}
-	}
-	return nil
+	return graphcontract.ValidatePackManifest(manifest)
 }
 
 func (s *looseObjectStore) writePackManifest(manifest PackManifest) error {
@@ -604,22 +562,7 @@ func readPackedObjectReader(packID PackID, reader *packReader, entry PackIndexEn
 	if _, err := reader.file.ReadAt(compressed, int64(entry.Offset)); err != nil {
 		return "", nil, &PackCorruptionError{Pack: packID, Object: entry.Object, Offset: entry.Offset, Detail: "read compressed entry: " + err.Error()}
 	}
-	if crc32.ChecksumIEEE(compressed) != entry.CRC32 {
-		return "", nil, &PackCorruptionError{Pack: packID, Object: entry.Object, Offset: entry.Offset, Detail: "compressed entry CRC does not match"}
-	}
-	decoder, err := zstd.NewReader(nil)
-	if err != nil {
-		return "", nil, fmt.Errorf("create zstd decoder: %w", err)
-	}
-	defer decoder.Close()
-	envelope, err := decoder.DecodeAll(compressed, nil)
-	if err != nil {
-		return "", nil, &PackCorruptionError{Pack: packID, Object: entry.Object, Offset: entry.Offset, Detail: "decompress entry: " + err.Error()}
-	}
-	if uint64(len(envelope)) != entry.UncompressedSize {
-		return "", nil, &PackCorruptionError{Pack: packID, Object: entry.Object, Offset: entry.Offset, Detail: "uncompressed entry size does not match"}
-	}
-	objectType, objectData, err := decodeObjectEnvelope(envelope, entry.Object)
+	objectType, objectData, err := graphcontract.DecompressPackedObject(entry, compressed)
 	if err != nil {
 		return "", nil, &PackCorruptionError{Pack: packID, Object: entry.Object, Offset: entry.Offset, Detail: err.Error()}
 	}
@@ -627,37 +570,15 @@ func readPackedObjectReader(packID PackID, reader *packReader, entry PackIndexEn
 }
 
 func readPackHeaderAt(reader io.ReaderAt) (packHeader, error) {
-	var raw [packHeaderSize]byte
-	if _, err := reader.ReadAt(raw[:], 0); err != nil {
-		return packHeader{}, fmt.Errorf("read pack header: %w", err)
-	}
-	var header packHeader
-	copy(header.Magic[:], raw[:4])
-	header.Version = binary.BigEndian.Uint32(raw[4:8])
-	header.ObjectCount = binary.BigEndian.Uint32(raw[8:12])
-	return header, nil
+	return graphcontract.ReadPackHeaderAt(reader)
 }
 
 func readPackHeader(reader io.Reader) (packHeader, error) {
-	var raw [packHeaderSize]byte
-	if _, err := io.ReadFull(reader, raw[:]); err != nil {
-		return packHeader{}, fmt.Errorf("read pack header: %w", err)
-	}
-	var header packHeader
-	copy(header.Magic[:], raw[:4])
-	header.Version = binary.BigEndian.Uint32(raw[4:8])
-	header.ObjectCount = binary.BigEndian.Uint32(raw[8:12])
-	return header, nil
+	return graphcontract.ReadPackHeader(reader)
 }
 
 func validatePackHeader(header packHeader) error {
-	if string(header.Magic[:]) != PackMagic {
-		return &PackCorruptionError{Detail: "pack has an invalid magic"}
-	}
-	if header.Version != PackFormatVersion {
-		return &UnsupportedPackVersionError{Format: "pack", Version: header.Version}
-	}
-	return nil
+	return graphcontract.ValidatePackHeader(header)
 }
 
 func verifyPackFiles(indexStore packIndexStore, packID PackID, packPath, indexPath string) (result error) {
@@ -706,22 +627,14 @@ func verifyPackFiles(indexStore packIndexStore, packID PackID, packPath, indexPa
 	if err := validatePackHeader(header); err != nil {
 		return err
 	}
-	if header.ObjectCount != metadata.ObjectCount {
-		return &PackCorruptionError{Pack: packID, Detail: "pack and index object counts differ"}
-	}
 	sort.Slice(entries, func(left, right int) bool { return entries[left].Offset < entries[right].Offset })
-	nextOffset := uint64(packHeaderSize)
+	if err := graphcontract.ValidatePackEntries(packID, header, uint64(info.Size()), entries); err != nil {
+		return err
+	}
 	for _, entry := range entries {
-		if entry.Offset != nextOffset {
-			return &PackCorruptionError{Pack: packID, Object: entry.Object, Offset: entry.Offset, Detail: "pack entries are not contiguous"}
-		}
 		if _, _, err := readPackedObjectFile(packID, packPath, entry, metadata.ObjectCount); err != nil {
 			return err
 		}
-		nextOffset += entry.CompressedSize
-	}
-	if nextOffset != uint64(info.Size()) {
-		return &PackCorruptionError{Pack: packID, Offset: nextOffset, Detail: "pack has unindexed trailing data"}
 	}
 	return nil
 }
