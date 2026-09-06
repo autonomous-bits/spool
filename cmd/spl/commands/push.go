@@ -78,6 +78,15 @@ func NewPushCommand(repoProvider func() (*repository.Repository, error)) *cobra.
 				return writeRemoteErrorEnvelope(command, "push to rack", err, credential)
 			}
 
+			// Establish or refresh local remote-branch tracking metadata so
+			// a subsequent push or pull for this local branch knows which
+			// remote branch it corresponds to and its last-known remote
+			// head, without requiring a separate `spl remote branch
+			// create` step for a branch that was pushed into existence.
+			if err := repo.SetRemoteBranchTracking(branchName, result.Branch, result.HeadCommit); err != nil {
+				return fmt.Errorf("update remote branch tracking: %w", err)
+			}
+
 			return json.NewEncoder(command.OutOrStdout()).Encode(pushResult{
 				Branch:      result.Branch,
 				Pushed:      true,

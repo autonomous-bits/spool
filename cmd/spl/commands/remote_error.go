@@ -35,7 +35,19 @@ func remoteErrorCode(err error) string {
 		return "pull_rejected"
 	case errors.Is(err, remote.ErrPullBranchNotFound):
 		return "pull_branch_not_found"
+	case errors.Is(err, remote.ErrBranchAlreadyExists):
+		return "branch_already_exists"
+	case errors.Is(err, remote.ErrBranchSourceNotFound):
+		return "branch_source_not_found"
+	case errors.Is(err, remote.ErrBranchNotFound):
+		return "branch_not_found"
+	case errors.Is(err, remote.ErrBranchRejected):
+		return "branch_rejected"
 	default:
+		var protectedErr *remote.ProtectedBranchError
+		if errors.As(err, &protectedErr) {
+			return "branch_protected"
+		}
 		return "remote_error"
 	}
 }
@@ -56,6 +68,11 @@ func newRemoteErrorEnvelope(err error, credential string) remoteErrorEnvelope {
 		}
 		envelope.CorrelationID = rackErr.CorrelationID
 		envelope.CurrentHead = rackErr.CurrentHead
+	}
+	var protectedErr *remote.ProtectedBranchError
+	if errors.As(err, &protectedErr) {
+		envelope.Message = protectedErr.Error()
+		envelope.CorrelationID = protectedErr.CorrelationID
 	}
 	envelope.Message = remote.Redact(envelope.Message, credential)
 	return envelope

@@ -288,6 +288,49 @@ func TestPushUnreachableRemoteEmitsUnifiedErrorEnvelope(t *testing.T) {
 	}
 }
 
+func TestPushSuccessUpdatesRemoteBranchTracking(t *testing.T) {
+	repo := newTestSeedRepository(t)
+	stageAndCommit(t, repo, "push-cli-node-1", "First", "alice", "first commit")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		metadata := decodePushMetadata(t, r)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"branch":     "main",
+			"headCommit": metadata["targetCommit"].(string),
+		})
+	}))
+	defer server.Close()
+
+	if err := repo.SetRemote(repository.RemoteConfig{Endpoint: server.URL, RepoID: "acme", AuthMode: repository.RemoteAuthModeBearer}); err != nil {
+		t.Fatalf("SetRemote: %v", err)
+	}
+	t.Setenv("SPOOL_RACK_TOKEN", "test-token")
+
+	var output bytes.Buffer
+	command := NewPushCommand(func() (*repository.Repository, error) { return repo, nil })
+	command.SetOut(&output)
+	command.SetArgs([]string{"--branch", "main"})
+	if err := command.Execute(); err != nil {
+		t.Fatalf("execute push: %v", err)
+	}
+
+	var result pushResult
+	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+		t.Fatalf("decode CLI result: %v", err)
+	}
+	tracking, ok, err := repo.RemoteBranchTracking("main")
+	if err != nil {
+		t.Fatalf("RemoteBranchTracking: %v", err)
+	}
+	if !ok {
+		t.Fatal("RemoteBranchTracking ok = false, want true after successful push")
+	}
+	if tracking.RemoteBranch != "main" || tracking.RemoteHeadCommit != result.HeadCommit {
+		t.Fatalf("tracking = %#v, want remoteBranch=main remoteHeadCommit=%s", tracking, result.HeadCommit)
+	}
+}
+
 func TestPushNonFastForwardReportsRejection(t *testing.T) {
 	repo := newTestSeedRepository(t)
 	stageAndCommit(t, repo, "push-cli-node-1", "First", "alice", "first commit")

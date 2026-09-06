@@ -86,3 +86,48 @@ func (r *Repository) Remote() (RemoteConfig, bool, error) {
 	}
 	return *r.remote, true, nil
 }
+
+// RemoteBranchTracking records, for one local branch, which remote branch it
+// tracks and the last wire commit ID known to have been synchronized with
+// Rack for that branch (set after a successful `spl remote branch create` or
+// a push that establishes tracking for a not-yet-tracked branch).
+type RemoteBranchTracking struct {
+	// RemoteBranch is the tracked remote branch name.
+	RemoteBranch string `json:"remoteBranch" toml:"remote_branch"`
+	// RemoteHeadCommit is the last wire commit ID known for RemoteBranch.
+	RemoteHeadCommit string `json:"remoteHeadCommit" toml:"remote_head_commit"`
+}
+
+// RemoteBranchTracking returns the remote-branch tracking metadata recorded
+// for localBranch, or ok=false if localBranch has no tracked remote branch.
+func (r *Repository) RemoteBranchTracking(localBranch string) (RemoteBranchTracking, bool, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if err := r.ensureOpenLocked(); err != nil {
+		return RemoteBranchTracking{}, false, err
+	}
+	tracking, ok := r.remoteBranchTracking[localBranch]
+	return tracking, ok, nil
+}
+
+// SetRemoteBranchTracking durably records that localBranch tracks
+// remoteBranch at remoteHeadCommit, overwriting any prior tracking entry for
+// localBranch.
+func (r *Repository) SetRemoteBranchTracking(localBranch, remoteBranch, remoteHeadCommit string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.ensureOpenLocked(); err != nil {
+		return err
+	}
+	previous, hadPrevious := r.remoteBranchTracking[localBranch]
+	r.remoteBranchTracking[localBranch] = RemoteBranchTracking{RemoteBranch: remoteBranch, RemoteHeadCommit: remoteHeadCommit}
+	if err := r.writeConfigLocked(); err != nil {
+		if hadPrevious {
+			r.remoteBranchTracking[localBranch] = previous
+		} else {
+			delete(r.remoteBranchTracking, localBranch)
+		}
+		return fmt.Errorf("persist remote branch tracking: %w", err)
+	}
+	return nil
+}

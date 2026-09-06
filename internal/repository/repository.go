@@ -171,6 +171,7 @@ type Repository struct {
 	mergeTransactions               map[string]mergeTransaction
 	mergeStateDir                   string
 	remote                          *remote.Config
+	remoteBranchTracking            map[string]RemoteBranchTracking
 	persistStateFn                  func(string, string, *mergeTransaction) error
 	persistRepositoryFn             func() error
 	appendReflogFn                  func(string, ObjectID, ObjectID, string) error
@@ -213,6 +214,7 @@ func newRepository() *Repository {
 		stagedMutations:       make(map[string]StagedMutationSet),
 		mergeLeases:           make(map[string]string),
 		mergeTransactions:     make(map[string]mergeTransaction),
+		remoteBranchTracking:  make(map[string]RemoteBranchTracking),
 		now:                   time.Now,
 	}
 	repo.objectStore = newLooseObjectStore("", &repo.objects)
