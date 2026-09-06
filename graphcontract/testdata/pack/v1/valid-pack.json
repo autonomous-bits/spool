@@ -1,0 +1,14 @@
+{
+  "format_version": 1,
+  "pack_id": "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+  "pack_base64": "SURHUAAAAAIAAAABKLUv/QQAoQAAogFkbm9kZQJLeyJpZCI6Im4xIn04gJwO",
+  "object_type": "node",
+  "object_data_base64": "eyJpZCI6Im4xIn0=",
+  "entry": {
+    "object": "132850760021318d38b9609d9a00e57da220bbc3cde1979296240f9856716824",
+    "offset": 12,
+    "compressedSize": 33,
+    "uncompressedSize": 20,
+    "crc32": 632364973
+  }
+}

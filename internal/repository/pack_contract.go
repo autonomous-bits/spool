@@ -4,17 +4,19 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/autonomous-bits/spool/graphcontract"
 )
 
 const (
 	// PackMagic identifies an IDG pack stream.
-	PackMagic = "IDGP"
+	PackMagic = graphcontract.PackMagic
 	// PackFormatVersion is the version encoded in every pack header.
-	PackFormatVersion uint32 = 2
+	PackFormatVersion = graphcontract.PackFormatVersion
 	// PackIndexFormatVersion is the version of the sidecar object index.
-	PackIndexFormatVersion uint32 = 1
+	PackIndexFormatVersion = graphcontract.PackIndexFormatVersion
 	// PackManifestFormatVersion is the version of objects/info/packs.
-	PackManifestFormatVersion uint32 = 1
+	PackManifestFormatVersion = graphcontract.PackManifestFormatVersion
 
 	packDirectoryName      = "pack"
 	packInfoDirectoryName  = "info"
@@ -27,22 +29,40 @@ const (
 
 var (
 	// ErrPackCorrupt reports malformed or inconsistent pack, index, or manifest data.
-	ErrPackCorrupt = errors.New("pack storage is corrupt")
+	ErrPackCorrupt = graphcontract.ErrPackCorrupt
 	// ErrUnsupportedPackVersion reports a pack storage format newer or older than this repository supports.
-	ErrUnsupportedPackVersion = errors.New("unsupported pack storage version")
+	ErrUnsupportedPackVersion = graphcontract.ErrUnsupportedPackVersion
 	// ErrGCCorrupt reports corruption that prevents GC from safely deciding what to retain.
 	ErrGCCorrupt = errors.New("GC cannot continue with corrupt repository data")
 )
 
-// PackID identifies one immutable pack and its paired index.
-type PackID string
-
-// PackCompression identifies the compression applied to a packed object envelope.
-type PackCompression string
+type (
+	// PackID identifies one immutable pack and its paired index.
+	PackID = graphcontract.PackID
+	// PackCompression identifies the compression applied to a packed object envelope.
+	PackCompression = graphcontract.PackCompression
+	// PackMetadata identifies an active pack listed by a manifest.
+	PackMetadata = graphcontract.PackMetadata
+	// PackManifest is the atomically replaced list of active packs.
+	PackManifest = graphcontract.PackManifest
+	// PackIndexEntry maps one object ID to its zstd-compressed canonical loose
+	// envelope in a pack. CRC32 is the IEEE CRC32 of the compressed bytes.
+	PackIndexEntry = graphcontract.PackIndexEntry
+	// PackCorruptionError identifies a failed pack, index, or manifest validation.
+	PackCorruptionError = graphcontract.PackCorruptionError
+	// UnsupportedPackVersionError identifies a pack, index, or manifest format
+	// this repository cannot safely read.
+	UnsupportedPackVersionError = graphcontract.UnsupportedPackVersionError
+	// packHeader is the fixed 12-byte, big-endian prefix of every pack stream.
+	packHeader = graphcontract.PackHeader
+	// packIndexMetadata is persisted by a pack-index implementation and binds
+	// the index to one pack before any entry lookup is trusted.
+	packIndexMetadata = graphcontract.PackIndexMetadata
+)
 
 const (
 	// PackCompressionZstd is the required compression for PackFormatVersion.
-	PackCompressionZstd PackCompression = "zstd"
+	PackCompressionZstd = graphcontract.PackCompressionZstd
 )
 
 // GCOptions configures explicit object-store maintenance.
@@ -87,92 +107,6 @@ func (e *GCCommittedWithWarningError) Error() string {
 
 // Unwrap returns the cleanup warning.
 func (e *GCCommittedWithWarningError) Unwrap() error { return e.Err }
-
-// PackMetadata identifies an active pack listed by a manifest.
-type PackMetadata struct {
-	ID          PackID          `json:"id"`
-	Version     uint32          `json:"version"`
-	Compression PackCompression `json:"compression"`
-	ObjectCount uint32          `json:"objectCount"`
-}
-
-// packHeader is the fixed 12-byte, big-endian prefix of every pack stream.
-// Magic must equal PackMagic and Version must equal PackFormatVersion before
-// any object entry is processed.
-type packHeader struct {
-	Magic       [4]byte
-	Version     uint32
-	ObjectCount uint32
-}
-
-// PackManifest is the atomically replaced list of active packs.
-type PackManifest struct {
-	Version uint32         `json:"version"`
-	Packs   []PackMetadata `json:"packs"`
-}
-
-// PackIndexEntry maps one object ID to its zstd-compressed canonical loose
-// envelope in a pack. CRC32 is the IEEE CRC32 of the compressed bytes.
-type PackIndexEntry struct {
-	Object           ObjectID `json:"object"`
-	Offset           uint64   `json:"offset"`
-	CompressedSize   uint64   `json:"compressedSize"`
-	UncompressedSize uint64   `json:"uncompressedSize"`
-	CRC32            uint32   `json:"crc32"`
-}
-
-// PackCorruptionError identifies a failed pack, index, or manifest validation.
-// Object and Offset are omitted when corruption is not associated with an entry.
-type PackCorruptionError struct {
-	Pack   PackID
-	Object ObjectID
-	Offset uint64
-	Detail string
-}
-
-// Error implements error.
-func (e *PackCorruptionError) Error() string {
-	location := "pack storage"
-	if e.Pack != "" {
-		location = fmt.Sprintf("pack %q", e.Pack)
-	}
-	if e.Object != "" {
-		location += fmt.Sprintf(" object %q", e.Object)
-	}
-	if e.Object != "" || e.Offset != 0 {
-		location += fmt.Sprintf(" at offset %d", e.Offset)
-	}
-	if e.Detail == "" {
-		return fmt.Sprintf("%s: %v", location, ErrPackCorrupt)
-	}
-	return fmt.Sprintf("%s: %v: %s", location, ErrPackCorrupt, e.Detail)
-}
-
-// Unwrap makes PackCorruptionError match ErrPackCorrupt.
-func (e *PackCorruptionError) Unwrap() error { return ErrPackCorrupt }
-
-// UnsupportedPackVersionError identifies a pack, index, or manifest format this
-// repository cannot safely read.
-type UnsupportedPackVersionError struct {
-	Format  string
-	Version uint32
-}
-
-// Error implements error.
-func (e *UnsupportedPackVersionError) Error() string {
-	return fmt.Sprintf("unsupported %s version %d", e.Format, e.Version)
-}
-
-// Unwrap makes UnsupportedPackVersionError match ErrUnsupportedPackVersion.
-func (e *UnsupportedPackVersionError) Unwrap() error { return ErrUnsupportedPackVersion }
-
-// packIndexMetadata is persisted by a pack-index implementation and binds the
-// index to one pack before any entry lookup is trusted.
-type packIndexMetadata struct {
-	Version     uint32
-	Pack        PackID
-	ObjectCount uint32
-}
 
 // packIndex deliberately hides its on-disk representation. Implementations
 // must return entries by exact object ID and expose all entries for verification
