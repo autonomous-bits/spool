@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"testing"
+
+	"github.com/fxamacker/cbor/v2"
 )
 
 func TestSnapshotCanonicalRoundTrip(t *testing.T) {
@@ -129,6 +131,20 @@ func TestSnapshotEqualAndClone(t *testing.T) {
 	}
 }
 
+// reorderedSnapshotCBOR carries the same field tags as snapshotCBOR but
+// declares them in a different order, so a non-canonical (plain) CBOR
+// encoding emits map keys out of ascending order while still decoding to an
+// identical Snapshot value.
+type reorderedSnapshotCBOR struct {
+	EdgeCount  uint64   `cbor:"7,keyasint"`
+	NodeCount  uint64   `cbor:"6,keyasint"`
+	SchemaRoot ObjectID `cbor:"5,keyasint"`
+	InAdjRoot  ObjectID `cbor:"4,keyasint"`
+	OutAdjRoot ObjectID `cbor:"3,keyasint"`
+	EdgeRoot   ObjectID `cbor:"2,keyasint"`
+	NodeRoot   ObjectID `cbor:"1,keyasint"`
+}
+
 func TestUnmarshalSnapshotRejectsNonCanonicalCBOR(t *testing.T) {
 	snapshot, err := NewSnapshot("node-root", "edge-root", "out-adj-root", "in-adj-root", "schema-root", 3, 5)
 	if err != nil {
@@ -146,5 +162,26 @@ func TestUnmarshalSnapshotRejectsNonCanonicalCBOR(t *testing.T) {
 
 	if _, err := UnmarshalSnapshot([]byte("not cbor")); !errors.Is(err, ErrInvalidCanonicalCBOR) {
 		t.Fatalf("UnmarshalSnapshot error = %v, want %v", err, ErrInvalidCanonicalCBOR)
+	}
+
+	// A valid, decodable CBOR map with keys out of canonical ascending order
+	// must still be rejected: it decodes to the same Snapshot value, but its
+	// bytes are not the canonical re-encoding.
+	nonCanonical, err := cbor.Marshal(reorderedSnapshotCBOR{
+		NodeRoot: "node-root", EdgeRoot: "edge-root", OutAdjRoot: "out-adj-root",
+		InAdjRoot: "in-adj-root", SchemaRoot: "schema-root", NodeCount: 3, EdgeCount: 5,
+	})
+	if err != nil {
+		t.Fatalf("marshal non-canonical snapshot: %v", err)
+	}
+	if bytes.Equal(nonCanonical, data) {
+		t.Fatalf("reordered encoding unexpectedly matched the canonical encoding")
+	}
+	var probe map[int]any
+	if err := cbor.Unmarshal(nonCanonical, &probe); err != nil {
+		t.Fatalf("non-canonical bytes must still be valid, decodable CBOR: %v", err)
+	}
+	if _, err := UnmarshalSnapshot(nonCanonical); !errors.Is(err, ErrInvalidCanonicalCBOR) {
+		t.Fatalf("UnmarshalSnapshot non-canonical-order error = %v, want %v", err, ErrInvalidCanonicalCBOR)
 	}
 }
