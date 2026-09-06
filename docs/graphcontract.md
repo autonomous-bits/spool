@@ -91,3 +91,27 @@ Building, storing, and reconstructing the node/edge/adjacency/schema trees
 that a `Snapshot` references remains `internal/repository` implementation
 detail; only the canonical root-set record itself is part of this contract.
 
+## Merge simulation
+
+`graphcontract` also exports the deterministic three-way merge simulation
+contract through `ThreeWayMerge`. Given base, source, and target node and edge
+maps plus their schema roots, it merges against the common base by canonical
+object ID and returns a `MergeResult` containing the merged node and edge maps,
+the resolved schema root, a `Clean` flag, and stable `Changes` and
+`Conflicts`.
+
+`ThreeWayMerge` intentionally stops at structural merge simulation. It reports
+structural conflicts in node and edge content plus schema-root conflicts, but
+it does not resolve the chosen schema root to a `SchemaSnapshot` or run schema
+validation itself. Callers that have repository context to do that work — such
+as `internal/repository`, with branch, commit, and schema-snapshot resolution
+available — validate afterward and append semantic conflicts and normalized
+violations deterministically.
+
+`MergeConflict.Category` is one of `"structural"`, `"schema"`, or
+`"semantic"`, and `MergeConflict.Entity` is one of `"node"`, `"edge"`, or
+`"schema"`. `SortMergeConflicts`, `MergeConflictID`, `MergeConflictPaths`, and
+`SchemaViolationPaths` are public so callers that append their own semantic
+conflicts after validation can reuse the exact same deterministic
+ordering, identifiers, and graph paths as Spool itself, including Rack and
+other downstream integrations.

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/autonomous-bits/spool/graphcontract"
 	"github.com/autonomous-bits/spool/internal/repository/cherrypick"
 )
 
@@ -123,9 +124,23 @@ func (r *Repository) previewCherryPickLocked(request CherryPickRequest) (cherryP
 		return cherryPickCandidate{}, err
 	}
 
-	conflicts := make([]MergeConflict, 0)
-	mergedNodes := mergeNodeMaps(baseNodes, srcNodes, targetNodes, &conflicts)
-	mergedEdges := mergeEdgeMaps(baseEdges, srcEdges, targetEdges, &conflicts)
+	mergeResult, err := graphcontract.ThreeWayMerge(
+		baseNodes,
+		srcNodes,
+		targetNodes,
+		baseEdges,
+		srcEdges,
+		targetEdges,
+		targetSchemaRoot,
+		targetSchemaRoot,
+		targetSchemaRoot,
+	)
+	if err != nil {
+		return cherryPickCandidate{}, fmt.Errorf("simulate cherry-pick merge: %w", err)
+	}
+	conflicts := append([]MergeConflict(nil), mergeResult.Conflicts...)
+	mergedNodes := mergeResult.Nodes
+	mergedEdges := mergeResult.Edges
 	mergedSchemaRoot := mergeCherryPickSchemaRoot(baseSchemaRoot, srcSchemaRoot, targetSchemaRoot, &conflicts)
 
 	validateCherryPickEndpoints(mergedNodes, mergedEdges, &conflicts)
@@ -134,12 +149,16 @@ func (r *Repository) previewCherryPickLocked(request CherryPickRequest) (cherryP
 		return cherryPickCandidate{}, err
 	}
 
-	sortMergeConflicts(conflicts)
+	graphcontract.SortMergeConflicts(conflicts)
 	for i := range conflicts {
 		if conflicts[i].Paths == nil {
-			conflicts[i].Paths = mergeConflictPaths(conflicts[i])
+			conflicts[i].Paths = graphcontract.MergeConflictPaths(conflicts[i])
 		}
-		conflicts[i].ConflictID = mergeConflictID(conflicts[i])
+		conflictID, err := graphcontract.MergeConflictID(conflicts[i])
+		if err != nil {
+			return cherryPickCandidate{}, fmt.Errorf("calculate merge conflict ID: %w", err)
+		}
+		conflicts[i].ConflictID = conflictID
 	}
 
 	return cherryPickCandidate{
@@ -149,7 +168,7 @@ func (r *Repository) previewCherryPickLocked(request CherryPickRequest) (cherryP
 		mergedNodes:      mergedNodes,
 		mergedEdges:      mergedEdges,
 		mergedSchemaRoot: mergedSchemaRoot,
-		changes:          formatCherryPickChanges(targetNodes, mergedNodes, targetEdges, mergedEdges),
+		changes:          formatCherryPickChanges(mergeResult.Changes),
 		conflicts:        conflicts,
 		violations:       violations,
 	}, nil
@@ -177,7 +196,14 @@ func (r *Repository) resolveSnapshotEntitiesLocked(snapshotID ObjectID) (map[str
 
 func mergeCherryPickSchemaRoot(baseRoot, srcRoot, targetRoot ObjectID, conflicts *[]MergeConflict) ObjectID {
 	if baseRoot != "" {
-		return mergeSchemaRoot(baseRoot, srcRoot, targetRoot, conflicts)
+		if srcRoot == targetRoot || srcRoot == baseRoot {
+			return targetRoot
+		}
+		if targetRoot == baseRoot {
+			return srcRoot
+		}
+		*conflicts = append(*conflicts, MergeConflict{Category: "schema", Entity: "schema", Field: "root"})
+		return targetRoot
 	}
 	if srcRoot == targetRoot || srcRoot == "" {
 		return targetRoot
@@ -192,8 +218,8 @@ func mergeCherryPickSchemaRoot(baseRoot, srcRoot, targetRoot ObjectID, conflicts
 func validateCherryPickEndpoints(nodes map[string]Node, edges map[string]Edge, conflicts *[]MergeConflict) {
 	for _, edgeID := range sortedEdgeIDs(edges) {
 		edge := edges[edgeID]
-		sourceExists := hasNode(nodes, edge.Source)
-		targetExists := hasNode(nodes, edge.Target)
+		_, sourceExists := nodes[edge.Source]
+		_, targetExists := nodes[edge.Target]
 		if !sourceExists || !targetExists {
 			var field string
 			if !sourceExists && !targetExists {
@@ -243,15 +269,14 @@ func (r *Repository) validateCherryPickSchemaLocked(schemaRoot ObjectID, nodes m
 				Entity:   v.Entity,
 				ID:       v.EntityID,
 				Field:    v.Field,
-				Paths:    schemaViolationPaths(v),
+				Paths:    graphcontract.SchemaViolationPaths(v),
 			})
 		}
 	}
 	return violations, nil
 }
 
-func formatCherryPickChanges(targetNodes, mergedNodes map[string]Node, targetEdges, mergedEdges map[string]Edge) []cherrypick.Change {
-	rawChanges := mergeChanges(targetNodes, mergedNodes, targetEdges, mergedEdges)
+func formatCherryPickChanges(rawChanges []MergeChange) []cherrypick.Change {
 	changes := make([]cherrypick.Change, len(rawChanges))
 	for i, c := range rawChanges {
 		changes[i] = cherrypick.Change{Entity: c.Entity, ID: c.ID, Change: c.Change}

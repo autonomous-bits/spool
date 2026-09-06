@@ -10,6 +10,11 @@ generated from commits since the preceding `v*` tag. Commits prefixed with `docs
 
 ### Added
 
+- Public `graphcontract` merge APIs exposing deterministic three-way graph
+  merge simulation (`ThreeWayMerge`, `MergeResult`, `MergeChange`,
+  `MergeConflict`, and conflict finalization helpers), enabling downstream
+  integrations to share Spool's stable merge conflict ordering, identifiers,
+  and paths without depending on `internal/repository`.
 - Public `graphcontract.Snapshot` type exposing the canonical graph snapshot
   root (node, edge, incoming-adjacency, outgoing-adjacency, and schema tree
   roots, plus entity counts), with `NewSnapshot`, `MarshalSnapshot`, and
