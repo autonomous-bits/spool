@@ -45,10 +45,11 @@ type persistedRepository struct {
 const repositoryFormatVersion = 2
 
 type repositoryConfig struct {
-	FormatVersion            int            `toml:"format_version"`
-	DefaultBranch            string         `toml:"default_branch"`
-	ReflogRetentionInventory bool           `toml:"reflog_retention_inventory"`
-	Remote                   *remote.Config `toml:"remote,omitempty"`
+	FormatVersion            int                             `toml:"format_version"`
+	DefaultBranch            string                          `toml:"default_branch"`
+	ReflogRetentionInventory bool                            `toml:"reflog_retention_inventory"`
+	Remote                   *remote.Config                  `toml:"remote,omitempty"`
+	RemoteBranches           map[string]RemoteBranchTracking `toml:"remote_branches,omitempty"`
 }
 
 type legacyNode struct {
@@ -400,6 +401,11 @@ func (r *Repository) loadControlState() (bool, error) {
 			return false, fmt.Errorf("decode repository configuration: invalid durable repository: %w", err)
 		}
 	}
+	for localBranch, tracking := range config.RemoteBranches {
+		if !validRefName(localBranch) || !validRefName(tracking.RemoteBranch) || tracking.RemoteHeadCommit == "" {
+			return false, fmt.Errorf("decode repository configuration: invalid durable repository: invalid remote branch tracking entry for local branch %q", localBranch)
+		}
+	}
 	head, err := readControlValue(r.headPath())
 	if err != nil || !validRefName(head) {
 		return false, fmt.Errorf("read HEAD: invalid durable repository")
@@ -416,6 +422,10 @@ func (r *Repository) loadControlState() (bool, error) {
 	}
 	r.defaultBranch, r.activeBranch, r.branches = config.DefaultBranch, head, branches
 	r.remote = config.Remote
+	r.remoteBranchTracking = make(map[string]RemoteBranchTracking, len(config.RemoteBranches))
+	for localBranch, tracking := range config.RemoteBranches {
+		r.remoteBranchTracking[localBranch] = tracking
+	}
 	r.commits, r.snapshots = make(map[ObjectID]commit), make(map[ObjectID]graphSnapshot)
 	r.projections, r.edgeProjections = make(map[ObjectID]map[string]Node), make(map[ObjectID]map[string]Edge)
 	r.materializedSnapshots = make(map[ObjectID]struct{})
@@ -604,7 +614,8 @@ func (r *Repository) writeConfigLocked() error {
 		return nil
 	}
 	data, err := toml.Marshal(repositoryConfig{
-		FormatVersion: repositoryFormatVersion, DefaultBranch: r.defaultBranch, ReflogRetentionInventory: true, Remote: r.remote,
+		FormatVersion: repositoryFormatVersion, DefaultBranch: r.defaultBranch, ReflogRetentionInventory: true,
+		Remote: r.remote, RemoteBranches: r.remoteBranchTracking,
 	})
 	if err != nil {
 		return fmt.Errorf("encode repository configuration: %w", err)

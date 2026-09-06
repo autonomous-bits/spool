@@ -22,6 +22,7 @@ func NewRemoteCommand(repoProvider func() (*repository.Repository, error)) *cobr
 		newRemoteSetCommand(repoProvider),
 		newRemoteShowCommand(repoProvider),
 		newRemoteRemoveCommand(repoProvider),
+		newRemoteBranchCommand(repoProvider),
 	)
 	return command
 }

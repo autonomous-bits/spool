@@ -140,6 +140,96 @@ func TestUnrelatedRepositoryMutationsPreserveRemoteConfig(t *testing.T) {
 	}
 }
 
+func TestSetRemoteBranchTrackingPersistsAndRoundTripsThroughReopen(t *testing.T) {
+	stateDir := t.TempDir()
+	repo, err := NewSeedRepositoryWithMergeState(stateDir)
+	if err != nil {
+		t.Fatalf("NewSeedRepositoryWithMergeState: %v", err)
+	}
+	if err := repo.SetRemoteBranchTracking("main", "main", "abc123"); err != nil {
+		t.Fatalf("SetRemoteBranchTracking: %v", err)
+	}
+	if err := repo.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	reopened, err := OpenRepository(stateDir)
+	if err != nil {
+		t.Fatalf("OpenRepository: %v", err)
+	}
+	closeTestRepository(t, reopened)
+	tracking, ok, err := reopened.RemoteBranchTracking("main")
+	if err != nil {
+		t.Fatalf("RemoteBranchTracking: %v", err)
+	}
+	if !ok {
+		t.Fatal("RemoteBranchTracking ok = false, want true after reopen")
+	}
+	want := RemoteBranchTracking{RemoteBranch: "main", RemoteHeadCommit: "abc123"}
+	if tracking != want {
+		t.Fatalf("RemoteBranchTracking() = %#v, want %#v", tracking, want)
+	}
+}
+
+func TestSetRemoteBranchTrackingOverwritesPriorEntry(t *testing.T) {
+	repo, err := NewSeedRepository()
+	if err != nil {
+		t.Fatalf("NewSeedRepository: %v", err)
+	}
+	if err := repo.SetRemoteBranchTracking("main", "main", "abc123"); err != nil {
+		t.Fatalf("SetRemoteBranchTracking: %v", err)
+	}
+	if err := repo.SetRemoteBranchTracking("main", "main", "def456"); err != nil {
+		t.Fatalf("SetRemoteBranchTracking: %v", err)
+	}
+	tracking, ok, err := repo.RemoteBranchTracking("main")
+	if err != nil || !ok {
+		t.Fatalf("RemoteBranchTracking: ok=%v, err=%v", ok, err)
+	}
+	if tracking.RemoteHeadCommit != "def456" {
+		t.Fatalf("RemoteHeadCommit = %q, want def456", tracking.RemoteHeadCommit)
+	}
+}
+
+func TestRemoteBranchTrackingUnknownBranchReturnsNotOK(t *testing.T) {
+	repo, err := NewSeedRepository()
+	if err != nil {
+		t.Fatalf("NewSeedRepository: %v", err)
+	}
+	if _, ok, err := repo.RemoteBranchTracking("missing"); err != nil || ok {
+		t.Fatalf("RemoteBranchTracking() = ok=%v, err=%v, want ok=false", ok, err)
+	}
+}
+
+func TestSetRemoteBranchTrackingRejectsInvalidEntryWithoutPersisting(t *testing.T) {
+	tests := map[string]struct {
+		localBranch      string
+		remoteBranch     string
+		remoteHeadCommit string
+	}{
+		"empty local branch":       {localBranch: "", remoteBranch: "main", remoteHeadCommit: "abc123"},
+		"invalid local branch":     {localBranch: "..", remoteBranch: "main", remoteHeadCommit: "abc123"},
+		"empty remote branch":      {localBranch: "main", remoteBranch: "", remoteHeadCommit: "abc123"},
+		"invalid remote branch":    {localBranch: "main", remoteBranch: "/leading-slash", remoteHeadCommit: "abc123"},
+		"empty remote head commit": {localBranch: "main", remoteBranch: "main", remoteHeadCommit: ""},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			repo, err := NewSeedRepository()
+			if err != nil {
+				t.Fatalf("NewSeedRepository: %v", err)
+			}
+			err = repo.SetRemoteBranchTracking(tc.localBranch, tc.remoteBranch, tc.remoteHeadCommit)
+			if !errors.Is(err, ErrInvalidRemoteBranchTracking) {
+				t.Fatalf("SetRemoteBranchTracking() err = %v, want ErrInvalidRemoteBranchTracking", err)
+			}
+			if _, ok, err := repo.RemoteBranchTracking(tc.localBranch); err != nil || ok {
+				t.Fatalf("RemoteBranchTracking() = ok=%v, err=%v, want ok=false after rejected write", ok, err)
+			}
+		})
+	}
+}
+
 func TestRemoteConfigBackwardCompatibleWithoutRemoteTable(t *testing.T) {
 	stateDir := t.TempDir()
 	repo, err := NewSeedRepositoryWithMergeState(stateDir)

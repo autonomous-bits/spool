@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/autonomous-bits/spool/internal/repository/branch"
@@ -196,6 +197,41 @@ func TestOpenRepositoryRejectsPreviousRepositoryFormat(t *testing.T) {
 	}
 	if _, err := OpenRepository(stateDir); err == nil {
 		t.Fatal("OpenRepository accepted version 1 repository state")
+	}
+}
+
+func TestOpenRepositoryRejectsCorruptRemoteBranchTrackingEntry(t *testing.T) {
+	stateDir := t.TempDir()
+	repo, err := NewSeedRepositoryWithMergeState(stateDir)
+	if err != nil {
+		t.Fatalf("NewSeedRepositoryWithMergeState: %v", err)
+	}
+	if err := repo.SetRemoteBranchTracking("main", "main", "abc123"); err != nil {
+		t.Fatalf("SetRemoteBranchTracking: %v", err)
+	}
+	if err := repo.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	configPath := filepath.Join(stateDir, "config.toml")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	// Corrupt the persisted tracking entry so it no longer carries a remote
+	// head commit; loadControlState must reject this rather than let it
+	// silently reopen with incomplete tracking metadata.
+	corrupted := []byte(strings.ReplaceAll(string(data), "remote_head_commit = 'abc123'", "remote_head_commit = ''"))
+	if err := os.WriteFile(configPath, corrupted, 0o600); err != nil {
+		t.Fatalf("write corrupted config: %v", err)
+	}
+
+	_, err = OpenRepository(stateDir)
+	if err == nil {
+		t.Fatal("OpenRepository accepted a corrupt remote branch tracking entry")
+	}
+	if !strings.Contains(err.Error(), "main") {
+		t.Fatalf("OpenRepository error = %q, want it to identify the offending local branch %q", err.Error(), "main")
 	}
 }
 
