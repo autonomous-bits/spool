@@ -1,6 +1,6 @@
 module github.com/autonomous-bits/spool
 
-go 1.26.1
+go 1.26.6
 
 require (
 	github.com/fxamacker/cbor/v2 v2.9.3
