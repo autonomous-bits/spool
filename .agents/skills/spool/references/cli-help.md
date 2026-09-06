@@ -45,7 +45,7 @@ repository discovery.
 | `fsck`, `gc`, `prune` | Check integrity, maintain objects, and remove ephemeral graph data |
 | `workspace init/attach` | Provision central detached state and bind repository manifests |
 | `remote set/show/remove` | Configure a non-secret Rack remote and check graphcontract version compatibility |
-| `push` | Push local commits to the configured Rack remote over the native push protocol |
+| `push`, `pull` | Exchange commits with the configured Rack remote over the native push/pull protocol |
 | `version` | Print Spool release version and build information as JSON |
 | `completion`, `help` | Generate shell completion and inspect command help |
 
@@ -357,6 +357,26 @@ true, "actualHead": "..."}` with Rack's guidance message rather than attempting 
 retry — reconciling a rejected push is out of scope for this command. Credentials are resolved the
 same way as other remote commands, but unlike `remote show`'s best-effort probe, `push` fails if no
 credential can be resolved, since pushing is a state-changing operation.
+
+## Pull
+
+```sh
+spl pull --branch main
+```
+
+`pull` requires `--branch` and a configured Rack remote (`remote set`). It recomputes the local
+branch's current Rack wire-format head commit ID (the same recomputation `push` performs, with no
+persisted local-to-wire commit mapping), asks Rack what it has for the branch beyond that commit,
+and installs any new commits Rack reports as a fast-forward extension of local history, preserving
+each pulled commit's exact original author, message, and time so a later `push` recomputes the same
+wire commit IDs Rack already has.
+
+If local history already matches Rack's reported head, `pull` reports `{"pulled": false, "upToDate":
+true}` without installing anything. If Rack's branch head is not a descendant of the local branch
+(divergence), `pull` reports `{"pulled": false, "diverged": true, "actualHead": "..."}` with Rack's
+guidance message rather than attempting a merge — reconciling diverged history is out of scope for
+this command. Installing a branch with no local history in common with Rack (a from-scratch
+bootstrap) is not yet supported. Credentials are resolved the same way as `push`.
 
 ## Version
 

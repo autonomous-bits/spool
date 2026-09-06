@@ -10,6 +10,16 @@ generated from commits since the preceding `v*` tag. Commits prefixed with `docs
 
 ### Added
 
+- `spl pull` CLI command that fetches new commits for a branch from a
+  repository's configured Rack remote over the native pull protocol: it
+  recomputes the local branch's Rack wire-format head, asks Rack for
+  anything newer, and installs any new commits as a fast-forward extension
+  of local history, preserving each pulled commit's original author,
+  message, and time. It reports a clean "up to date" result when local
+  history already matches Rack's head, and reports divergence (Rack's head
+  is not a descendant of the local branch) without attempting a merge.
+  Bootstrapping a branch with no local history in common with Rack is not
+  yet supported.
 - `spl push` CLI command that pushes verified local native commits and packs
   to a repository's configured Rack remote over the native (non-JSON) push
   protocol: it recomputes the Rack wire-format commit chain from local
