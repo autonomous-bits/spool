@@ -65,15 +65,16 @@ func newCorrelationID() string {
 	return uuid.NewString()
 }
 
-// setCorrelationHeader attaches c's CorrelationID to request, generating one
-// on the fly if the Client was constructed without NewClient (e.g. a bare
-// Client{} in a test) so every request still carries the header.
+// setCorrelationHeader attaches c's CorrelationID to request, generating and
+// persisting one onto c if the Client was constructed without NewClient
+// (e.g. a bare Client{} in a test) so every request that Client issues
+// shares the same correlation ID, and c.CorrelationID always reflects what
+// was actually sent.
 func (c *Client) setCorrelationHeader(request *http.Request) {
-	correlationID := c.CorrelationID
-	if correlationID == "" {
-		correlationID = newCorrelationID()
+	if c.CorrelationID == "" {
+		c.CorrelationID = newCorrelationID()
 	}
-	request.Header.Set(CorrelationIDHeader, correlationID)
+	request.Header.Set(CorrelationIDHeader, c.CorrelationID)
 }
 
 // RackError is the decoded form of Rack's JSON error envelope:
