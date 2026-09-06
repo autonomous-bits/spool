@@ -44,6 +44,7 @@ repository discovery.
 | `merge preview/apply/conflicts/resolve/finalize/abort` | Run the merge transaction lifecycle |
 | `fsck`, `gc`, `prune` | Check integrity, maintain objects, and remove ephemeral graph data |
 | `workspace init/attach` | Provision central detached state and bind repository manifests |
+| `remote set/show/remove` | Configure a non-secret Rack remote and check graphcontract version compatibility |
 | `version` | Print Spool release version and build information as JSON |
 | `completion`, `help` | Generate shell completion and inspect command help |
 
@@ -305,6 +306,33 @@ requires a central workspace name and portable repository ID, then writes the
 repository's `.spl/config.toml` manifest. Commit that manifest so other
 checkouts resolve the same central workspace by immutable ID. The command does
 not register a host-path attachment.
+
+## Remote configuration
+
+```sh
+spl remote set --endpoint https://rack.example.com --repo-id acme-prod --auth-mode bearer
+spl remote show
+spl remote remove
+```
+
+`remote set` requires `--endpoint`, `--repo-id`, and `--auth-mode` (`bearer` or `api_key`) and
+persists them as a non-secret `[remote]` table in `.spl/config.toml`. It rejects endpoint or
+repo-id values that look like pasted-in credentials (known token prefixes, URL userinfo,
+overlong identifiers) and never accepts or stores a credential itself.
+
+`remote show` prints the configured remote and probes its `/healthz` endpoint to compare
+`packFormatVersion`, `packIndexFormatVersion`, and `packManifestFormatVersion` against this
+build's `graphcontract` constants, reporting each as `match`, `mismatch`, or `unknown` (when the
+server omits the field). An unreachable endpoint is reported as `versionStatus: "unreachable"`
+rather than an error. It never prints a credential.
+
+`remote remove` clears the configured remote and reports whether one existed; it is a no-op when
+none is configured.
+
+Credentials are never read from or written to `.spl/config.toml`. When a command needs one, it is
+resolved in this order: the OS keychain/secret store (service `spool-rack`, account = repo-id),
+then an environment variable (`SPOOL_RACK_TOKEN` for `bearer`, `SPOOL_RACK_API_KEY` for
+`api_key`), then an interactive TTY prompt with hidden input.
 
 ## Version
 

@@ -254,6 +254,14 @@ explicitly writes a repository manifest for it. Repository resolution uses only
 that committed manifest's immutable `workspace_id`; it does not use host-path
 attachments, `SPOOL_WORKSPACE`, or active-workspace preferences.
 
+## Remote configuration
+
+`remote set` persists a non-secret Rack remote (`--endpoint`, `--repo-id`, `--auth-mode`) to
+`.spl/config.toml`; `remote show` reports it plus `graphcontract` version compatibility with the
+remote's `/healthz` endpoint; `remote remove` clears it. No credential is ever read from or
+written to repository configuration — credentials are resolved at use from the OS
+keychain/secret store, then `SPOOL_RACK_TOKEN`/`SPOOL_RACK_API_KEY`, then an interactive prompt.
+
 ## CLI command reference
 
 The complete installed surface, including generated help and every flag, is documented in
@@ -291,6 +299,9 @@ The command and flag inventory is:
 | `cherry-pick` | `--commit` (required), `--target-branch` (required), `--dry-run`, `--author`, `--message` |
 | `workspace init <name>` | positional name |
 | `workspace attach [path]` | `--workspace` and `--repository-id` (required); path defaults to current directory |
+| `remote set` | `--endpoint`, `--repo-id`, `--auth-mode` (all required) |
+| `remote show` | none; probes the configured remote's `/healthz` and never prints credentials |
+| `remote remove` | none |
 | `version` | none |
 | `completion` | shell subcommand: `bash`, `zsh`, `fish`, or `powershell` |
 | `help [command path]` | optional command path |

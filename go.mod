@@ -6,17 +6,21 @@ require (
 	github.com/fxamacker/cbor/v2 v2.9.3
 	github.com/gofrs/flock v0.13.1
 	github.com/klauspost/compress v1.19.2
+	github.com/mattn/go-isatty v0.0.24
 	github.com/pelletier/go-toml/v2 v2.4.3
+	github.com/zalando/go-keyring v0.2.8
 	golang.org/x/sys v0.47.0
+	golang.org/x/term v0.45.0
 	lukechampine.com/blake3 v1.4.1
 	modernc.org/sqlite v1.57.0
 )
 
 require (
+	github.com/danieljoos/wincred v1.2.3 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.4.0 // indirect
-	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/x448/float16 v0.8.4 // indirect

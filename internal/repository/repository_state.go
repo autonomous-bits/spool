@@ -14,6 +14,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/autonomous-bits/spool/internal/remote"
 	"github.com/fxamacker/cbor/v2"
 	"github.com/gofrs/flock"
 	"github.com/pelletier/go-toml/v2"
@@ -44,9 +45,10 @@ type persistedRepository struct {
 const repositoryFormatVersion = 2
 
 type repositoryConfig struct {
-	FormatVersion            int    `toml:"format_version"`
-	DefaultBranch            string `toml:"default_branch"`
-	ReflogRetentionInventory bool   `toml:"reflog_retention_inventory"`
+	FormatVersion            int            `toml:"format_version"`
+	DefaultBranch            string         `toml:"default_branch"`
+	ReflogRetentionInventory bool           `toml:"reflog_retention_inventory"`
+	Remote                   *remote.Config `toml:"remote,omitempty"`
 }
 
 type legacyNode struct {
@@ -393,6 +395,11 @@ func (r *Repository) loadControlState() (bool, error) {
 	if err := toml.Unmarshal(data, &config); err != nil || config.FormatVersion != repositoryFormatVersion || !validRefName(config.DefaultBranch) {
 		return false, fmt.Errorf("decode repository configuration: invalid durable repository")
 	}
+	if config.Remote != nil {
+		if err := config.Remote.Validate(); err != nil {
+			return false, fmt.Errorf("decode repository configuration: invalid durable repository: %w", err)
+		}
+	}
 	head, err := readControlValue(r.headPath())
 	if err != nil || !validRefName(head) {
 		return false, fmt.Errorf("read HEAD: invalid durable repository")
@@ -408,6 +415,7 @@ func (r *Repository) loadControlState() (bool, error) {
 		return false, fmt.Errorf("load reflog retention inventory: %w", err)
 	}
 	r.defaultBranch, r.activeBranch, r.branches = config.DefaultBranch, head, branches
+	r.remote = config.Remote
 	r.commits, r.snapshots = make(map[ObjectID]commit), make(map[ObjectID]graphSnapshot)
 	r.projections, r.edgeProjections = make(map[ObjectID]map[string]Node), make(map[ObjectID]map[string]Edge)
 	r.materializedSnapshots = make(map[ObjectID]struct{})
@@ -596,7 +604,7 @@ func (r *Repository) writeConfigLocked() error {
 		return nil
 	}
 	data, err := toml.Marshal(repositoryConfig{
-		FormatVersion: repositoryFormatVersion, DefaultBranch: r.defaultBranch, ReflogRetentionInventory: true,
+		FormatVersion: repositoryFormatVersion, DefaultBranch: r.defaultBranch, ReflogRetentionInventory: true, Remote: r.remote,
 	})
 	if err != nil {
 		return fmt.Errorf("encode repository configuration: %w", err)
