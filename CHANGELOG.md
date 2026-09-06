@@ -8,6 +8,14 @@ generated from commits since the preceding `v*` tag. Commits prefixed with `docs
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-09-06
+
+### Added
+
+- Public `graphcontract` schema APIs for canonical schema CBOR, TOML parsing
+  and normalization, schema validation, and stable normalized violations,
+  enabling downstream integrations to share Spool's schema semantics.
+
 ### Added
 
 - Public `graphcontract` schema TOML parser, canonical schema CBOR objects, and
