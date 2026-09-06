@@ -10,6 +10,12 @@ generated from commits since the preceding `v*` tag. Commits prefixed with `docs
 
 ### Added
 
+- Public `graphcontract.Snapshot` type exposing the canonical graph snapshot
+  root (node, edge, incoming-adjacency, outgoing-adjacency, and schema tree
+  roots, plus entity counts), with `NewSnapshot`, `MarshalSnapshot`, and
+  `UnmarshalSnapshot` canonical CBOR helpers, enabling downstream
+  integrations to interpret Spool snapshot roots without depending on
+  `internal/repository`.
 - Public `graphcontract` pack APIs exposing the immutable pack container
   format (`PackID`, `PackManifest`, `PackIndexEntry`, `PackHeader`, and
   related errors) and full packed-object integrity verification

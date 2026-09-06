@@ -137,16 +137,10 @@ type SchemaValidationResolution struct {
 	Violations []SchemaViolation
 }
 
-// GraphSnapshot is the immutable, content-addressed root set for one graph version.
-type GraphSnapshot struct {
-	NodeRoot   ObjectID `cbor:"1,keyasint"`
-	EdgeRoot   ObjectID `cbor:"2,keyasint"`
-	OutAdjRoot ObjectID `cbor:"3,keyasint"`
-	InAdjRoot  ObjectID `cbor:"4,keyasint"`
-	SchemaRoot ObjectID `cbor:"5,keyasint"`
-	NodeCount  uint64   `cbor:"6,keyasint"`
-	EdgeCount  uint64   `cbor:"7,keyasint"`
-}
+// GraphSnapshot is the repository's compatibility alias for the public
+// canonical graph contract snapshot root, the immutable content-addressed
+// root set for one graph version.
+type GraphSnapshot = graphcontract.Snapshot
 
 // graphSnapshot remains an internal compatibility alias.
 type graphSnapshot = GraphSnapshot

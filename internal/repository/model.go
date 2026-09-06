@@ -139,6 +139,8 @@ func normalizeCanonicalObject(value any) (any, error) {
 		return value.Normalize()
 	case SchemaSnapshot:
 		return value.Normalize()
+	case graphcontract.Snapshot:
+		return value.Normalize()
 	default:
 		return value, nil
 	}
@@ -154,6 +156,8 @@ func canonicalObjectEncoding(value any) ([]byte, error) {
 		return graphcontract.MarshalCommit(value)
 	case SchemaSnapshot:
 		return graphcontract.MarshalSchemaSnapshot(value)
+	case graphcontract.Snapshot:
+		return graphcontract.MarshalSnapshot(value)
 	}
 	normalized, err := normalizeCanonicalObject(value)
 	if err != nil {
