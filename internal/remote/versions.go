@@ -50,10 +50,17 @@ func NegotiateVersions(ctx context.Context, client *Client, cfg Config, credenti
 	if err != nil {
 		return VersionReport{}, err
 	}
+	// An older or not-yet-updated Rack server may omit the graphcontract
+	// block entirely; treat that the same as every field within it being
+	// omitted, rather than as an error.
+	info := health.Graphcontract
+	if info == nil {
+		info = &healthzGraphcontractInfo{}
+	}
 	return VersionReport{
-		PackFormatVersion:         fieldReport(graphcontract.PackFormatVersion, health.PackFormatVersion),
-		PackIndexFormatVersion:    fieldReport(graphcontract.PackIndexFormatVersion, health.PackIndexFormatVersion),
-		PackManifestFormatVersion: fieldReport(graphcontract.PackManifestFormatVersion, health.PackManifestFormatVersion),
+		PackFormatVersion:         fieldReport(graphcontract.PackFormatVersion, info.PackFormatVersion),
+		PackIndexFormatVersion:    fieldReport(graphcontract.PackIndexFormatVersion, info.PackIndexFormatVersion),
+		PackManifestFormatVersion: fieldReport(graphcontract.PackManifestFormatVersion, info.PackManifestFormatVersion),
 	}, nil
 }
 

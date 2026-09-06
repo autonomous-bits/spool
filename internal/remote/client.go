@@ -15,10 +15,20 @@ import (
 const healthzTimeout = 5 * time.Second
 
 // healthzResponse is the subset of a Rack /healthz body this client
-// understands. Every field is optional: an older or not-yet-updated Rack
-// server may omit the graphcontract version fields entirely, and that must
-// be handled gracefully rather than treated as an error.
+// understands. The graphcontract field itself, and every version field
+// within it, is optional: an older or not-yet-updated Rack server may omit
+// them entirely, and that must be handled gracefully rather than treated as
+// an error.
 type healthzResponse struct {
+	Status        string                    `json:"status,omitempty"`
+	Graphcontract *healthzGraphcontractInfo `json:"graphcontract,omitempty"`
+}
+
+// healthzGraphcontractInfo is the graphcontract version block nested under
+// a Rack /healthz response, e.g.:
+//
+//	{"status": "healthy", "graphcontract": {"packFormatVersion": 2, ...}}
+type healthzGraphcontractInfo struct {
 	PackFormatVersion         *uint32 `json:"packFormatVersion,omitempty"`
 	PackIndexFormatVersion    *uint32 `json:"packIndexFormatVersion,omitempty"`
 	PackManifestFormatVersion *uint32 `json:"packManifestFormatVersion,omitempty"`

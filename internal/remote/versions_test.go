@@ -12,10 +12,13 @@ import (
 
 func TestNegotiateVersionsReportsMatchForCurrentVersions(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]uint32{
-			"packFormatVersion":         graphcontract.PackFormatVersion,
-			"packIndexFormatVersion":    graphcontract.PackIndexFormatVersion,
-			"packManifestFormatVersion": graphcontract.PackManifestFormatVersion,
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": "healthy",
+			"graphcontract": map[string]uint32{
+				"packFormatVersion":         graphcontract.PackFormatVersion,
+				"packIndexFormatVersion":    graphcontract.PackIndexFormatVersion,
+				"packManifestFormatVersion": graphcontract.PackManifestFormatVersion,
+			},
 		})
 	}))
 	defer server.Close()
@@ -37,10 +40,13 @@ func TestNegotiateVersionsReportsMatchForCurrentVersions(t *testing.T) {
 
 func TestNegotiateVersionsReportsMismatchForDifferentVersions(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]uint32{
-			"packFormatVersion":         graphcontract.PackFormatVersion + 1,
-			"packIndexFormatVersion":    graphcontract.PackIndexFormatVersion,
-			"packManifestFormatVersion": graphcontract.PackManifestFormatVersion,
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": "healthy",
+			"graphcontract": map[string]uint32{
+				"packFormatVersion":         graphcontract.PackFormatVersion + 1,
+				"packIndexFormatVersion":    graphcontract.PackIndexFormatVersion,
+				"packManifestFormatVersion": graphcontract.PackManifestFormatVersion,
+			},
 		})
 	}))
 	defer server.Close()
