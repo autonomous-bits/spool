@@ -1,0 +1,22 @@
+{
+  "format_version": 1,
+  "candidate": "merge",
+  "schema": "schema.toml",
+  "nodes": {
+    "left": {
+      "id": "left",
+      "labels": ["Person"],
+      "properties": {"external_id": {"kind": "integer", "integer": 9}}
+    },
+    "right": {
+      "id": "right",
+      "labels": ["Person"],
+      "properties": {"external_id": {"kind": "integer", "integer": 9}}
+    }
+  },
+  "edges": {},
+  "violations": [
+    {"code": "natural-key-unique", "entity": "node", "entityID": "left", "rule": "Person", "field": "external_id", "expected": "unique natural key"},
+    {"code": "natural-key-unique", "entity": "node", "entityID": "right", "rule": "Person", "field": "external_id", "expected": "unique natural key"}
+  ]
+}

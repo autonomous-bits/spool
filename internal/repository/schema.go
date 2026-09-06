@@ -1,31 +1,24 @@
 package repository
 
 import (
-	"bytes"
-	"errors"
 	"fmt"
 	"io"
 	"unicode/utf8"
 
-	"github.com/pelletier/go-toml/v2"
+	"github.com/autonomous-bits/spool/graphcontract"
 )
 
-var (
-	// ErrInvalidSchemaTOML reports malformed TOML or TOML that does not match
-	// the schema authoring format.
-	ErrInvalidSchemaTOML = errors.New("invalid schema TOML")
-)
+var ErrInvalidSchemaTOML = graphcontract.ErrInvalidSchemaTOML
 
 type propertyBudget struct {
 	entries int
 	bytes   int
 }
 
-// DecodeSchemaTOML decodes a schema definition from TOML and returns its
-// normalized canonical representation. Unknown keys are rejected so a typo
-// cannot silently weaken validation.
+// DecodeSchemaTOML delegates schema parsing and canonical normalization to the
+// public graph contract.
 func DecodeSchemaTOML(data []byte) (SchemaSnapshot, error) {
-	return DecodeSchemaTOMLReader(bytes.NewReader(data))
+	return graphcontract.DecodeSchemaTOML(data)
 }
 
 // ParseSchemaTOML is an alias for DecodeSchemaTOML.
@@ -35,113 +28,7 @@ func ParseSchemaTOML(data []byte) (SchemaSnapshot, error) {
 
 // DecodeSchemaTOMLReader decodes a schema definition from a TOML stream.
 func DecodeSchemaTOMLReader(reader io.Reader) (SchemaSnapshot, error) {
-	var document tomlSchemaDocument
-	decoder := toml.NewDecoder(reader).DisallowUnknownFields()
-	if err := decoder.Decode(&document); err != nil {
-		return SchemaSnapshot{}, fmt.Errorf("%w: %w", ErrInvalidSchemaTOML, err)
-	}
-
-	schema := SchemaSnapshot{
-		Version:          document.Version,
-		Permissive:       document.Permissive,
-		GlobalInvariants: make([]GlobalInvariant, len(document.GlobalInvariants)),
-		NodeRules:        make([]NodeLabelRule, len(document.Nodes)),
-		EdgeRules:        make([]EdgeTypeRule, len(document.Edges)),
-	}
-	for i, invariant := range document.GlobalInvariants {
-		schema.GlobalInvariants[i] = GlobalInvariant(invariant)
-	}
-	for i, node := range document.Nodes {
-		schema.NodeRules[i] = NodeLabelRule{
-			Label:            node.Label,
-			Properties:       decodePropertyRules(node.Properties),
-			NaturalKey:       node.NaturalKey,
-			NaturalKeyUnique: node.NaturalKeyUnique,
-		}
-	}
-	for i, edge := range document.Edges {
-		schema.EdgeRules[i] = EdgeTypeRule{
-			Type:         edge.Type,
-			Properties:   decodePropertyRules(edge.Properties),
-			SourceLabels: edge.SourceLabels,
-			TargetLabels: edge.TargetLabels,
-			Cardinality: Cardinality{
-				SourceMin: edge.Cardinality.SourceMin,
-				SourceMax: edge.Cardinality.SourceMax,
-				TargetMin: edge.Cardinality.TargetMin,
-				TargetMax: edge.Cardinality.TargetMax,
-			},
-		}
-	}
-	normalized, err := schema.Normalize()
-	if err != nil {
-		return SchemaSnapshot{}, fmt.Errorf("%w: %w", ErrInvalidSchemaTOML, err)
-	}
-	return normalized, nil
-}
-
-type tomlSchemaDocument struct {
-	Version          uint16         `toml:"version"`
-	Permissive       bool           `toml:"permissive"`
-	GlobalInvariants []string       `toml:"global_invariants"`
-	Nodes            []tomlNodeRule `toml:"node"`
-	Edges            []tomlEdgeRule `toml:"edge"`
-}
-
-type tomlNodeRule struct {
-	Label            string             `toml:"label"`
-	NaturalKey       []string           `toml:"natural_key"`
-	NaturalKeyUnique bool               `toml:"natural_key_unique"`
-	Properties       []tomlPropertyRule `toml:"property"`
-}
-
-type tomlEdgeRule struct {
-	Type         string             `toml:"type"`
-	SourceLabels []string           `toml:"source_labels"`
-	TargetLabels []string           `toml:"target_labels"`
-	Cardinality  tomlCardinality    `toml:"cardinality"`
-	Properties   []tomlPropertyRule `toml:"property"`
-}
-
-type tomlCardinality struct {
-	SourceMin uint32 `toml:"source_min"`
-	SourceMax uint32 `toml:"source_max"`
-	TargetMin uint32 `toml:"target_min"`
-	TargetMax uint32 `toml:"target_max"`
-}
-
-type tomlPropertyRule struct {
-	Key      string   `toml:"key"`
-	Required bool     `toml:"required"`
-	Types    []string `toml:"types"`
-	Indexed  bool     `toml:"indexed"`
-}
-
-func decodePropertyRules(rules []tomlPropertyRule) []PropertyRule {
-	if len(rules) == 0 {
-		return nil
-	}
-	decoded := make([]PropertyRule, len(rules))
-	for i, rule := range rules {
-		decoded[i] = PropertyRule{
-			Key:      rule.Key,
-			Required: rule.Required,
-			Types:    propertyKinds(rule.Types),
-			Indexed:  rule.Indexed,
-		}
-	}
-	return decoded
-}
-
-func propertyKinds(types []string) []PropertyKind {
-	if len(types) == 0 {
-		return nil
-	}
-	kinds := make([]PropertyKind, len(types))
-	for i, kind := range types {
-		kinds[i] = PropertyKind(kind)
-	}
-	return kinds
+	return graphcontract.DecodeSchemaTOMLReader(reader)
 }
 
 func validateNodeIngestion(node Node) error {

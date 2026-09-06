@@ -1,0 +1,57 @@
+{
+  "format_version": 1,
+  "candidate": "graph",
+  "schema": "schema.toml",
+  "nodes": {
+    "alice": {
+      "id": "alice",
+      "labels": ["Person"],
+      "properties": {"external_id": {"kind": "integer", "integer": 7}}
+    },
+    "bob": {
+      "id": "bob",
+      "labels": ["Person"],
+      "properties": {"external_id": {"kind": "integer", "integer": 7}}
+    },
+    "missing-property": {"id": "missing-property", "labels": ["Person"]},
+    "outsider": {"id": "outsider", "labels": ["Other"]}
+  },
+  "edges": {
+    "bad-endpoint": {
+      "id": "bad-endpoint",
+      "source": "outsider",
+      "target": "alice",
+      "type": "KNOWS"
+    },
+    "bad-type": {
+      "id": "bad-type",
+      "source": "alice",
+      "target": "bob",
+      "type": "UNDECLARED"
+    },
+    "missing-target": {
+      "id": "missing-target",
+      "source": "alice",
+      "target": "missing",
+      "type": "KNOWS"
+    },
+    "self": {
+      "id": "self",
+      "source": "alice",
+      "target": "alice",
+      "type": "KNOWS"
+    }
+  },
+  "violations": [
+    {"code": "source-label", "entity": "edge", "entityID": "bad-endpoint", "rule": "KNOWS", "field": "source", "expected": "Person", "actual": "Other"},
+    {"code": "edge-type", "entity": "edge", "entityID": "bad-type", "rule": "UNDECLARED", "expected": "declared edge type", "actual": "UNDECLARED"},
+    {"code": "missing-target", "entity": "edge", "entityID": "missing-target", "field": "target", "expected": "existing node", "actual": "missing"},
+    {"code": "acyclic", "entity": "edge", "entityID": "self", "rule": "acyclic", "expected": "acyclic graph"},
+    {"code": "no-self-loop", "entity": "edge", "entityID": "self", "rule": "no-self-loop", "expected": "distinct source and target"},
+    {"code": "source-cardinality-max", "entity": "node", "entityID": "alice", "rule": "KNOWS", "field": "source", "expected": "at most 1", "actual": "2"},
+    {"code": "target-cardinality-max", "entity": "node", "entityID": "alice", "rule": "KNOWS", "field": "target", "expected": "at most 1", "actual": "2"},
+    {"code": "natural-key-unique", "entity": "node", "entityID": "alice", "rule": "Person", "field": "external_id", "expected": "unique natural key"},
+    {"code": "natural-key-unique", "entity": "node", "entityID": "bob", "rule": "Person", "field": "external_id", "expected": "unique natural key"},
+    {"code": "required-property", "entity": "node", "entityID": "missing-property", "rule": "Person", "field": "external_id", "expected": "float,integer"}
+  ]
+}

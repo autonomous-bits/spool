@@ -1,0 +1,26 @@
+{
+  "format_version": 1,
+  "candidate": "migration",
+  "schema": "schema.toml",
+  "nodes": {
+    "alice": {
+      "id": "alice",
+      "labels": ["Person"],
+      "properties": {"external_id": {"kind": "integer", "integer": 1}}
+    },
+    "bob": {
+      "id": "bob",
+      "labels": ["Person"],
+      "properties": {"external_id": {"kind": "float", "float": 1}}
+    }
+  },
+  "edges": {
+    "knows-alice-bob": {
+      "id": "knows-alice-bob",
+      "source": "alice",
+      "target": "bob",
+      "type": "KNOWS"
+    }
+  },
+  "violations": []
+}
