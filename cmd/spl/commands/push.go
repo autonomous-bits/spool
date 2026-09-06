@@ -52,10 +52,20 @@ func NewPushCommand(repoProvider func() (*repository.Repository, error)) *cobra.
 				return fmt.Errorf("resolve rack credential: %w", err)
 			}
 
-			attempt := func(base string) (remote.PushResult, repository.PushPack, error) {
-				pack, err := repo.BuildPushPack(ctx, branchName, base)
+			// One Client (and therefore one CorrelationID) is reused for
+			// every remote call this invocation makes - the initial push,
+			// a reconciliation pull, and any retry push - so Rack's audit
+			// log can correlate them as a single CLI invocation.
+			client := remote.NewClient()
+
+			// attempt returns remoteErr=false when the failure is local
+			// (BuildPushPack, before any remote call was made), so the
+			// caller never mislabels a local validation failure as a
+			// remote_error.
+			attempt := func(base string) (result remote.PushResult, pack repository.PushPack, remoteErr bool, err error) {
+				pack, err = repo.BuildPushPack(ctx, branchName, base)
 				if err != nil {
-					return remote.PushResult{}, repository.PushPack{}, err
+					return remote.PushResult{}, repository.PushPack{}, false, err
 				}
 				req := remote.PushRequest{
 					Branch:       pack.Branch,
@@ -66,11 +76,11 @@ func NewPushCommand(repoProvider func() (*repository.Repository, error)) *cobra.
 					PackFormat:   uint32(pack.PackFormat),
 					PackData:     pack.PackData,
 				}
-				result, err := remote.Push(ctx, remote.NewClient(), cfg, credential, req)
-				return result, pack, err
+				result, err = remote.Push(ctx, client, cfg, credential, req)
+				return result, pack, true, err
 			}
 
-			result, pack, err := attempt(baseCommit)
+			result, pack, remoteErr, err := attempt(baseCommit)
 			reconciled := false
 			if err != nil {
 				if errors.Is(err, repository.ErrNothingToPush) {
@@ -80,6 +90,9 @@ func NewPushCommand(repoProvider func() (*repository.Repository, error)) *cobra.
 				}
 				var nffErr *remote.NonFastForwardError
 				if !errors.As(err, &nffErr) {
+					if !remoteErr {
+						return fmt.Errorf("build push pack for %s: %w", branchName, err)
+					}
 					return writeRemoteErrorEnvelope(command, "push to rack", err, credential)
 				}
 				if !reconcile {
@@ -93,7 +106,7 @@ func NewPushCommand(repoProvider func() (*repository.Repository, error)) *cobra.
 					})
 				}
 
-				remoteHead, conflictResult, err := reconcilePush(ctx, repo, cfg, credential, branchName)
+				remoteHead, conflictResult, err := reconcilePush(ctx, client, repo, cfg, credential, branchName)
 				if err != nil {
 					return fmt.Errorf("reconcile %s: %w", branchName, err)
 				}
@@ -101,7 +114,7 @@ func NewPushCommand(repoProvider func() (*repository.Repository, error)) *cobra.
 					return json.NewEncoder(command.OutOrStdout()).Encode(conflictResult)
 				}
 
-				result, pack, err = attempt(remoteHead)
+				result, pack, remoteErr, err = attempt(remoteHead)
 				if err != nil {
 					var retryNFF *remote.NonFastForwardError
 					if errors.As(err, &retryNFF) {
@@ -114,6 +127,9 @@ func NewPushCommand(repoProvider func() (*repository.Repository, error)) *cobra.
 							Message:       retryNFF.Guidance,
 							CorrelationID: retryNFF.CorrelationID,
 						})
+					}
+					if !remoteErr {
+						return fmt.Errorf("build push pack for %s (post-reconciliation retry): %w", branchName, err)
 					}
 					return writeRemoteErrorEnvelope(command, "push to rack (post-reconciliation retry)", err, credential)
 				}

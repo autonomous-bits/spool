@@ -32,8 +32,8 @@ type pushReconcileConflictResult struct {
 // its --base-commit; on conflicts it returns a populated
 // pushReconcileConflictResult (and an empty remoteHead) for the caller to
 // report instead of retrying.
-func reconcilePush(ctx context.Context, repo *repository.Repository, cfg repository.RemoteConfig, credential, branchName string) (remoteHead string, conflict *pushReconcileConflictResult, err error) {
-	pulled, err := remote.Pull(ctx, remote.NewClient(), cfg, credential, branchName, "")
+func reconcilePush(ctx context.Context, client *remote.Client, repo *repository.Repository, cfg repository.RemoteConfig, credential, branchName string) (remoteHead string, conflict *pushReconcileConflictResult, err error) {
+	pulled, err := remote.Pull(ctx, client, cfg, credential, branchName, "")
 	if err != nil {
 		return "", nil, fmt.Errorf("fetch rack's current history: %w", err)
 	}

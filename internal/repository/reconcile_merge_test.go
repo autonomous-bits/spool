@@ -34,7 +34,9 @@ func TestReconcileBranchProducesFastForwardEligibleCommit(t *testing.T) {
 	ctx := context.Background()
 	dest := setupDivergedReconciliation(t,
 		func(r *Repository) { commitTestMutation(t, r, "local-only-node", "Local", "alice", "local advance") },
-		func(r *Repository) { commitTestMutation(t, r, "remote-only-node", "Remote", "rack-bot", "remote advance") },
+		func(r *Repository) {
+			commitTestMutation(t, r, "remote-only-node", "Remote", "rack-bot", "remote advance")
+		},
 	)
 
 	remoteBranch := ReconciliationBranchName("main")
@@ -89,7 +91,9 @@ func TestReconcileBranchProducesFastForwardEligibleCommit(t *testing.T) {
 func TestReconcileBranchReportsConflictsWithoutMutating(t *testing.T) {
 	dest := setupDivergedReconciliation(t,
 		func(r *Repository) { commitTestMutation(t, r, "shared-node", "Local title", "alice", "local edit") },
-		func(r *Repository) { commitTestMutation(t, r, "shared-node", "Remote title", "rack-bot", "remote edit") },
+		func(r *Repository) {
+			commitTestMutation(t, r, "shared-node", "Remote title", "rack-bot", "remote edit")
+		},
 	)
 
 	remoteBranch := ReconciliationBranchName("main")

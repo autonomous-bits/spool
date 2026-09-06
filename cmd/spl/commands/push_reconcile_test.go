@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/autonomous-bits/spool/internal/remote"
 	"github.com/autonomous-bits/spool/internal/repository"
 )
 
@@ -39,7 +41,9 @@ func TestPushReconcileRetriesAfterCleanMerge(t *testing.T) {
 	stageAndCommit(t, local, "push-reconcile-local-node", "Local side", "local-author", "local advances")
 
 	pushAttempts := 0
+	var correlationIDs []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		correlationIDs = append(correlationIDs, r.Header.Get(remote.CorrelationIDHeader))
 		switch {
 		case r.Method == http.MethodGet:
 			if got := r.URL.Query().Get("knownCommit"); got != "" {
@@ -98,6 +102,22 @@ func TestPushReconcileRetriesAfterCleanMerge(t *testing.T) {
 	}
 	if !ok || tracking.RemoteHeadCommit != result.HeadCommit {
 		t.Fatalf("tracking = %#v, want remoteHeadCommit=%s", tracking, result.HeadCommit)
+	}
+
+	// The initial push, the reconciliation pull, and the retried push
+	// should all share one remote.Client (and therefore one
+	// CorrelationID), so Rack's audit log can correlate them as a single
+	// `spl push --reconcile` invocation.
+	if len(correlationIDs) != 3 {
+		t.Fatalf("saw %d remote requests, want 3 (push, pull, retried push)", len(correlationIDs))
+	}
+	if correlationIDs[0] == "" {
+		t.Fatal("first remote request sent an empty CorrelationID")
+	}
+	for i, id := range correlationIDs {
+		if id != correlationIDs[0] {
+			t.Fatalf("correlationIDs[%d] = %q, want %q (all requests in one invocation should share a CorrelationID)", i, id, correlationIDs[0])
+		}
 	}
 
 	reconciliationBranch := repository.ReconciliationBranchName("main")
@@ -159,5 +179,43 @@ func TestPushWithoutReconcileFlagReportsRejectionWithoutFetching(t *testing.T) {
 	}
 	if result.Pushed || !result.Rejected || result.Reconciled {
 		t.Fatalf("result = %#v, want Pushed=false Rejected=true Reconciled=false", result)
+	}
+}
+
+// TestPushLocalBuildErrorIsNotWrappedInRemoteEnvelope proves a local
+// failure (BuildPushPack, before any remote call is made - here, a
+// nonexistent branch) is returned as a plain error rather than routed
+// through the remote JSON error envelope, which is reserved for failures
+// that actually came back from Rack.
+func TestPushLocalBuildErrorIsNotWrappedInRemoteEnvelope(t *testing.T) {
+	local := newTestSeedRepository(t)
+
+	contacted := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		contacted = true
+	}))
+	defer server.Close()
+
+	if err := local.SetRemote(repository.RemoteConfig{Endpoint: server.URL, RepoID: "acme", AuthMode: repository.RemoteAuthModeBearer}); err != nil {
+		t.Fatalf("SetRemote: %v", err)
+	}
+	t.Setenv("SPOOL_RACK_TOKEN", "test-token")
+
+	var output bytes.Buffer
+	command := NewPushCommand(func() (*repository.Repository, error) { return local, nil })
+	command.SetOut(&output)
+	command.SetArgs([]string{"--branch", "does-not-exist"})
+	err := command.Execute()
+	if err == nil {
+		t.Fatal("execute push: want an error for a nonexistent branch, got nil")
+	}
+	if !errors.Is(err, repository.ErrBranchNotFound) {
+		t.Fatalf("err = %v, want it to wrap repository.ErrBranchNotFound", err)
+	}
+	if contacted {
+		t.Fatal("push contacted the remote for a local BuildPushPack failure")
+	}
+	if output.Len() != 0 {
+		t.Fatalf("output = %q, want no remote error envelope written for a local failure", output.String())
 	}
 }
