@@ -265,3 +265,87 @@ func TestDeleteBranchCredentialNeverAppearsInErrorText(t *testing.T) {
 		t.Fatalf("error %q leaked credential", err.Error())
 	}
 }
+
+func TestBranchOperationsWithTenantAndWorkspaceRouteToWorkspacesAndSetTenantHeader(t *testing.T) {
+	var gotPath, gotTenant, gotAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotTenant = r.Header.Get("X-Tenant-ID")
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method {
+		case http.MethodPost:
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(BranchResult{Name: "feature", HeadCommit: "abc123"})
+		case http.MethodGet:
+			if strings.HasSuffix(r.URL.Path, "/default") {
+				_ = json.NewEncoder(w).Encode(BranchResult{Name: "main", HeadCommit: "abc123"})
+			} else {
+				_ = json.NewEncoder(w).Encode(BranchListResult{Branches: []BranchListEntry{{Name: "main", HeadCommit: "abc123", Default: true}}})
+			}
+		case http.MethodDelete:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer server.Close()
+
+	cfg := Config{
+		Endpoint:    server.URL,
+		TenantID:    "tenant-xyz",
+		WorkspaceID: "ws-123",
+		AuthMode:    AuthModeBearer,
+	}
+	client := NewClient()
+
+	// 1. CreateBranch
+	_, err := CreateBranch(context.Background(), client, cfg, "secret-token", BranchCreateRequest{Name: "feature", SourceBranch: "main"})
+	if err != nil {
+		t.Fatalf("CreateBranch: %v", err)
+	}
+	if gotPath != "/api/v1/workspaces/ws-123/branches" {
+		t.Fatalf("CreateBranch path = %q, want /api/v1/workspaces/ws-123/branches", gotPath)
+	}
+	if gotTenant != "tenant-xyz" {
+		t.Fatalf("CreateBranch X-Tenant-ID = %q, want tenant-xyz", gotTenant)
+	}
+	if gotAuth != "Bearer secret-token" {
+		t.Fatalf("CreateBranch Authorization = %q, want Bearer secret-token", gotAuth)
+	}
+
+	// 2. ListBranches
+	_, err = ListBranches(context.Background(), client, cfg, "secret-token")
+	if err != nil {
+		t.Fatalf("ListBranches: %v", err)
+	}
+	if gotPath != "/api/v1/workspaces/ws-123/branches" {
+		t.Fatalf("ListBranches path = %q, want /api/v1/workspaces/ws-123/branches", gotPath)
+	}
+	if gotTenant != "tenant-xyz" {
+		t.Fatalf("ListBranches X-Tenant-ID = %q, want tenant-xyz", gotTenant)
+	}
+
+	// 3. DefaultBranch
+	_, err = DefaultBranch(context.Background(), client, cfg, "secret-token")
+	if err != nil {
+		t.Fatalf("DefaultBranch: %v", err)
+	}
+	if gotPath != "/api/v1/workspaces/ws-123/branches/default" {
+		t.Fatalf("DefaultBranch path = %q, want /api/v1/workspaces/ws-123/branches/default", gotPath)
+	}
+	if gotTenant != "tenant-xyz" {
+		t.Fatalf("DefaultBranch X-Tenant-ID = %q, want tenant-xyz", gotTenant)
+	}
+
+	// 4. DeleteBranch
+	err = DeleteBranch(context.Background(), client, cfg, "secret-token", "feature")
+	if err != nil {
+		t.Fatalf("DeleteBranch: %v", err)
+	}
+	if gotPath != "/api/v1/workspaces/ws-123/branches/feature" {
+		t.Fatalf("DeleteBranch path = %q, want /api/v1/workspaces/ws-123/branches/feature", gotPath)
+	}
+	if gotTenant != "tenant-xyz" {
+		t.Fatalf("DeleteBranch X-Tenant-ID = %q, want tenant-xyz", gotTenant)
+	}
+}
+

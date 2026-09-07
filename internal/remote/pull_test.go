@@ -308,3 +308,46 @@ func TestPullCredentialNeverAppearsInErrorText(t *testing.T) {
 		t.Fatalf("error %q leaked credential", err.Error())
 	}
 }
+
+func TestPullWithTenantAndWorkspaceRoutesToWorkspacesAndSetsTenantHeader(t *testing.T) {
+	var gotPath, gotTenant, gotAuth, gotCorrelation string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotTenant = r.Header.Get("X-Tenant-ID")
+		gotAuth = r.Header.Get("Authorization")
+		gotCorrelation = r.Header.Get("X-Correlation-ID")
+		if got := r.URL.Query().Get("branch"); got != "main" {
+			t.Fatalf("branch = %q", got)
+		}
+		w.Header().Set("X-Spool-Head-Commit", "abc123")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	cfg := Config{
+		Endpoint:    server.URL,
+		TenantID:    "tenant-xyz",
+		WorkspaceID: "ws-123",
+		AuthMode:    AuthModeBearer,
+	}
+	result, err := Pull(context.Background(), NewClient(), cfg, "secret-token", "main", "abc123")
+	if err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+	if !result.UpToDate || result.HeadCommit != "abc123" {
+		t.Fatalf("result = %#v", result)
+	}
+	if gotPath != "/api/v1/workspaces/ws-123/pull" {
+		t.Fatalf("path = %q, want /api/v1/workspaces/ws-123/pull", gotPath)
+	}
+	if gotTenant != "tenant-xyz" {
+		t.Fatalf("X-Tenant-ID = %q, want tenant-xyz", gotTenant)
+	}
+	if gotAuth != "Bearer secret-token" {
+		t.Fatalf("Authorization = %q, want Bearer secret-token", gotAuth)
+	}
+	if gotCorrelation == "" {
+		t.Fatal("expected non-empty X-Correlation-ID header")
+	}
+}
+

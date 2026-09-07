@@ -31,6 +31,12 @@ func TestRemoteSetPersistsConfigurationAndPrintsNoCredential(t *testing.T) {
 	if result.Endpoint != "https://rack.example.com" || result.RepoID != "acme-prod" || result.AuthMode != "bearer" {
 		t.Fatalf("result = %#v", result)
 	}
+	if result.WorkspaceID != "" {
+		t.Fatalf("result.WorkspaceID = %q, want empty for legacy repo-id config", result.WorkspaceID)
+	}
+	if strings.Contains(output.String(), `"workspaceId"`) {
+		t.Fatalf("JSON output unexpectedly includes workspaceId for legacy config: %s", output.String())
+	}
 	cfg, ok, err := repo.Remote()
 	if err != nil || !ok {
 		t.Fatalf("Remote() = %#v, %v, %v", cfg, ok, err)

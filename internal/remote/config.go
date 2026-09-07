@@ -132,7 +132,7 @@ func (c Config) Validate() error {
 	}
 
 	if c.WorkspaceOrRepoID() == "" {
-		return fmt.Errorf("%w: workspace_id is required", ErrInvalidConfig)
+		return fmt.Errorf("%w: either workspace_id or repo_id is required", ErrInvalidConfig)
 	}
 
 	switch c.AuthMode {

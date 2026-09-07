@@ -40,14 +40,10 @@ func newRemoteConfigResult(cfg repository.RemoteConfig) remoteConfigResult {
 	if repoID == "" {
 		repoID = cfg.WorkspaceID
 	}
-	workspaceID := cfg.WorkspaceID
-	if workspaceID == "" {
-		workspaceID = cfg.RepoID
-	}
 	return remoteConfigResult{
 		Endpoint:    cfg.Endpoint,
 		TenantID:    cfg.TenantID,
-		WorkspaceID: workspaceID,
+		WorkspaceID: cfg.WorkspaceID,
 		RepoID:      repoID,
 		AuthMode:    string(cfg.AuthMode),
 	}
@@ -66,12 +62,6 @@ func newRemoteSetCommand(repoProvider func() (*repository.Repository, error)) *c
 			repo, err := repoProvider()
 			if err != nil {
 				return err
-			}
-			if workspaceID == "" && repoID != "" {
-				workspaceID = repoID
-			}
-			if repoID == "" && workspaceID != "" {
-				repoID = workspaceID
 			}
 			cfg := repository.RemoteConfig{
 				Endpoint:    endpoint,
