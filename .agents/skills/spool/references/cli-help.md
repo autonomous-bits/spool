@@ -43,8 +43,8 @@ repository discovery.
 | `history`, `branches-containing`, `diff` | Inspect history, branch containment, and snapshot changes |
 | `merge preview/apply/conflicts/resolve/finalize/abort` | Run the merge transaction lifecycle |
 | `fsck`, `gc`, `prune` | Check integrity, maintain objects, and remove ephemeral graph data |
-| `workspace init/attach` | Provision central detached state and bind repository manifests |
-| `remote set/show/remove` | Configure a non-secret Rack remote and check graphcontract version compatibility |
+| `workspace init/attach/migrate`, `migrate` | Provision central detached state, bind repository manifests, and upgrade format |
+| `remote set/show/remove/branch` | Configure a non-secret Rack remote, check version compatibility, and manage remote branches |
 | `push`, `pull` | Exchange commits with the configured Rack remote over the native push/pull protocol |
 | `version` | Print Spool release version and build information as JSON |
 | `completion`, `help` | Generate shell completion and inspect command help |
@@ -308,18 +308,25 @@ repository's `.spl/config.toml` manifest. Commit that manifest so other
 checkouts resolve the same central workspace by immutable ID. The command does
 not register a host-path attachment.
 
+## Workspace format migration
+
+```sh
+spl migrate --from 1 --to 2
+spl workspace migrate --from 1 --to 2
+```
+
+`migrate` (or `workspace migrate`) upgrades an existing Spool repository state directory to a newer format version. It acquires an exclusive lock on repository control state, creates a timestamped durable backup of the state directory (e.g. `.v1.backup-<timestamp>`), canonicalizes commit objects, remaps references and reflogs, updates configuration format version and tracking metadata, and runs an integrity fsck.
+
 ## Remote configuration
 
 ```sh
+spl remote set --endpoint https://rack.example.com --tenant-id acme --workspace-id prod --auth-mode bearer
 spl remote set --endpoint https://rack.example.com --repo-id acme-prod --auth-mode bearer
 spl remote show
 spl remote remove
 ```
 
-`remote set` requires `--endpoint`, `--repo-id`, and `--auth-mode` (`bearer` or `api_key`) and
-persists them as a non-secret `[remote]` table in `.spl/config.toml`. It rejects endpoint or
-repo-id values that look like pasted-in credentials (known token prefixes, URL userinfo,
-overlong identifiers) and never accepts or stores a credential itself.
+`remote set` requires `--endpoint`, `--auth-mode` (`bearer` or `api_key`), and either `--workspace-id` (alias `--workspace`), `--tenant-id` (alias `--tenant`), or legacy `--repo-id`, and persists them as a non-secret `[remote]` table in `.spl/config.toml`. It rejects endpoint or identifier values that look like pasted-in credentials (known token prefixes, URL userinfo, overlong identifiers) and never accepts or stores a credential itself.
 
 `remote show` prints the configured remote and probes its `/healthz` endpoint to compare
 `packFormatVersion`, `packIndexFormatVersion`, and `packManifestFormatVersion` against this
@@ -331,9 +338,21 @@ rather than an error. It never prints a credential.
 none is configured.
 
 Credentials are never read from or written to `.spl/config.toml`. When a command needs one, it is
-resolved in this order: the OS keychain/secret store (service `spool-rack`, account = repo-id),
+resolved in this order: the OS keychain/secret store (service `spool-rack`, account = workspace/repo-id),
 then an environment variable (`SPOOL_RACK_TOKEN` for `bearer`, `SPOOL_RACK_API_KEY` for
 `api_key`), then an interactive TTY prompt with hidden input.
+
+## Remote branch management
+
+```sh
+spl remote branch create feature --from-branch main
+spl remote branch create review --from-commit <commit-id>
+spl remote branch list
+spl remote branch default
+spl remote branch delete feature
+```
+
+`remote branch create <name>` creates a remote branch on the configured Rack remote from an existing remote branch or commit, and records local tracking metadata. `remote branch list` lists all branches on the remote. `remote branch default` reports the remote's default branch. `remote branch delete <name>` deletes a remote branch (the remote default branch cannot be deleted).
 
 ## Push
 

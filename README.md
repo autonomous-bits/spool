@@ -254,13 +254,86 @@ explicitly writes a repository manifest for it. Repository resolution uses only
 that committed manifest's immutable `workspace_id`; it does not use host-path
 attachments, `SPOOL_WORKSPACE`, or active-workspace preferences.
 
-## Remote configuration
+## Remote configuration and synchronization
 
-`remote set` persists a non-secret Rack remote (`--endpoint`, `--repo-id`, `--auth-mode`) to
-`.spl/config.toml`; `remote show` reports it plus `graphcontract` version compatibility with the
-remote's `/healthz` endpoint; `remote remove` clears it. No credential is ever read from or
-written to repository configuration — credentials are resolved at use from the OS
-keychain/secret store, then `SPOOL_RACK_TOKEN`/`SPOOL_RACK_API_KEY`, then an interactive prompt.
+Spool connects to a remote Spool Rack service to push, pull, and coordinate graph history across team members.
+
+### Remote configuration
+
+`remote set` persists a non-secret Rack remote configuration to `.spl/config.toml`:
+
+```sh
+# Configure with tenant and workspace identity
+spl remote set --endpoint https://rack.example.com --tenant-id acme --workspace-id prod --auth-mode bearer
+
+# Or using legacy repository identity
+spl remote set --endpoint https://rack.example.com --repo-id acme-prod --auth-mode bearer
+```
+
+`remote show` reports the configured remote and probes its `/healthz` endpoint to verify `graphcontract` version compatibility:
+
+```sh
+spl remote show
+```
+
+`remote remove` clears the configured remote from `.spl/config.toml`:
+
+```sh
+spl remote remove
+```
+
+No credential is ever read from or written to repository configuration — credentials are resolved at use from the OS keychain/secret store (service `spool-rack`, account = workspace/repo-id), then `SPOOL_RACK_TOKEN` / `SPOOL_RACK_API_KEY`, then an interactive prompt.
+
+### Remote branches
+
+Inspect and manage branch lifecycle on the configured Rack remote:
+
+```sh
+# Create a remote branch from an existing remote branch or commit
+spl remote branch create feature --from-branch main
+spl remote branch create review --from-commit <commit-id>
+
+# List remote branches or query the remote default branch
+spl remote branch list
+spl remote branch default
+
+# Delete a non-default remote branch
+spl remote branch delete feature
+```
+
+### Push and pull
+
+Exchange verified commits with the configured Rack remote over native pack protocols:
+
+```sh
+# Push local commits reachable from --branch to Rack
+spl push --branch main
+
+# Push only commits newer than a known remote base commit
+spl push --branch main --base-commit <last-known-wire-commit-id>
+
+# Automatically reconcile non-fast-forward rejections via 3-way graph merge and retry
+spl push --branch main --reconcile
+
+# Pull new commits from Rack and fast-forward local history
+spl pull --branch main
+```
+
+`push` and `pull` enforce linear, fast-forward history. If a push is rejected because the remote branch moved, `--reconcile` pulls the remote history into a temporary reconciliation branch, rebases local changes onto it using the 3-way graph merge engine, and retries the push if clean. If conflicts exist, they are reported so they can be inspected and resolved using `spl merge`.
+
+## Workspace format migration
+
+When upgrading Spool across format version increments (such as upgrading from format version 1 to format version 2 in v1.5.0), existing workspace state must be migrated before it can be read or modified:
+
+```sh
+# Upgrade repository state directory format
+spl migrate --from 1 --to 2
+
+# Also available under the workspace command group
+spl workspace migrate --from 1 --to 2
+```
+
+`migrate` acquires an exclusive lock on repository control state, creates a durable backup copy of the state directory (e.g. `.v1.backup-<timestamp>`), canonicalizes commit objects to current graph contracts, remaps references and reflogs, updates configuration format version and tracking metadata, and validates the upgraded repository with `fsck`.
 
 ## CLI command reference
 
@@ -299,9 +372,16 @@ The command and flag inventory is:
 | `cherry-pick` | `--commit` (required), `--target-branch` (required), `--dry-run`, `--author`, `--message` |
 | `workspace init <name>` | positional name |
 | `workspace attach [path]` | `--workspace` and `--repository-id` (required); path defaults to current directory |
-| `remote set` | `--endpoint`, `--repo-id`, `--auth-mode` (all required) |
+| `workspace migrate`, `migrate` | `--from` (required), `--to` (required) |
+| `remote set` | `--endpoint` (required), `--auth-mode` (required), `--workspace-id`/`--workspace` or `--tenant-id`/`--tenant` or legacy `--repo-id` |
 | `remote show` | none; probes the configured remote's `/healthz` and never prints credentials |
 | `remote remove` | none |
+| `remote branch create <name>` | exactly one of `--from-branch`, `--from-commit` |
+| `remote branch list` | none |
+| `remote branch default` | none |
+| `remote branch delete <name>` | positional branch name (cannot delete default remote branch) |
+| `push` | `--branch` (required), `--base-commit`, `--reconcile` |
+| `pull` | `--branch` (required) |
 | `version` | none |
 | `completion` | shell subcommand: `bash`, `zsh`, `fish`, or `powershell` |
 | `help [command path]` | optional command path |
