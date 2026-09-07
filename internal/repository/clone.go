@@ -14,18 +14,19 @@ import (
 // by packs, setting up remote configuration, and making branch the active branch.
 // If packs is empty (the remote workspace has no commits yet), the repository is
 // seeded with the standard initial skeleton.
-func InitializeClonedRepository(stateDir string, cfg RemoteConfig, branch string, headCommit string, packs [][]byte) (*Repository, error) {
+// It returns the opened repository and the count of commits installed from remote.
+func InitializeClonedRepository(stateDir string, cfg RemoteConfig, branch string, headCommit string, packs [][]byte) (*Repository, int, error) {
 	if err := rejectLegacyRepositoryState(stateDir); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if _, err := os.Stat(filepath.Join(stateDir, "config.toml")); err == nil {
-		return nil, ErrRepositoryAlreadyInitialized
+		return nil, 0, ErrRepositoryAlreadyInitialized
 	} else if !os.IsNotExist(err) {
-		return nil, fmt.Errorf("inspect repository configuration: %w", err)
+		return nil, 0, fmt.Errorf("inspect repository configuration: %w", err)
 	}
 
 	if err := ensureDurableDirectory(stateDir); err != nil {
-		return nil, fmt.Errorf("create repository state directory: %w", err)
+		return nil, 0, fmt.Errorf("create repository state directory: %w", err)
 	}
 
 	repo := newRepository()
@@ -34,10 +35,10 @@ func InitializeClonedRepository(stateDir string, cfg RemoteConfig, branch string
 	repo.stateLock = flock.New(filepath.Join(stateDir, "repository.lock"))
 	locked, err := repo.stateLock.TryLock()
 	if err != nil {
-		return nil, fmt.Errorf("lock merge repository: %w", err)
+		return nil, 0, fmt.Errorf("lock merge repository: %w", err)
 	}
 	if !locked {
-		return nil, ErrMergeRepositoryLocked
+		return nil, 0, ErrMergeRepositoryLocked
 	}
 
 	if branch == "" {
@@ -50,9 +51,14 @@ func InitializeClonedRepository(stateDir string, cfg RemoteConfig, branch string
 		repo.remoteBranchTracking = make(map[string]RemoteBranchTracking)
 	}
 
+	commitsInstalled := 0
 	if len(packs) == 0 {
 		if err := repo.seed(); err != nil {
-			return nil, closeAfterFailedOpen(repo, fmt.Errorf("seed cloned repository: %w", err))
+			return nil, 0, closeAfterFailedOpen(repo, fmt.Errorf("seed cloned repository: %w", err))
+		}
+		if branch != defaultBranchName {
+			repo.branches[branch] = repo.branches[defaultBranchName]
+			delete(repo.branches, defaultBranchName)
 		}
 		if headCommit != "" {
 			repo.remoteBranchTracking[branch] = RemoteBranchTracking{
@@ -63,33 +69,34 @@ func InitializeClonedRepository(stateDir string, cfg RemoteConfig, branch string
 	} else {
 		frames, err := decodePullPackFrames(packs)
 		if err != nil {
-			return nil, closeAfterFailedOpen(repo, err)
+			return nil, 0, closeAfterFailedOpen(repo, err)
 		}
 		if len(frames) == 0 {
-			return nil, closeAfterFailedOpen(repo, fmt.Errorf("%w: clone pack list is empty", ErrPullInvalidPack))
+			return nil, 0, closeAfterFailedOpen(repo, fmt.Errorf("%w: clone pack list is empty", ErrPullInvalidPack))
 		}
 		if frames[0].Base.ID != "" {
-			return nil, closeAfterFailedOpen(repo, fmt.Errorf("%w: clone pack must declare a from-scratch base", ErrPullInvalidPack))
+			return nil, 0, closeAfterFailedOpen(repo, fmt.Errorf("%w: clone pack must declare a from-scratch base", ErrPullInvalidPack))
 		}
 		if err := validatePullFrameChain(frames); err != nil {
-			return nil, closeAfterFailedOpen(repo, err)
+			return nil, 0, closeAfterFailedOpen(repo, err)
 		}
 
 		restore := repo.beginPullInstallLocked()
 		defer func() { repo.objectBatch = nil }()
 
-		currentLocalHead, _, _, err := repo.installPullFramesLocked(context.Background(), frames, map[string]ObjectID{}, "", headCommit)
+		currentLocalHead, installed, _, err := repo.installPullFramesLocked(context.Background(), frames, map[string]ObjectID{}, "", headCommit)
 		if err != nil {
 			restore()
-			return nil, closeAfterFailedOpen(repo, err)
+			return nil, 0, closeAfterFailedOpen(repo, err)
 		}
 
 		if packErr := repo.objectBatch.publish(); packErr != nil && !packPublicationCommitted(packErr) {
 			restore()
-			return nil, closeAfterFailedOpen(repo, fmt.Errorf("repository: publish cloned immutable objects: %w", packErr))
+			return nil, 0, closeAfterFailedOpen(repo, fmt.Errorf("repository: publish cloned immutable objects: %w", packErr))
 		}
 
 		repo.branches[branch] = currentLocalHead
+		commitsInstalled = installed
 		if headCommit != "" {
 			repo.remoteBranchTracking[branch] = RemoteBranchTracking{
 				RemoteBranch:     branch,
@@ -98,20 +105,20 @@ func InitializeClonedRepository(stateDir string, cfg RemoteConfig, branch string
 		}
 		if err := repo.ensureBranchHeadProjectionsLocked(); err != nil {
 			restore()
-			return nil, closeAfterFailedOpen(repo, fmt.Errorf("repository: pin cloned snapshot: %w", err))
+			return nil, 0, closeAfterFailedOpen(repo, fmt.Errorf("repository: pin cloned snapshot: %w", err))
 		}
 	}
 
 	if err := repo.initializeControlStateLocked(); err != nil {
-		return nil, closeAfterFailedOpen(repo, fmt.Errorf("initialize repository control state: %w", err))
+		return nil, 0, closeAfterFailedOpen(repo, fmt.Errorf("initialize repository control state: %w", err))
 	}
 
 	if err := repo.RecoverMergeTransactions(); err != nil {
-		return nil, closeAfterFailedOpen(repo, err)
+		return nil, 0, closeAfterFailedOpen(repo, err)
 	}
 	if err := repo.ensureStartupProjections(); err != nil {
-		return nil, closeAfterFailedOpen(repo, err)
+		return nil, 0, closeAfterFailedOpen(repo, err)
 	}
 
-	return repo, nil
+	return repo, commitsInstalled, nil
 }

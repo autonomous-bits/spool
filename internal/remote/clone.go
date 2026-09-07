@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 )
 
 // CloneResult is the outcome of a successful clone HTTP call.
@@ -101,11 +102,17 @@ func (c *Client) clone(ctx context.Context, cfg Config, credential string, branc
 
 	case http.StatusNotFound:
 		rackErr := decodeRackErrorFromResponse(response, credential)
-		if rackErr.Message == "branch not found" {
-			return CloneResult{}, fmt.Errorf("%w: %w", ErrPullBranchNotFound, rackErr)
+		// If the server returned a structured Rack error (JSON body or non-empty code/message),
+		// the clone endpoint exists but rejected the request (e.g. branch or workspace not found).
+		// Return the error directly rather than falling back and masking the real failure.
+		if strings.Contains(response.Header.Get("Content-Type"), "json") || rackErr.Code != "" || (rackErr.Message != "" && rackErr.Message != "404 page not found") {
+			if rackErr.Message == "branch not found" || rackErr.Code == "branch_not_found" {
+				return CloneResult{}, fmt.Errorf("%w: %w", ErrPullBranchNotFound, rackErr)
+			}
+			return CloneResult{}, fmt.Errorf("%w: %w", ErrPullRejected, rackErr)
 		}
 
-		// Fallback for servers that do not have the /clone endpoint
+		// Fallback for older servers that do not have the /clone endpoint (unrouted 404)
 		targetBranch := branch
 		var defBranch string
 		if targetBranch == "" {

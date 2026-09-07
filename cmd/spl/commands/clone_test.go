@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/autonomous-bits/spool/internal/repository"
@@ -80,8 +81,8 @@ func TestCloneCommandWithURL(t *testing.T) {
 	if res.HeadCommit != fullPack.TargetCommit {
 		t.Errorf("HeadCommit = %q, want %q", res.HeadCommit, fullPack.TargetCommit)
 	}
-	if res.CommitsInstalled != 1 {
-		t.Errorf("CommitsInstalled = %d, want 1", res.CommitsInstalled)
+	if res.CommitsInstalled != 2 {
+		t.Errorf("CommitsInstalled = %d, want 2", res.CommitsInstalled)
 	}
 
 	// Verify opened repo in destDir works
@@ -204,6 +205,28 @@ func TestCloneCommandRejectsNonEmptyDestination(t *testing.T) {
 	err := cmd.Execute()
 	if err == nil {
 		t.Fatal("expected error when destination is not empty, got nil")
+	}
+}
+
+func TestCloneCommandRejectsExistingFileDestination(t *testing.T) {
+	tempDir := t.TempDir()
+	destFile := filepath.Join(tempDir, "dest-file")
+	if err := os.WriteFile(destFile, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewCloneCommand()
+	cmd.SetArgs([]string{
+		"http://127.0.0.1:8080/api/v1/workspaces/ws-1",
+		destFile,
+	})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when destination is an existing file, got nil")
+	}
+	if !strings.Contains(err.Error(), "not a directory") {
+		t.Fatalf("expected 'not a directory' error, got: %v", err)
 	}
 }
 

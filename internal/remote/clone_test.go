@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -159,5 +160,39 @@ func TestCloneFallbackWhenCloneEndpointNotFound(t *testing.T) {
 	}
 	if res.Branch != "main" || res.HeadCommit != head || len(res.Packs) != 1 {
 		t.Errorf("Clone() result = %+v, want branch:main head:%s", res, head)
+	}
+}
+
+func TestCloneStructured404DoesNotFallback(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/workspaces/ws-missing/clone" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"error":   "not_found",
+				"message": "workspace not found",
+			})
+			return
+		}
+		t.Errorf("unexpected path hit: %s", r.URL.Path)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	cfg := Config{
+		Endpoint:    server.URL,
+		TenantID:    "tenant-1",
+		WorkspaceID: "ws-missing",
+		AuthMode:    AuthModeBearer,
+	}
+
+	_, err := Clone(context.Background(), nil, cfg, "dev-token", "")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, ErrPullRejected) {
+		t.Errorf("expected ErrPullRejected, got %v", err)
 	}
 }

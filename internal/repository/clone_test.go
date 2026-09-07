@@ -26,9 +26,12 @@ func TestInitializeClonedRepositoryWithPacks(t *testing.T) {
 		AuthMode:    RemoteAuthModeBearer,
 	}
 
-	cloned, err := InitializeClonedRepository(cloneDir, remoteCfg, "main", fullPack.TargetCommit, [][]byte{fullPack.PackData})
+	cloned, installed, err := InitializeClonedRepository(cloneDir, remoteCfg, "main", fullPack.TargetCommit, [][]byte{fullPack.PackData})
 	if err != nil {
 		t.Fatalf("InitializeClonedRepository: %v", err)
+	}
+	if installed != 3 {
+		t.Fatalf("installed commits = %d, want 3", installed)
 	}
 	defer func() {
 		if err := cloned.Close(); err != nil {
@@ -89,9 +92,12 @@ func TestInitializeClonedRepositoryEmpty(t *testing.T) {
 		AuthMode:    RemoteAuthModeBearer,
 	}
 
-	cloned, err := InitializeClonedRepository(cloneDir, remoteCfg, "main", "", nil)
+	cloned, installed, err := InitializeClonedRepository(cloneDir, remoteCfg, "main", "", nil)
 	if err != nil {
 		t.Fatalf("InitializeClonedRepository empty: %v", err)
+	}
+	if installed != 0 {
+		t.Fatalf("installed commits = %d, want 0", installed)
 	}
 	defer func() {
 		if err := cloned.Close(); err != nil {
@@ -108,5 +114,57 @@ func TestInitializeClonedRepositoryEmpty(t *testing.T) {
 	}
 	if cloned.defaultBranch != "main" {
 		t.Fatalf("defaultBranch = %q, want main", cloned.defaultBranch)
+	}
+}
+
+func TestInitializeClonedRepositoryEmptyCustomBranch(t *testing.T) {
+	cloneDir := filepath.Join(t.TempDir(), ".spl")
+	remoteCfg := RemoteConfig{
+		Endpoint:    "http://127.0.0.1:8080",
+		TenantID:    "tenant-1",
+		WorkspaceID: "ws-empty-custom",
+		AuthMode:    RemoteAuthModeBearer,
+	}
+
+	cloned, installed, err := InitializeClonedRepository(cloneDir, remoteCfg, "develop", "", nil)
+	if err != nil {
+		t.Fatalf("InitializeClonedRepository empty develop: %v", err)
+	}
+	if installed != 0 {
+		t.Fatalf("installed commits = %d, want 0", installed)
+	}
+	defer func() {
+		if err := cloned.Close(); err != nil {
+			t.Fatalf("close cloned repo: %v", err)
+		}
+	}()
+
+	if cloned.defaultBranch != "develop" {
+		t.Fatalf("defaultBranch = %q, want develop", cloned.defaultBranch)
+	}
+	if cloned.activeBranch != "develop" {
+		t.Fatalf("activeBranch = %q, want develop", cloned.activeBranch)
+	}
+	head, ok := cloned.branches["develop"]
+	if !ok || head == "" {
+		t.Fatalf("branches[develop] = %q, ok = %v; want valid head commit", head, ok)
+	}
+
+	// Verify head can be pinned and resolved
+	commitID, err := cloned.PinBranch("develop")
+	if err != nil {
+		t.Fatalf("PinBranch(develop): %v", err)
+	}
+	if commitID != head {
+		t.Fatalf("PinBranch(develop) = %q, want %q", commitID, head)
+	}
+
+	// Verify FSCK passes cleanly on custom branch empty clone
+	report, err := cloned.Fsck()
+	if err != nil {
+		t.Fatalf("Fsck: %v", err)
+	}
+	if !report.Valid {
+		t.Fatalf("Fsck invalid: %+v", report)
 	}
 }

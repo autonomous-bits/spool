@@ -110,8 +110,19 @@ func NewCloneCommand() *cobra.Command {
 				return fmt.Errorf("resolve destination directory: %w", err)
 			}
 
-			if entries, err := os.ReadDir(absDestDir); err == nil && len(entries) > 0 {
-				return fmt.Errorf("destination path %q already exists and is not an empty directory", absDestDir)
+			if info, statErr := os.Stat(absDestDir); statErr == nil {
+				if !info.IsDir() {
+					return fmt.Errorf("destination path %q already exists and is not a directory", absDestDir)
+				}
+				entries, readErr := os.ReadDir(absDestDir)
+				if readErr != nil {
+					return fmt.Errorf("inspect destination directory %q: %w", absDestDir, readErr)
+				}
+				if len(entries) > 0 {
+					return fmt.Errorf("destination path %q already exists and is not an empty directory", absDestDir)
+				}
+			} else if !os.IsNotExist(statErr) {
+				return fmt.Errorf("inspect destination path %q: %w", absDestDir, statErr)
 			}
 
 			stateDir := filepath.Join(absDestDir, ".spl")
@@ -128,15 +139,12 @@ func NewCloneCommand() *cobra.Command {
 				return writeRemoteErrorEnvelope(command, "clone from rack", err, credential)
 			}
 
-			repo, err := repository.InitializeClonedRepository(stateDir, cfg, cloneRes.Branch, cloneRes.HeadCommit, cloneRes.Packs)
+			repo, commitsInstalled, err := repository.InitializeClonedRepository(stateDir, cfg, cloneRes.Branch, cloneRes.HeadCommit, cloneRes.Packs)
 			if err != nil {
 				return fmt.Errorf("initialize cloned workspace: %w", err)
 			}
-			_ = repo.Close()
-
-			installedCount := 0
-			if !cloneRes.Empty {
-				installedCount = len(cloneRes.Packs)
+			if closeErr := repo.Close(); closeErr != nil {
+				return fmt.Errorf("finalize cloned workspace: %w", closeErr)
 			}
 
 			return json.NewEncoder(command.OutOrStdout()).Encode(cloneResult{
@@ -148,7 +156,7 @@ func NewCloneCommand() *cobra.Command {
 				RepoID:           cfg.RepoID,
 				Branch:           cloneRes.Branch,
 				HeadCommit:       cloneRes.HeadCommit,
-				CommitsInstalled: installedCount,
+				CommitsInstalled: commitsInstalled,
 				Empty:            cloneRes.Empty,
 			})
 		},
