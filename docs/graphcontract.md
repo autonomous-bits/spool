@@ -1,7 +1,7 @@
 # Graph contract interoperability
 
 `github.com/autonomous-bits/spool/graphcontract` is Spool's public,
-dependency-light canonical graph contract. Rack must pin **`v2.1.0` or
+dependency-light canonical graph contract. Rack must pin **`v1.4.0` or
 later**, the first release containing the schema API and interoperability
 fixtures; a subsequent release adds the full object, commit, and invalid-pack
 conformance fixture sets described below (see `CHANGELOG.md` for the exact
