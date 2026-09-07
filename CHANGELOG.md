@@ -8,6 +8,17 @@ generated from commits since the preceding `v*` tag. Commits prefixed with `docs
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-09-07
+
+### Added
+
+- `spl clone` CLI command (and `spl workspace clone`) that clones a remote Spool Rack
+  workspace into a new local directory over the native clone/pull protocol. It supports both
+  positional URL syntax (`spl clone <url> [dir]`) and flag syntax (`spl clone --endpoint <url> --workspace-id <id> [dir]`),
+  authenticates via Bearer or Basic auth, initializes the local repository with remote
+  configuration and remote-tracking branch state, verifies and installs packs from scratch, and
+  materializes initial graph projections ready for immediate mutations and commits.
+
 ## [1.5.0] - 2026-09-07
 
 ### Added
