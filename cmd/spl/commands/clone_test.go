@@ -90,7 +90,7 @@ func TestCloneCommandWithURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenRepository: %v", err)
 	}
-	defer repo.Close()
+	t.Cleanup(func() { _ = repo.Close() })
 
 	commitID, err := repo.PinBranch("main")
 	if err != nil {
