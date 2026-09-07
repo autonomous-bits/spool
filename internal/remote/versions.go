@@ -50,7 +50,7 @@ func NegotiateVersions(ctx context.Context, client *Client, cfg Config, credenti
 	if client == nil {
 		client = NewClient()
 	}
-	health, err := client.fetchHealthz(ctx, cfg.Endpoint, cfg.AuthMode, credential)
+	health, err := client.fetchHealthz(ctx, cfg.Endpoint, cfg.AuthMode, credential, cfg.TenantID)
 	if err != nil {
 		return VersionReport{}, err
 	}

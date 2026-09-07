@@ -28,22 +28,34 @@ func NewRemoteCommand(repoProvider func() (*repository.Repository, error)) *cobr
 }
 
 type remoteConfigResult struct {
-	Endpoint string `json:"endpoint"`
-	RepoID   string `json:"repoId"`
-	AuthMode string `json:"authMode"`
+	Endpoint    string `json:"endpoint"`
+	TenantID    string `json:"tenantId,omitempty"`
+	WorkspaceID string `json:"workspaceId,omitempty"`
+	RepoID      string `json:"repoId"`
+	AuthMode    string `json:"authMode"`
 }
 
 func newRemoteConfigResult(cfg repository.RemoteConfig) remoteConfigResult {
-	return remoteConfigResult{Endpoint: cfg.Endpoint, RepoID: cfg.RepoID, AuthMode: string(cfg.AuthMode)}
+	repoID := cfg.RepoID
+	if repoID == "" {
+		repoID = cfg.WorkspaceID
+	}
+	return remoteConfigResult{
+		Endpoint:    cfg.Endpoint,
+		TenantID:    cfg.TenantID,
+		WorkspaceID: cfg.WorkspaceID,
+		RepoID:      repoID,
+		AuthMode:    string(cfg.AuthMode),
+	}
 }
 
 func newRemoteSetCommand(repoProvider func() (*repository.Repository, error)) *cobra.Command {
-	var endpoint, repoID, authMode string
+	var endpoint, tenantID, workspaceID, repoID, authMode string
 	command := &cobra.Command{
 		Use:          "set",
 		Short:        "Configure the repository's Rack remote endpoint, identity, and auth mode",
 		Long:         "Persist a non-secret Rack remote configuration. No credential is ever read from or written to repository control state.",
-		Example:      "  spl remote set --endpoint https://rack.example.com --repo-id acme-prod --auth-mode bearer",
+		Example:      "  spl remote set --endpoint https://rack.example.com --tenant-id acme --workspace-id prod --auth-mode bearer\n  spl remote set --endpoint https://rack.example.com --repo-id acme-prod --auth-mode bearer",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(command *cobra.Command, args []string) error {
@@ -51,7 +63,13 @@ func newRemoteSetCommand(repoProvider func() (*repository.Repository, error)) *c
 			if err != nil {
 				return err
 			}
-			cfg := repository.RemoteConfig{Endpoint: endpoint, RepoID: repoID, AuthMode: repository.RemoteAuthMode(authMode)}
+			cfg := repository.RemoteConfig{
+				Endpoint:    endpoint,
+				TenantID:    tenantID,
+				WorkspaceID: workspaceID,
+				RepoID:      repoID,
+				AuthMode:    repository.RemoteAuthMode(authMode),
+			}
 			if err := repo.SetRemote(cfg); err != nil {
 				return err
 			}
@@ -59,10 +77,13 @@ func newRemoteSetCommand(repoProvider func() (*repository.Repository, error)) *c
 		},
 	}
 	command.Flags().StringVar(&endpoint, "endpoint", "", "Rack remote HTTP(S) endpoint")
-	command.Flags().StringVar(&repoID, "repo-id", "", "logical Rack repository/tenant identity")
+	command.Flags().StringVar(&tenantID, "tenant-id", "", "logical Rack tenant identity")
+	command.Flags().StringVar(&tenantID, "tenant", "", "alias for --tenant-id")
+	command.Flags().StringVar(&workspaceID, "workspace-id", "", "logical Rack workspace identity")
+	command.Flags().StringVar(&workspaceID, "workspace", "", "alias for --workspace-id")
+	command.Flags().StringVar(&repoID, "repo-id", "", "deprecated legacy Rack repository identity (prefer --workspace-id)")
 	command.Flags().StringVar(&authMode, "auth-mode", "", `authentication mode: "bearer" or "api_key"`)
 	_ = command.MarkFlagRequired("endpoint")
-	_ = command.MarkFlagRequired("repo-id")
 	_ = command.MarkFlagRequired("auth-mode")
 	return command
 }
@@ -98,7 +119,7 @@ func newRemoteShowCommand(repoProvider func() (*repository.Repository, error)) *
 			credential := resolveShowCredential(cfg)
 			report, err := remote.NegotiateVersions(command.Context(), remote.NewClient(), cfg, credential)
 			if err != nil {
-				result.Message = remote.Redact(err.Error(), credential, cfg.RepoID)
+				result.Message = remote.Redact(err.Error(), credential, cfg.WorkspaceOrRepoID())
 			} else {
 				result.VersionStatus = "negotiated"
 				result.Versions = &report
@@ -113,7 +134,7 @@ func newRemoteShowCommand(repoProvider func() (*repository.Repository, error)) *
 // prompts interactively so `spl remote show` never blocks waiting on input;
 // an unresolved credential simply results in an unauthenticated probe.
 func resolveShowCredential(cfg repository.RemoteConfig) string {
-	credential, err := remote.ResolveCredential(cfg.RepoID, cfg.AuthMode, remote.ResolveOptions{
+	credential, err := remote.ResolveCredential(cfg.WorkspaceOrRepoID(), cfg.AuthMode, remote.ResolveOptions{
 		Keychain: remote.KeyringStore{},
 		Getenv:   os.Getenv,
 	})

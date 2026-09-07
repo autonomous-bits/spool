@@ -168,3 +168,25 @@ func TestNegotiateVersionsSendsAPIKeyHeader(t *testing.T) {
 		t.Fatalf("X-Api-Key header = %q, want secret-key", receivedKey)
 	}
 }
+
+func TestNegotiateVersionsSendsTenantHeader(t *testing.T) {
+	var receivedTenant string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedTenant = r.Header.Get("X-Tenant-ID")
+		_ = json.NewEncoder(w).Encode(map[string]string{})
+	}))
+	defer server.Close()
+
+	cfg := Config{
+		Endpoint:    server.URL,
+		TenantID:    "tenant-abc",
+		WorkspaceID: "ws-xyz",
+		AuthMode:    AuthModeBearer,
+	}
+	if _, err := NegotiateVersions(context.Background(), NewClient(), cfg, ""); err != nil {
+		t.Fatalf("NegotiateVersions: %v", err)
+	}
+	if receivedTenant != "tenant-abc" {
+		t.Fatalf("X-Tenant-ID header = %q, want tenant-abc", receivedTenant)
+	}
+}

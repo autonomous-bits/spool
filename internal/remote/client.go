@@ -123,10 +123,33 @@ func decodeRackErrorFromResponse(response *http.Response, credential string) *Ra
 	return &envelope
 }
 
+// setHeaders attaches authentication credentials, tenant ID header, and correlation ID to request.
+func (c *Client) setHeaders(request *http.Request, authMode AuthMode, credential, tenantID string) {
+	if credential != "" {
+		if authMode == AuthModeAPIKey {
+			request.Header.Set("X-Api-Key", credential)
+		} else {
+			request.Header.Set("Authorization", "Bearer "+credential)
+		}
+	}
+	if tenantID != "" {
+		request.Header.Set("X-Tenant-ID", tenantID)
+	}
+	c.setCorrelationHeader(request)
+}
+
+func resourceBase(endpoint string, cfg Config) string {
+	base := strings.TrimRight(endpoint, "/")
+	if cfg.WorkspaceID != "" {
+		return base + "/api/v1/workspaces/" + cfg.WorkspaceID
+	}
+	return base + "/api/v1/repos/" + cfg.RepoID
+}
+
 // fetchHealthz calls GET {endpoint}/healthz and decodes its JSON body.
 // credential, when non-empty, is attached as an Authorization header per
 // authMode; it is never logged or included in returned errors.
-func (c *Client) fetchHealthz(ctx context.Context, endpoint string, authMode AuthMode, credential string) (healthzResponse, error) {
+func (c *Client) fetchHealthz(ctx context.Context, endpoint string, authMode AuthMode, credential, tenantID string) (healthzResponse, error) {
 	client := c.HTTPClient
 	if client == nil {
 		client = &http.Client{Timeout: healthzTimeout}
@@ -136,14 +159,7 @@ func (c *Client) fetchHealthz(ctx context.Context, endpoint string, authMode Aut
 	if err != nil {
 		return healthzResponse{}, fmt.Errorf("build healthz request: %w", err)
 	}
-	if credential != "" {
-		if authMode == AuthModeAPIKey {
-			request.Header.Set("X-Api-Key", credential)
-		} else {
-			request.Header.Set("Authorization", "Bearer "+credential)
-		}
-	}
-	c.setCorrelationHeader(request)
+	c.setHeaders(request, authMode, credential, tenantID)
 	response, err := client.Do(request)
 	if err != nil {
 		return healthzResponse{}, fmt.Errorf("%w: %s", ErrRemoteUnreachable, Redact(err.Error(), credential))

@@ -242,3 +242,43 @@ func TestPushCredentialNeverAppearsInErrorText(t *testing.T) {
 		}
 	}
 }
+
+func TestPushWithTenantAndWorkspaceRoutesToWorkspacesAndSetsTenantHeader(t *testing.T) {
+	var gotPath, gotTenant, gotAuth, gotCorrelation string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotTenant = r.Header.Get("X-Tenant-ID")
+		gotAuth = r.Header.Get("Authorization")
+		gotCorrelation = r.Header.Get("X-Correlation-ID")
+		_, _ = decodeMultipartPush(t, r)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(PushResult{Branch: "main", HeadCommit: "abc123"})
+	}))
+	defer server.Close()
+
+	cfg := Config{
+		Endpoint:    server.URL,
+		TenantID:    "tenant-xyz",
+		WorkspaceID: "ws-123",
+		AuthMode:    AuthModeBearer,
+	}
+	result, err := Push(context.Background(), NewClient(), cfg, "secret-token", testPushRequest())
+	if err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+	if result.Branch != "main" || result.HeadCommit != "abc123" {
+		t.Fatalf("result = %#v", result)
+	}
+	if gotPath != "/api/v1/workspaces/ws-123/push" {
+		t.Fatalf("path = %q, want /api/v1/workspaces/ws-123/push", gotPath)
+	}
+	if gotTenant != "tenant-xyz" {
+		t.Fatalf("X-Tenant-ID = %q, want tenant-xyz", gotTenant)
+	}
+	if gotAuth != "Bearer secret-token" {
+		t.Fatalf("Authorization = %q, want Bearer secret-token", gotAuth)
+	}
+	if gotCorrelation == "" {
+		t.Fatal("expected non-empty X-Correlation-ID header")
+	}
+}

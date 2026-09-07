@@ -94,9 +94,9 @@ func (e *ProtectedBranchError) Error() string {
 	return "branch is protected and cannot be deleted"
 }
 
-// branchesEndpoint returns {endpoint}/api/v1/repos/{repoID}/branches.
-func branchesEndpoint(endpoint, repoID string) string {
-	return strings.TrimRight(endpoint, "/") + "/api/v1/repos/" + repoID + "/branches"
+// branchesEndpoint returns {endpoint}/api/v1/[workspaces|repos]/{id}/branches.
+func branchesEndpoint(cfg Config) string {
+	return resourceBase(cfg.Endpoint, cfg) + "/branches"
 }
 
 func (c *Client) branchHTTPClient() *http.Client {
@@ -106,7 +106,7 @@ func (c *Client) branchHTTPClient() *http.Client {
 	return &http.Client{Timeout: branchTimeout}
 }
 
-func (c *Client) newBranchRequest(ctx context.Context, method, target string, authMode AuthMode, credential string, body []byte) (*http.Request, error) {
+func (c *Client) newBranchRequest(ctx context.Context, method, target string, cfg Config, credential string, body []byte) (*http.Request, error) {
 	var reader *strings.Reader
 	if body != nil {
 		reader = strings.NewReader(string(body))
@@ -124,19 +124,12 @@ func (c *Client) newBranchRequest(ctx context.Context, method, target string, au
 	if body != nil {
 		request.Header.Set("Content-Type", "application/json")
 	}
-	if credential != "" {
-		if authMode == AuthModeAPIKey {
-			request.Header.Set("X-Api-Key", credential)
-		} else {
-			request.Header.Set("Authorization", "Bearer "+credential)
-		}
-	}
-	c.setCorrelationHeader(request)
+	c.setHeaders(request, cfg.AuthMode, credential, cfg.TenantID)
 	return request, nil
 }
 
-// createBranch calls POST {endpoint}/api/v1/repos/{repoID}/branches.
-func (c *Client) createBranch(ctx context.Context, endpoint, repoID string, authMode AuthMode, credential string, req BranchCreateRequest) (BranchResult, error) {
+// createBranch calls POST {endpoint}/api/v1/[workspaces|repos]/{id}/branches.
+func (c *Client) createBranch(ctx context.Context, cfg Config, credential string, req BranchCreateRequest) (BranchResult, error) {
 	if err := req.validate(); err != nil {
 		return BranchResult{}, err
 	}
@@ -144,7 +137,7 @@ func (c *Client) createBranch(ctx context.Context, endpoint, repoID string, auth
 	if err != nil {
 		return BranchResult{}, fmt.Errorf("encode branch create request: %w", err)
 	}
-	request, err := c.newBranchRequest(ctx, http.MethodPost, branchesEndpoint(endpoint, repoID), authMode, credential, body)
+	request, err := c.newBranchRequest(ctx, http.MethodPost, branchesEndpoint(cfg), cfg, credential, body)
 	if err != nil {
 		return BranchResult{}, err
 	}
@@ -176,9 +169,9 @@ func (c *Client) createBranch(ctx context.Context, endpoint, repoID string, auth
 	}
 }
 
-// listBranches calls GET {endpoint}/api/v1/repos/{repoID}/branches.
-func (c *Client) listBranches(ctx context.Context, endpoint, repoID string, authMode AuthMode, credential string) (BranchListResult, error) {
-	request, err := c.newBranchRequest(ctx, http.MethodGet, branchesEndpoint(endpoint, repoID), authMode, credential, nil)
+// listBranches calls GET {endpoint}/api/v1/[workspaces|repos]/{id}/branches.
+func (c *Client) listBranches(ctx context.Context, cfg Config, credential string) (BranchListResult, error) {
+	request, err := c.newBranchRequest(ctx, http.MethodGet, branchesEndpoint(cfg), cfg, credential, nil)
 	if err != nil {
 		return BranchListResult{}, err
 	}
@@ -202,9 +195,9 @@ func (c *Client) listBranches(ctx context.Context, endpoint, repoID string, auth
 	return result, nil
 }
 
-// defaultBranch calls GET {endpoint}/api/v1/repos/{repoID}/branches/default.
-func (c *Client) defaultBranch(ctx context.Context, endpoint, repoID string, authMode AuthMode, credential string) (BranchResult, error) {
-	request, err := c.newBranchRequest(ctx, http.MethodGet, branchesEndpoint(endpoint, repoID)+"/default", authMode, credential, nil)
+// defaultBranch calls GET {endpoint}/api/v1/[workspaces|repos]/{id}/branches/default.
+func (c *Client) defaultBranch(ctx context.Context, cfg Config, credential string) (BranchResult, error) {
+	request, err := c.newBranchRequest(ctx, http.MethodGet, branchesEndpoint(cfg)+"/default", cfg, credential, nil)
 	if err != nil {
 		return BranchResult{}, err
 	}
@@ -228,12 +221,12 @@ func (c *Client) defaultBranch(ctx context.Context, endpoint, repoID string, aut
 	return result, nil
 }
 
-// deleteBranch calls DELETE {endpoint}/api/v1/repos/{repoID}/branches/{name}.
+// deleteBranch calls DELETE {endpoint}/api/v1/[workspaces|repos]/{id}/branches/{name}.
 // name is percent-escaped as a single path segment so a ref-like branch name
 // containing slashes (e.g. "feature/foo") is not misinterpreted as multiple
 // path segments by Rack's router.
-func (c *Client) deleteBranch(ctx context.Context, endpoint, repoID string, authMode AuthMode, credential string, name string) error {
-	request, err := c.newBranchRequest(ctx, http.MethodDelete, branchesEndpoint(endpoint, repoID)+"/"+url.PathEscape(name), authMode, credential, nil)
+func (c *Client) deleteBranch(ctx context.Context, cfg Config, credential string, name string) error {
+	request, err := c.newBranchRequest(ctx, http.MethodDelete, branchesEndpoint(cfg)+"/"+url.PathEscape(name), cfg, credential, nil)
 	if err != nil {
 		return err
 	}
@@ -272,7 +265,7 @@ func CreateBranch(ctx context.Context, client *Client, cfg Config, credential st
 	if client == nil {
 		client = NewClient()
 	}
-	return client.createBranch(ctx, cfg.Endpoint, cfg.RepoID, cfg.AuthMode, credential, req)
+	return client.createBranch(ctx, cfg, credential, req)
 }
 
 // ListBranches lists every remote branch for cfg.Endpoint/cfg.RepoID.
@@ -281,7 +274,7 @@ func ListBranches(ctx context.Context, client *Client, cfg Config, credential st
 	if client == nil {
 		client = NewClient()
 	}
-	return client.listBranches(ctx, cfg.Endpoint, cfg.RepoID, cfg.AuthMode, credential)
+	return client.listBranches(ctx, cfg, credential)
 }
 
 // DefaultBranch discovers the default branch for cfg.Endpoint/cfg.RepoID.
@@ -290,7 +283,7 @@ func DefaultBranch(ctx context.Context, client *Client, cfg Config, credential s
 	if client == nil {
 		client = NewClient()
 	}
-	return client.defaultBranch(ctx, cfg.Endpoint, cfg.RepoID, cfg.AuthMode, credential)
+	return client.defaultBranch(ctx, cfg, credential)
 }
 
 // DeleteBranch deletes the named remote branch from cfg.Endpoint/cfg.RepoID.
@@ -302,5 +295,5 @@ func DeleteBranch(ctx context.Context, client *Client, cfg Config, credential st
 	if client == nil {
 		client = NewClient()
 	}
-	return client.deleteBranch(ctx, cfg.Endpoint, cfg.RepoID, cfg.AuthMode, credential, name)
+	return client.deleteBranch(ctx, cfg, credential, name)
 }

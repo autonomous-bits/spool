@@ -187,7 +187,7 @@ func toRemotePushCommits(commits []repository.PushCommitRecord) []remote.PushCom
 // state-changing operation: an unresolved credential is a hard error rather
 // than falling back to an unauthenticated request.
 func resolvePushCredential(cfg repository.RemoteConfig) (string, error) {
-	credential, err := remote.ResolveCredential(cfg.RepoID, cfg.AuthMode, remote.ResolveOptions{
+	credential, err := remote.ResolveCredential(cfg.WorkspaceOrRepoID(), cfg.AuthMode, remote.ResolveOptions{
 		Keychain: remote.KeyringStore{},
 		Getenv:   os.Getenv,
 		Prompt:   remote.TerminalPrompt(),
