@@ -190,13 +190,13 @@ func TestOpenRepositoryRejectsNewTargetWithoutCreatingState(t *testing.T) {
 	}
 }
 
-func TestOpenRepositoryRejectsPreviousRepositoryFormat(t *testing.T) {
+func TestOpenRepositoryRejectsUnsupportedRepositoryFormat(t *testing.T) {
 	stateDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(stateDir, "config.toml"), []byte("format_version = 1\ndefault_branch = 'main'\n"), 0o600); err != nil {
-		t.Fatalf("write version 1 config: %v", err)
+	if err := os.WriteFile(filepath.Join(stateDir, "config.toml"), []byte("format_version = 3\ndefault_branch = 'main'\n"), 0o600); err != nil {
+		t.Fatalf("write version 3 config: %v", err)
 	}
 	if _, err := OpenRepository(stateDir); err == nil {
-		t.Fatal("OpenRepository accepted version 1 repository state")
+		t.Fatal("OpenRepository accepted version 3 repository state")
 	}
 }
 

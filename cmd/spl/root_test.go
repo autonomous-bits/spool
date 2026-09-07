@@ -199,3 +199,25 @@ func TestRootCommandIncludesCommitSubcommand(t *testing.T) {
 		t.Fatalf("command = %q, want commit", found.Name())
 	}
 }
+
+func TestRootCommandIncludesMigrateSubcommand(t *testing.T) {
+	command := newRootCommand(&bytes.Buffer{}, newTestSeedRepository(t))
+	found, _, err := command.Find([]string{"migrate"})
+	if err != nil {
+		t.Fatalf("find migrate command: %v", err)
+	}
+	if found.Name() != "migrate" {
+		t.Fatalf("command = %q, want migrate", found.Name())
+	}
+}
+
+func TestRootCommandIncludesWorkspaceMigrateSubcommand(t *testing.T) {
+	command := newRootCommand(&bytes.Buffer{}, newTestSeedRepository(t))
+	found, _, err := command.Find([]string{"workspace", "migrate"})
+	if err != nil {
+		t.Fatalf("find workspace migrate command: %v", err)
+	}
+	if found.Name() != "migrate" {
+		t.Fatalf("command = %q, want migrate", found.Name())
+	}
+}

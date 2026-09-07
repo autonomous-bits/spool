@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 
 	"github.com/autonomous-bits/spool/cmd/spl/commands"
@@ -21,6 +22,11 @@ func newRootCommand(stdout io.Writer, repo *repository.Repository) *cobra.Comman
 			return repository.FsckResult{}, err
 		}
 		return repo.Fsck()
+	}, func(from, to int) (*repository.MigrationResult, error) {
+		if repo.StateDir() == "" {
+			return nil, errors.New("repository has no durable state directory")
+		}
+		return repository.MigrateRepositoryFormat(repo.StateDir(), from, to)
 	})
 }
 
@@ -29,23 +35,44 @@ func newRootCommandWithLifecycle(
 	repoProvider func() (*repository.Repository, error),
 	toolProvider func() (*resolve.ResolveTool, error),
 	initialize func() (*repository.Repository, error),
-	fsckProviders ...func(context.Context) (repository.FsckResult, error),
+	providers ...any,
 ) *cobra.Command {
-	fsckProvider := func(ctx context.Context) (repository.FsckResult, error) {
-		if err := ctx.Err(); err != nil {
-			return repository.FsckResult{}, err
+	var fsckProvider func(context.Context) (repository.FsckResult, error)
+	var migrateProvider func(from, to int) (*repository.MigrationResult, error)
+	for _, p := range providers {
+		switch fn := p.(type) {
+		case func(context.Context) (repository.FsckResult, error):
+			fsckProvider = fn
+		case func(from, to int) (*repository.MigrationResult, error):
+			migrateProvider = fn
 		}
-		repo, err := repoProvider()
-		if err != nil {
-			return repository.FsckResult{}, err
-		}
-		if err := ctx.Err(); err != nil {
-			return repository.FsckResult{}, err
-		}
-		return repo.Fsck()
 	}
-	if len(fsckProviders) > 0 {
-		fsckProvider = fsckProviders[0]
+	if fsckProvider == nil {
+		fsckProvider = func(ctx context.Context) (repository.FsckResult, error) {
+			if err := ctx.Err(); err != nil {
+				return repository.FsckResult{}, err
+			}
+			repo, err := repoProvider()
+			if err != nil {
+				return repository.FsckResult{}, err
+			}
+			if err := ctx.Err(); err != nil {
+				return repository.FsckResult{}, err
+			}
+			return repo.Fsck()
+		}
+	}
+	if migrateProvider == nil {
+		migrateProvider = func(from, to int) (*repository.MigrationResult, error) {
+			repo, err := repoProvider()
+			if err != nil {
+				return nil, err
+			}
+			if repo.StateDir() == "" {
+				return nil, errors.New("repository has no durable state directory")
+			}
+			return repository.MigrateRepositoryFormat(repo.StateDir(), from, to)
+		}
 	}
 	root := &cobra.Command{
 		Use:          "spl",
@@ -78,7 +105,10 @@ func newRootCommandWithLifecycle(
 	root.AddCommand(commands.NewGCCommand(repoProvider))
 	root.AddCommand(commands.NewPruneCommand(repoProvider))
 	root.AddCommand(commands.NewCherryPickCommand(repoProvider))
-	root.AddCommand(commands.NewWorkspaceCommandDefault())
+	workspaceCmd := commands.NewWorkspaceCommandDefault()
+	workspaceCmd.AddCommand(commands.NewMigrateCommand(migrateProvider))
+	root.AddCommand(workspaceCmd)
+	root.AddCommand(commands.NewMigrateCommand(migrateProvider))
 	root.AddCommand(commands.NewRemoteCommand(repoProvider))
 	root.AddCommand(commands.NewPushCommand(repoProvider))
 	root.AddCommand(commands.NewPullCommand(repoProvider))
