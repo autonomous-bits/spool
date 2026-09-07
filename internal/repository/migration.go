@@ -208,11 +208,18 @@ func migrateV1ToV2Locked(stateDir string, conf map[string]any, configPath string
 
 	// 4. Canonicalize commit records in topological order
 	oldToNew := make(map[ObjectID]ObjectID)
+	inProgress := make(map[ObjectID]bool)
 	var migrateCommit func(id ObjectID) (ObjectID, error)
 	migrateCommit = func(id ObjectID) (ObjectID, error) {
 		if newID, ok := oldToNew[id]; ok {
 			return newID, nil
 		}
+		if inProgress[id] {
+			return "", fmt.Errorf("cyclic commit history detected at commit %s", id)
+		}
+		inProgress[id] = true
+		defer func() { inProgress[id] = false }()
+
 		c, ok := rawCommits[id]
 		if !ok {
 			return "", fmt.Errorf("commit %s not found in repository history", id)
@@ -273,57 +280,70 @@ func migrateV1ToV2Locked(stateDir string, conf map[string]any, configPath string
 		if !ok {
 			return fmt.Errorf("branch %s points to unknown commit %s", entry.Name(), oldRef)
 		}
-		if err := os.WriteFile(refPath, []byte(string(newRef)+"\n"), 0o600); err != nil {
+		if err := writeDurableStateFile(refPath, []byte(string(newRef)+"\n")); err != nil {
 			return fmt.Errorf("update branch ref %s: %w", entry.Name(), err)
 		}
 	}
 
-	// 6. Update reflogs
-	logsDir := filepath.Join(stateDir, "logs")
-	err = filepath.WalkDir(logsDir, func(path string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil || d.IsDir() {
-			return nil
-		}
-		lines, err := readReflogLines(path)
-		if err != nil {
-			return err
-		}
-		var newLines []string
-		for _, fields := range lines {
-			if len(fields) == 3 && fields[2] == "switch" {
+	// 6. Update branch reflogs (skipping logs/HEAD which stores branch ref names, not commit IDs)
+	headsLogsDir := filepath.Join(stateDir, "logs", "refs", "heads")
+	if _, statErr := os.Stat(headsLogsDir); statErr == nil {
+		err = filepath.WalkDir(headsLogsDir, func(path string, d fs.DirEntry, walkErr error) error {
+			if walkErr != nil || d.IsDir() {
+				return nil
+			}
+			lines, err := readReflogLines(path)
+			if err != nil {
+				return err
+			}
+			var newLines []string
+			for _, fields := range lines {
+				if len(fields) == 3 && fields[2] == "switch" {
+					newLines = append(newLines, strings.Join(fields[:], " "))
+					continue
+				}
+				fromID := ObjectID(fields[0])
+				toID := ObjectID(fields[1])
+				if fromID != "" {
+					if migratedFrom, ok := oldToNew[fromID]; ok {
+						fromID = migratedFrom
+					}
+				}
+				if toID != "" {
+					if migratedTo, ok := oldToNew[toID]; ok {
+						toID = migratedTo
+					}
+				}
+				fields[0] = string(fromID)
+				fields[1] = string(toID)
 				newLines = append(newLines, strings.Join(fields[:], " "))
-				continue
 			}
-			fromID := ObjectID(fields[0])
-			toID := ObjectID(fields[1])
-			if fromID != "" {
-				if migratedFrom, ok := oldToNew[fromID]; ok {
-					fromID = migratedFrom
-				}
-			}
-			if toID != "" {
-				if migratedTo, ok := oldToNew[toID]; ok {
-					toID = migratedTo
-				}
-			}
-			fields[0] = string(fromID)
-			fields[1] = string(toID)
-			newLines = append(newLines, strings.Join(fields[:], " "))
+			content := strings.Join(newLines, "\n") + "\n"
+			return writeDurableStateFile(path, []byte(content))
+		})
+		if err != nil {
+			return fmt.Errorf("update reflogs: %w", err)
 		}
-		content := strings.Join(newLines, "\n") + "\n"
-		return os.WriteFile(path, []byte(content), 0o600)
-	})
-	if err != nil {
-		return fmt.Errorf("update reflogs: %w", err)
 	}
 
-	// 7. Update repository configuration to format_version 2
+	// 7. Update repository configuration to format_version 2 and remap remote branch tracking
 	conf["format_version"] = repositoryFormatVersion
+	if rb, ok := conf["remote_branches"].(map[string]any); ok {
+		for _, val := range rb {
+			if entry, ok := val.(map[string]any); ok {
+				if oldHead, ok := entry["remote_head_commit"].(string); ok && oldHead != "" {
+					if newHead, ok := oldToNew[ObjectID(oldHead)]; ok {
+						entry["remote_head_commit"] = string(newHead)
+					}
+				}
+			}
+		}
+	}
 	newConfigData, err := toml.Marshal(conf)
 	if err != nil {
 		return fmt.Errorf("encode config.toml: %w", err)
 	}
-	if err := os.WriteFile(configPath, newConfigData, 0o600); err != nil {
+	if err := writeDurableStateFile(configPath, newConfigData); err != nil {
 		return fmt.Errorf("write config.toml: %w", err)
 	}
 

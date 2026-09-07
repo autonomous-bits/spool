@@ -143,7 +143,7 @@ func TestMigrateRepositoryFormatV1ToV2(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenRepository after migration: %v", err)
 	}
-	defer reopened.Close()
+	defer func() { _ = reopened.Close() }()
 
 	// Verify main branch is intact
 	headCommit, ok := reopened.branches["main"]
@@ -154,6 +154,114 @@ func TestMigrateRepositoryFormatV1ToV2(t *testing.T) {
 	// Running migration again should report already at version 2
 	if _, err := MigrateRepositoryFormat(stateDir, 1, 2); err == nil {
 		t.Fatal("expected error migrating already-migrated repository")
+	}
+}
+
+func TestMigrateRepositoryFormatDetectsCycles(t *testing.T) {
+	stateDir, v1SeedID := createFormatV1Repository(t)
+
+	// Create a cyclic commit B where B has parent v1SeedID, and alter v1SeedID to have parent B
+	cycleRawB := map[int]any{
+		1: string(v1SeedID),
+		2: []any{string(v1SeedID)},
+		3: "commit B",
+		4: "spl-local",
+		5: 0,
+	}
+	cycleDataB, err := cbor.Marshal(cycleRawB)
+	if err != nil {
+		t.Fatalf("marshal commit B: %v", err)
+	}
+	envDataB, err := cbor.Marshal(looseObjectEnvelope{Type: "commit", Data: cycleDataB})
+	if err != nil {
+		t.Fatalf("marshal env B: %v", err)
+	}
+	bID := objectIDForEncoded("commit", cycleDataB)
+	bPath := filepath.Join(stateDir, "objects", "loose", string(bID[:2]), string(bID[2:]))
+	_ = os.MkdirAll(filepath.Dir(bPath), 0o700)
+	if err := os.WriteFile(bPath, envDataB, 0o600); err != nil {
+		t.Fatalf("write commit B: %v", err)
+	}
+
+	// Make v1SeedID point back to bID to form a cycle: v1SeedID -> bID -> v1SeedID
+	cycleRawSeed := map[int]any{
+		1: string(v1SeedID),
+		2: []any{string(bID)},
+		3: "seed with cycle",
+		4: "spl-local",
+		5: 0,
+	}
+	cycleDataSeed, err := cbor.Marshal(cycleRawSeed)
+	if err != nil {
+		t.Fatalf("marshal cyclic seed: %v", err)
+	}
+	envDataSeed, err := cbor.Marshal(looseObjectEnvelope{Type: "commit", Data: cycleDataSeed})
+	if err != nil {
+		t.Fatalf("marshal env seed: %v", err)
+	}
+	seedPath := filepath.Join(stateDir, "objects", "loose", string(v1SeedID[:2]), string(v1SeedID[2:]))
+	if err := os.WriteFile(seedPath, envDataSeed, 0o600); err != nil {
+		t.Fatalf("write cyclic seed: %v", err)
+	}
+
+	_, err = MigrateRepositoryFormat(stateDir, 1, 2)
+	if err == nil {
+		t.Fatal("expected error on cyclic commit graph")
+	}
+	if !strings.Contains(err.Error(), "cyclic commit history detected") {
+		t.Fatalf("error = %q, want containing 'cyclic commit history detected'", err.Error())
+	}
+}
+
+func TestMigrateRepositoryFormatRemapsRemoteBranchTracking(t *testing.T) {
+	stateDir, v1SeedID := createFormatV1Repository(t)
+
+	// Add remote branch tracking pointing to v1SeedID in config.toml
+	configPath := filepath.Join(stateDir, "config.toml")
+	configData, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	var conf map[string]any
+	if err := toml.Unmarshal(configData, &conf); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+	conf["remote_branches"] = map[string]any{
+		"main": map[string]any{
+			"remote_branch":      "main",
+			"remote_head_commit": string(v1SeedID),
+		},
+	}
+	v1ConfigData, err := toml.Marshal(conf)
+	if err != nil {
+		t.Fatalf("marshal config: %v", err)
+	}
+	if err := os.WriteFile(configPath, v1ConfigData, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	// Run migration
+	if _, err := MigrateRepositoryFormat(stateDir, 1, 2); err != nil {
+		t.Fatalf("MigrateRepositoryFormat: %v", err)
+	}
+
+	// Verify remote tracking was remapped
+	reopened, err := OpenRepository(stateDir)
+	if err != nil {
+		t.Fatalf("OpenRepository after migration: %v", err)
+	}
+	defer func() { _ = reopened.Close() }()
+
+	tracking, ok, err := reopened.RemoteBranchTracking("main")
+	if err != nil {
+		t.Fatalf("RemoteBranchTracking error: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected remote tracking entry for main")
+	}
+	newHead := reopened.branches["main"]
+	if tracking.RemoteHeadCommit != string(newHead) {
+		t.Fatalf("remote head commit = %q, want %q", tracking.RemoteHeadCommit, newHead)
 	}
 }
 
