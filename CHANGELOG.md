@@ -8,6 +8,8 @@ generated from commits since the preceding `v*` tag. Commits prefixed with `docs
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-09-07
+
 ### Added
 
 - `spl pull` CLI command that fetches new commits for a branch from a
