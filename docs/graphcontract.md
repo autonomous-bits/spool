@@ -76,10 +76,12 @@ generation/reader lifecycle, and GC orchestration remain
 `internal/repository` implementation details; only the pure pack container
 format and its verification are part of this contract. Fixtures for the pack
 format are under `graphcontract/testdata/pack/v1/`, including
-`invalid-bad-magic.json` and `invalid-truncated-header.json`, which prove a
-pack stream with a corrupted magic header or one truncated below
-`PackHeaderSize` is rejected with `ErrPackCorrupt` before any packed object
-is read.
+`invalid-bad-magic.json` and `invalid-truncated-header.json`, which prove two
+distinct failure stages before any packed object is read: a pack stream
+truncated below `PackHeaderSize` fails in `ReadPackHeader` with a wrapped
+`io.ReadFull` read error (e.g. `unexpected EOF`), while a pack stream with a
+corrupted magic header decodes successfully but is rejected by
+`ValidatePackHeader` with `ErrPackCorrupt`.
 
 ## Object fixtures
 

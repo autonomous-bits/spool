@@ -13,7 +13,7 @@
       "name": "pack",
       "directory": "testdata/pack/v1",
       "format_version": 1,
-      "description": "Immutable pack container format: a valid round-trippable packed object, plus malformed pack streams (bad magic, truncated header) rejected with stable ErrPackCorrupt."
+      "description": "Immutable pack container format: a valid round-trippable packed object, plus malformed pack streams rejected before any packed object is read - a bad magic header with the stable ErrPackCorrupt error from ValidatePackHeader, and a truncated header with a wrapped io.ReadFull read error from ReadPackHeader."
     },
     {
       "name": "objects",

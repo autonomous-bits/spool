@@ -25,10 +25,13 @@ type invalidPackFixture struct {
 	Error         string `json:"error"`
 }
 
-// TestInvalidPackConformanceFixtures proves malformed pack streams -
-// starting with a bad magic header and a header truncated below
-// PackHeaderSize - are rejected with the stable ErrPackCorrupt error before
-// any packed object is read.
+// TestInvalidPackConformanceFixtures proves malformed pack streams - starting
+// with a bad magic header and a header truncated below PackHeaderSize - are
+// rejected before any packed object is read. A truncated header fails in
+// ReadPackHeader with a wrapped io.ReadFull read error (e.g. unexpected EOF);
+// only a header that decodes successfully but fails validation, such as a
+// bad magic value, is rejected with the stable ErrPackCorrupt error from
+// ValidatePackHeader.
 func TestInvalidPackConformanceFixtures(t *testing.T) {
 	paths, err := filepath.Glob(filepath.Join("testdata", "pack", "v1", "invalid-*.json"))
 	if err != nil {
