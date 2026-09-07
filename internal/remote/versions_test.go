@@ -190,4 +190,3 @@ func TestNegotiateVersionsSendsTenantHeader(t *testing.T) {
 		t.Fatalf("X-Tenant-ID header = %q, want tenant-abc", receivedTenant)
 	}
 }
-

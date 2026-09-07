@@ -348,4 +348,3 @@ func TestBranchOperationsWithTenantAndWorkspaceRouteToWorkspacesAndSetTenantHead
 		t.Fatalf("DeleteBranch X-Tenant-ID = %q, want tenant-xyz", gotTenant)
 	}
 }
-

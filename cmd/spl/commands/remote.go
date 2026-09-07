@@ -81,7 +81,7 @@ func newRemoteSetCommand(repoProvider func() (*repository.Repository, error)) *c
 	command.Flags().StringVar(&tenantID, "tenant", "", "alias for --tenant-id")
 	command.Flags().StringVar(&workspaceID, "workspace-id", "", "logical Rack workspace identity")
 	command.Flags().StringVar(&workspaceID, "workspace", "", "alias for --workspace-id")
-	command.Flags().StringVar(&repoID, "repo-id", "", "legacy Rack repository identity (alias for --workspace-id)")
+	command.Flags().StringVar(&repoID, "repo-id", "", "deprecated legacy Rack repository identity (prefer --workspace-id)")
 	command.Flags().StringVar(&authMode, "auth-mode", "", `authentication mode: "bearer" or "api_key"`)
 	_ = command.MarkFlagRequired("endpoint")
 	_ = command.MarkFlagRequired("auth-mode")

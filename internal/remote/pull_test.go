@@ -350,4 +350,3 @@ func TestPullWithTenantAndWorkspaceRoutesToWorkspacesAndSetsTenantHeader(t *test
 		t.Fatal("expected non-empty X-Correlation-ID header")
 	}
 }
-
