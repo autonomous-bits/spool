@@ -1,0 +1,6 @@
+{
+  "format_version": 1,
+  "object_type": "node",
+  "canonical_cbor_hex": "a401666e6f64652d3102644e6f646503826b526571756972656d656e74684465636973696f6e04f6",
+  "error": "invalid canonical CBOR"
+}

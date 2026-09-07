@@ -1,0 +1,13 @@
+{
+  "format_version": 1,
+  "object_type": "edge",
+  "value": {
+    "id": "linked",
+    "source": "person-alice",
+    "target": "person-bob",
+    "type": "",
+    "properties": null
+  },
+  "canonical_cbor_hex": "a401666c696e6b6564026c706572736f6e2d616c696365036a706572736f6e2d626f6205a0",
+  "object_id": "dc2a040caeb90a822603bfcb33165a283bf7e0c60b0df9a38992bb541d9a3a14"
+}

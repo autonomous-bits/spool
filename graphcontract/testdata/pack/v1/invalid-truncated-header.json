@@ -1,0 +1,7 @@
+{
+  "format_version": 1,
+  "name": "truncated-header",
+  "pack_base64": "SURHUAAAAAI=",
+  "failure_stage": "read_header",
+  "error": "truncated"
+}

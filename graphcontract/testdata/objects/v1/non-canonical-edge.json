@@ -1,0 +1,6 @@
+{
+  "format_version": 1,
+  "object_type": "edge",
+  "canonical_cbor_hex": "a40166656467652d3102666e6f64652d3103666e6f64652d3205f6",
+  "error": "invalid canonical CBOR"
+}

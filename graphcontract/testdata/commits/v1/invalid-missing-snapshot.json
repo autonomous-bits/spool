@@ -1,0 +1,12 @@
+{
+  "format_version": 1,
+  "candidate": "invalid-missing-snapshot",
+  "commit": {
+    "snapshot": "",
+    "parents": [],
+    "message": "Missing snapshot",
+    "author": "author@example.com",
+    "time": "2024-01-15T12:30:00Z"
+  },
+  "error": "invalid commit"
+}

@@ -1,0 +1,12 @@
+{
+  "format_version": 1,
+  "candidate": "invalid-empty-parent",
+  "commit": {
+    "snapshot": "9d93bfe01299f1be493214c31e31d965c7bc3b9025fd71d7b13683fb7ff5ffb2",
+    "parents": [""],
+    "message": "Empty parent",
+    "author": "author@example.com",
+    "time": "2024-01-15T12:30:00Z"
+  },
+  "error": "invalid commit"
+}

@@ -1,0 +1,12 @@
+{
+  "format_version": 1,
+  "object_type": "node",
+  "value": {
+    "id": "person-bob",
+    "title": "Bob",
+    "labels": null,
+    "properties": null
+  },
+  "canonical_cbor_hex": "a4016a706572736f6e2d626f620263426f62038004a0",
+  "object_id": "9d93bfe01299f1be493214c31e31d965c7bc3b9025fd71d7b13683fb7ff5ffb2"
+}

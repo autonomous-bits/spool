@@ -54,6 +54,15 @@ generated from commits since the preceding `v*` tag. Commits prefixed with `docs
   `ValidatePackEntries`, `DecompressPackedObject`), enabling downstream
   integrations to verify native Spool packs without depending on
   `internal/repository`.
+- Versioned `graphcontract` conformance fixtures for canonical objects
+  (`testdata/objects/v1/`) and commits (`testdata/commits/v1/`), plus
+  invalid-pack fixtures (`testdata/pack/v1/invalid-*.json`) and a
+  `testdata/MANIFEST.json` index enumerating every fixture set. Together
+  with the existing schema fixtures, this proves canonical `Node`, `Edge`,
+  `Commit`, pack, and schema encoding, decoding, and stable error behavior
+  for both valid and invalid inputs, giving Rack a single, language-agnostic
+  fixture surface to prove graph-contract parity before upgrading its
+  pinned Spool dependency.
 
 ## [2.1.0] - 2026-09-06
 

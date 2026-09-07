@@ -1,0 +1,15 @@
+{
+  "format_version": 1,
+  "object_type": "edge",
+  "value": {
+    "id": "knows-alice-bob",
+    "source": "person-alice",
+    "target": "person-bob",
+    "type": "KNOWS",
+    "properties": {
+      "weight": {"kind": "integer", "integer": 3}
+    }
+  },
+  "canonical_cbor_hex": "a5016f6b6e6f77732d616c6963652d626f62026c706572736f6e2d616c696365036a706572736f6e2d626f6204654b4e4f575305a166776569676874a20167696e74656765720303",
+  "object_id": "45421e8bc6dced256282bd796a03e072103c2b5afa11faac54decf386956821c"
+}
