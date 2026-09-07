@@ -265,16 +265,16 @@ func TestWorkspaceCloneSubcommand(t *testing.T) {
 
 func TestParseURLPathAndQuery(t *testing.T) {
 	tests := []struct {
-		rawURL      string
-		wantTenant  string
-		wantWs      string
-		wantRepo    string
-		wantBranch  string
-		wantAuth    string
+		rawURL     string
+		wantTenant string
+		wantWs     string
+		wantRepo   string
+		wantBranch string
+		wantAuth   string
 	}{
 		{
-			rawURL:     "http://localhost:8080/api/v1/workspaces/ws-1",
-			wantWs:     "ws-1",
+			rawURL: "http://localhost:8080/api/v1/workspaces/ws-1",
+			wantWs: "ws-1",
 		},
 		{
 			rawURL:     "http://localhost:8080/workspaces/ws-2?branch=feature&auth_mode=api_key",
