@@ -284,6 +284,23 @@ spl remote remove
 
 No credential is ever read from or written to repository configuration — credentials are resolved at use from the OS keychain/secret store (service `spool-rack`, account = workspace/repo-id), then `SPOOL_RACK_TOKEN` / `SPOOL_RACK_API_KEY`, then an interactive prompt.
 
+### Cloning a remote workspace
+
+To clone an existing remote workspace hosted on Spool Rack into a new local directory:
+
+```sh
+# Clone by workspace URL
+spl clone http://127.0.0.1:8080/api/v1/workspaces/ws-backend [directory]
+
+# Or clone by parameters
+spl clone --endpoint http://127.0.0.1:8080 --tenant-id acme --workspace-id ws-backend [directory]
+
+# Also available under the workspace command group
+spl workspace clone http://127.0.0.1:8080/api/v1/workspaces/ws-backend [directory]
+```
+
+`clone` initializes the local workspace directory, configures the Rack remote, fetches the complete graph history for the default branch (or specified `--branch`), and makes it the active branch so you can immediately begin pulling, committing, and pushing ideas.
+
 ### Remote branches
 
 Inspect and manage branch lifecycle on the configured Rack remote:
@@ -380,6 +397,7 @@ The command and flag inventory is:
 | `remote branch list` | none |
 | `remote branch default` | none |
 | `remote branch delete <name>` | positional branch name (cannot delete default remote branch) |
+| `clone`, `workspace clone` | positional `[url]` or flags (`--endpoint`, `--workspace-id`/`--workspace`, `--tenant-id`/`--tenant`), optional `[directory]`, `--branch`/`-b`, `--auth-mode` |
 | `push` | `--branch` (required), `--base-commit`, `--reconcile` |
 | `pull` | `--branch` (required) |
 | `version` | none |

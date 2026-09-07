@@ -354,6 +354,16 @@ spl remote branch delete feature
 
 `remote branch create <name>` creates a remote branch on the configured Rack remote from an existing remote branch or commit, and records local tracking metadata. `remote branch list` lists all branches on the remote. `remote branch default` reports the remote's default branch. `remote branch delete <name>` deletes a remote branch (the remote default branch cannot be deleted).
 
+## Clone
+
+```sh
+spl clone http://127.0.0.1:8080/api/v1/workspaces/ws-backend [directory]
+spl clone --endpoint http://127.0.0.1:8080 --tenant-id acme --workspace-id ws-backend [directory]
+spl workspace clone http://127.0.0.1:8080/api/v1/workspaces/ws-backend [directory]
+```
+
+`clone` (and `workspace clone`) initializes a new local Spool workspace directory, configures the Rack remote, fetches the complete graph history for the default branch (or specified `--branch`), and makes it the active branch. If `[directory]` is omitted, it defaults to the workspace ID or name.
+
 ## Push
 
 ```sh

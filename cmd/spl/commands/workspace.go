@@ -27,7 +27,7 @@ func NewWorkspaceCommand(registryRoot func() (string, error)) *cobra.Command {
 		Short:        "Provision central detached workspaces",
 		SilenceUsage: true,
 	}
-	command.AddCommand(newWorkspaceInitCommand(registryRoot), newWorkspaceAttachCommand(registryRoot))
+	command.AddCommand(newWorkspaceInitCommand(registryRoot), newWorkspaceAttachCommand(registryRoot), NewCloneCommand())
 	return command
 }
 
