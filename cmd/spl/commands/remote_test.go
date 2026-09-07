@@ -37,6 +37,33 @@ func TestRemoteSetPersistsConfigurationAndPrintsNoCredential(t *testing.T) {
 	}
 }
 
+func TestRemoteSetWithTenantAndWorkspacePersistsConfiguration(t *testing.T) {
+	repo := newTestSeedRepository(t)
+	var output bytes.Buffer
+
+	command := NewRemoteCommand(func() (*repository.Repository, error) { return repo, nil })
+	command.SetOut(&output)
+	command.SetArgs([]string{"set", "--endpoint", "https://rack.example.com", "--tenant-id", "tenant-1", "--workspace-id", "ws-prod", "--auth-mode", "bearer"})
+	if err := command.Execute(); err != nil {
+		t.Fatalf("execute remote set: %v", err)
+	}
+
+	var result remoteConfigResult
+	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+		t.Fatalf("decode CLI result: %v", err)
+	}
+	if result.Endpoint != "https://rack.example.com" || result.TenantID != "tenant-1" || result.WorkspaceID != "ws-prod" || result.AuthMode != "bearer" {
+		t.Fatalf("result = %#v", result)
+	}
+	cfg, ok, err := repo.Remote()
+	if err != nil || !ok {
+		t.Fatalf("Remote() = %#v, %v, %v", cfg, ok, err)
+	}
+	if cfg.TenantID != "tenant-1" || cfg.WorkspaceID != "ws-prod" {
+		t.Fatalf("stored cfg = %#v", cfg)
+	}
+}
+
 func TestRemoteSetRejectsMissingRequiredFlags(t *testing.T) {
 	repo := newTestSeedRepository(t)
 	var output bytes.Buffer

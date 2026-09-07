@@ -10,7 +10,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 
 	"github.com/fxamacker/cbor/v2"
@@ -109,10 +108,10 @@ func (e *DivergedError) Error() string {
 	return fmt.Sprintf("pull diverged: remote head is %s", e.ActualHead)
 }
 
-// pull calls GET {endpoint}/api/v1/repos/{repoID}/pull?branch=...&knownCommit=...
+// pull calls GET {endpoint}/api/v1/[workspaces|repos]/{id}/pull?branch=...&knownCommit=...
 // and returns the decoded, hash-verified pull response. knownCommit may be
 // empty to request the branch's entire history from scratch.
-func (c *Client) pull(ctx context.Context, endpoint, repoID string, authMode AuthMode, credential string, branch, knownCommit string) (PullResult, error) {
+func (c *Client) pull(ctx context.Context, cfg Config, credential string, branch, knownCommit string) (PullResult, error) {
 	client := c.HTTPClient
 	if client == nil {
 		client = &http.Client{Timeout: pullTimeout}
@@ -123,19 +122,12 @@ func (c *Client) pull(ctx context.Context, endpoint, repoID string, authMode Aut
 	if knownCommit != "" {
 		query.Set("knownCommit", knownCommit)
 	}
-	target := strings.TrimRight(endpoint, "/") + "/api/v1/repos/" + repoID + "/pull?" + query.Encode()
+	target := resourceBase(cfg.Endpoint, cfg) + "/pull?" + query.Encode()
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
 		return PullResult{}, fmt.Errorf("build pull request: %w", err)
 	}
-	if credential != "" {
-		if authMode == AuthModeAPIKey {
-			request.Header.Set("X-Api-Key", credential)
-		} else {
-			request.Header.Set("Authorization", "Bearer "+credential)
-		}
-	}
-	c.setCorrelationHeader(request)
+	c.setHeaders(request, cfg.AuthMode, credential, cfg.TenantID)
 
 	response, err := client.Do(request)
 	if err != nil {
@@ -271,5 +263,5 @@ func Pull(ctx context.Context, client *Client, cfg Config, credential string, br
 	if client == nil {
 		client = NewClient()
 	}
-	return client.pull(ctx, cfg.Endpoint, cfg.RepoID, cfg.AuthMode, credential, branch, knownCommit)
+	return client.pull(ctx, cfg, credential, branch, knownCommit)
 }

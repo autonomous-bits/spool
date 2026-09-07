@@ -8,7 +8,6 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/autonomous-bits/spool/graphcontract"
@@ -71,8 +70,8 @@ var ErrPushRejected = errors.New("rack rejected the push")
 
 // push POSTs a multipart/form-data push request (a JSON `metadata` part
 // followed by a binary `pack` part, matching the part order Rack's gateway
-// requires) to {endpoint}/api/v1/repos/{repoID}/push.
-func (c *Client) push(ctx context.Context, endpoint, repoID string, authMode AuthMode, credential string, req PushRequest) (PushResult, error) {
+// requires) to the configured Rack remote workspace/repo push endpoint.
+func (c *Client) push(ctx context.Context, cfg Config, credential string, req PushRequest) (PushResult, error) {
 	client := c.HTTPClient
 	if client == nil {
 		client = &http.Client{Timeout: pushTimeout}
@@ -125,20 +124,13 @@ func (c *Client) push(ctx context.Context, endpoint, repoID string, authMode Aut
 		_ = pipeWriter.CloseWithError(err)
 	}()
 
-	target := strings.TrimRight(endpoint, "/") + "/api/v1/repos/" + repoID + "/push"
+	target := resourceBase(cfg.Endpoint, cfg) + "/push"
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, target, pipeReader)
 	if err != nil {
 		return PushResult{}, fmt.Errorf("build push request: %w", err)
 	}
 	request.Header.Set("Content-Type", contentType)
-	if credential != "" {
-		if authMode == AuthModeAPIKey {
-			request.Header.Set("X-Api-Key", credential)
-		} else {
-			request.Header.Set("Authorization", "Bearer "+credential)
-		}
-	}
-	c.setCorrelationHeader(request)
+	c.setHeaders(request, cfg.AuthMode, credential, cfg.TenantID)
 
 	response, err := client.Do(request)
 	if err != nil {
@@ -174,5 +166,5 @@ func Push(ctx context.Context, client *Client, cfg Config, credential string, re
 	if client == nil {
 		client = NewClient()
 	}
-	return client.push(ctx, cfg.Endpoint, cfg.RepoID, cfg.AuthMode, credential, req)
+	return client.push(ctx, cfg, credential, req)
 }

@@ -37,10 +37,22 @@ var (
 type Config struct {
 	// Endpoint is the Rack HTTP(S) base URL.
 	Endpoint string `toml:"endpoint"`
-	// RepoID is the logical Rack repository/tenant identity.
-	RepoID string `toml:"repo_id"`
+	// TenantID is the optional Rack tenant identity.
+	TenantID string `toml:"tenant_id,omitempty"`
+	// WorkspaceID is the Rack workspace identity.
+	WorkspaceID string `toml:"workspace_id,omitempty"`
+	// RepoID is the legacy Rack repository identity kept for backwards compatibility.
+	RepoID string `toml:"repo_id,omitempty"`
 	// AuthMode selects how credentials for this remote are authenticated.
 	AuthMode AuthMode `toml:"auth_mode"`
+}
+
+// WorkspaceOrRepoID returns WorkspaceID if set, falling back to RepoID.
+func (c Config) WorkspaceOrRepoID() string {
+	if c.WorkspaceID != "" {
+		return c.WorkspaceID
+	}
+	return c.RepoID
 }
 
 // Validate reports whether c is a well-formed, non-secret remote
@@ -74,21 +86,53 @@ func (c Config) Validate() error {
 		return fmt.Errorf("%w: endpoint", ErrSecretLikeValue)
 	}
 
-	if c.RepoID != strings.TrimSpace(c.RepoID) {
-		return fmt.Errorf("%w: repo_id must not have leading or trailing whitespace", ErrInvalidConfig)
+	if c.TenantID != "" {
+		if c.TenantID != strings.TrimSpace(c.TenantID) {
+			return fmt.Errorf("%w: tenant_id must not have leading or trailing whitespace", ErrInvalidConfig)
+		}
+		if len(c.TenantID) > maxRepoIDLength {
+			return fmt.Errorf("%w: tenant_id", ErrSecretLikeValue)
+		}
+		if strings.ContainsAny(c.TenantID, " \t\n\r") {
+			return fmt.Errorf("%w: tenant_id must not contain whitespace", ErrInvalidConfig)
+		}
+		if looksLikeSecret(c.TenantID) {
+			return fmt.Errorf("%w: tenant_id", ErrSecretLikeValue)
+		}
 	}
-	repoID := c.RepoID
-	if repoID == "" {
-		return fmt.Errorf("%w: repo_id is required", ErrInvalidConfig)
+
+	if c.WorkspaceID != "" {
+		if c.WorkspaceID != strings.TrimSpace(c.WorkspaceID) {
+			return fmt.Errorf("%w: workspace_id must not have leading or trailing whitespace", ErrInvalidConfig)
+		}
+		if len(c.WorkspaceID) > maxRepoIDLength {
+			return fmt.Errorf("%w: workspace_id", ErrSecretLikeValue)
+		}
+		if strings.ContainsAny(c.WorkspaceID, " \t\n\r") {
+			return fmt.Errorf("%w: workspace_id must not contain whitespace", ErrInvalidConfig)
+		}
+		if looksLikeSecret(c.WorkspaceID) {
+			return fmt.Errorf("%w: workspace_id", ErrSecretLikeValue)
+		}
 	}
-	if len(repoID) > maxRepoIDLength {
-		return fmt.Errorf("%w: repo_id", ErrSecretLikeValue)
+
+	if c.RepoID != "" {
+		if c.RepoID != strings.TrimSpace(c.RepoID) {
+			return fmt.Errorf("%w: repo_id must not have leading or trailing whitespace", ErrInvalidConfig)
+		}
+		if len(c.RepoID) > maxRepoIDLength {
+			return fmt.Errorf("%w: repo_id", ErrSecretLikeValue)
+		}
+		if strings.ContainsAny(c.RepoID, " \t\n\r") {
+			return fmt.Errorf("%w: repo_id must not contain whitespace", ErrInvalidConfig)
+		}
+		if looksLikeSecret(c.RepoID) {
+			return fmt.Errorf("%w: repo_id", ErrSecretLikeValue)
+		}
 	}
-	if strings.ContainsAny(repoID, " \t\n\r") {
-		return fmt.Errorf("%w: repo_id must not contain whitespace", ErrInvalidConfig)
-	}
-	if looksLikeSecret(repoID) {
-		return fmt.Errorf("%w: repo_id", ErrSecretLikeValue)
+
+	if c.WorkspaceOrRepoID() == "" {
+		return fmt.Errorf("%w: workspace_id is required", ErrInvalidConfig)
 	}
 
 	switch c.AuthMode {

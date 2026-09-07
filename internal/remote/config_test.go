@@ -154,3 +154,59 @@ func TestEnvVarMapsAuthModes(t *testing.T) {
 		t.Fatal("EnvVar(oauth) = nil error, want error")
 	}
 }
+
+func TestConfigValidateAcceptsTenantAndWorkspaceID(t *testing.T) {
+	cfg := Config{
+		Endpoint:    "https://rack.example.com",
+		TenantID:    "tenant-123",
+		WorkspaceID: "ws-456",
+		AuthMode:    AuthModeBearer,
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if cfg.WorkspaceOrRepoID() != "ws-456" {
+		t.Fatalf("WorkspaceOrRepoID() = %q, want ws-456", cfg.WorkspaceOrRepoID())
+	}
+}
+
+func TestConfigValidateRejectsSecretLikeTenantOrWorkspaceID(t *testing.T) {
+	cfg := Config{
+		Endpoint:    "https://rack.example.com",
+		TenantID:    "ghp_1234567890abcdefghijklmnopqrstuvwxyz",
+		WorkspaceID: "ws-456",
+		AuthMode:    AuthModeBearer,
+	}
+	if err := cfg.Validate(); !errors.Is(err, ErrSecretLikeValue) {
+		t.Fatalf("Validate secret tenant = %v, want ErrSecretLikeValue", err)
+	}
+
+	cfg2 := Config{
+		Endpoint:    "https://rack.example.com",
+		TenantID:    "tenant-123",
+		WorkspaceID: "ghp_1234567890abcdefghijklmnopqrstuvwxyz",
+		AuthMode:    AuthModeBearer,
+	}
+	if err := cfg2.Validate(); !errors.Is(err, ErrSecretLikeValue) {
+		t.Fatalf("Validate secret workspace = %v, want ErrSecretLikeValue", err)
+	}
+}
+
+func TestResourceBaseUsesWorkspaceWhenSet(t *testing.T) {
+	cfgWithWs := Config{
+		Endpoint:    "https://rack.example.com",
+		WorkspaceID: "ws-100",
+		RepoID:      "legacy-100",
+	}
+	if base := resourceBase(cfgWithWs.Endpoint, cfgWithWs); base != "https://rack.example.com/api/v1/workspaces/ws-100" {
+		t.Fatalf("resourceBase with workspace = %q, want /workspaces/ws-100", base)
+	}
+
+	cfgLegacy := Config{
+		Endpoint: "https://rack.example.com",
+		RepoID:   "legacy-100",
+	}
+	if base := resourceBase(cfgLegacy.Endpoint, cfgLegacy); base != "https://rack.example.com/api/v1/repos/legacy-100" {
+		t.Fatalf("resourceBase legacy = %q, want /repos/legacy-100", base)
+	}
+}
