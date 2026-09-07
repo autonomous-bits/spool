@@ -40,9 +40,20 @@ type persistedRepository struct {
 }
 
 // repositoryFormatVersion 2 introduces canonical graphcontract commit records.
-// Version 1 repositories are intentionally unsupported because their commit
-// object IDs use a different canonical representation.
+// Version 1 repositories must be migrated using 'spl migrate --from 1 --to 2'.
 const repositoryFormatVersion = 2
+
+// WorkspaceMigrationRequiredError indicates that a repository cannot be opened
+// because its format_version is older than the current Spool version, and tells
+// the user to run the explicit migration command targeting the versions.
+type WorkspaceMigrationRequiredError struct {
+	FromVersion int
+	ToVersion   int
+}
+
+func (e *WorkspaceMigrationRequiredError) Error() string {
+	return fmt.Sprintf("workspace format version %d cannot be read by this version of Spool (format version %d); run 'spl migrate --from %d --to %d' to upgrade your workspace", e.FromVersion, e.ToVersion, e.FromVersion, e.ToVersion)
+}
 
 type repositoryConfig struct {
 	FormatVersion            int                             `toml:"format_version"`
@@ -393,7 +404,19 @@ func (r *Repository) loadControlState() (bool, error) {
 		return false, fmt.Errorf("read repository configuration: %w", err)
 	}
 	var config repositoryConfig
-	if err := toml.Unmarshal(data, &config); err != nil || config.FormatVersion != repositoryFormatVersion || !validRefName(config.DefaultBranch) {
+	if err := toml.Unmarshal(data, &config); err != nil {
+		return false, fmt.Errorf("decode repository configuration: invalid durable repository")
+	}
+	if config.FormatVersion != repositoryFormatVersion {
+		if config.FormatVersion > 0 && config.FormatVersion < repositoryFormatVersion {
+			return false, &WorkspaceMigrationRequiredError{
+				FromVersion: config.FormatVersion,
+				ToVersion:   repositoryFormatVersion,
+			}
+		}
+		return false, fmt.Errorf("decode repository configuration: invalid durable repository")
+	}
+	if !validRefName(config.DefaultBranch) {
 		return false, fmt.Errorf("decode repository configuration: invalid durable repository")
 	}
 	if config.Remote != nil {

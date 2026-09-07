@@ -12,6 +12,13 @@ generated from commits since the preceding `v*` tag. Commits prefixed with `docs
 
 ### Added
 
+- `spl migrate` CLI command (and `spl workspace migrate`) that upgrades repository
+  state between format versions (e.g. `spl migrate --from 1 --to 2`). When opening
+  a repository whose format cannot be read because it is from an older format version,
+  Spool halts with an actionable error instructing the user to run `spl migrate --from <from> --to <to>`.
+  The migration creates a durable, timestamped backup (`.v1.backup-<timestamp>`), canonicalizes the
+  commit DAG using `graphcontract.Commit`, remaps all branch refs and reflogs, updates `config.toml`,
+  invalidates SQLite projections, and verifies repository integrity.
 - `spl pull` CLI command that fetches new commits for a branch from a
   repository's configured Rack remote over the native pull protocol: it
   recomputes the local branch's Rack wire-format head, asks Rack for

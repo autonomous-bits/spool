@@ -187,7 +187,19 @@ func (c *fsckChecker) checkControlState() {
 		return
 	}
 	var config repositoryConfig
-	if err := toml.Unmarshal(configData, &config); err != nil || config.FormatVersion != repositoryFormatVersion || !validRefName(config.DefaultBranch) {
+	if err := toml.Unmarshal(configData, &config); err != nil {
+		c.issue("invalid-config", "config.toml", "", "", "configuration is not a supported repository configuration")
+		return
+	}
+	if config.FormatVersion != repositoryFormatVersion {
+		if config.FormatVersion > 0 && config.FormatVersion < repositoryFormatVersion {
+			c.issue("unsupported-format-version", "config.toml", "", "", fmt.Sprintf("workspace format version %d cannot be read (format version %d); run 'spl migrate --from %d --to %d' to upgrade", config.FormatVersion, repositoryFormatVersion, config.FormatVersion, repositoryFormatVersion))
+			return
+		}
+		c.issue("invalid-config", "config.toml", "", "", "configuration is not a supported repository configuration")
+		return
+	}
+	if !validRefName(config.DefaultBranch) {
 		c.issue("invalid-config", "config.toml", "", "", "configuration is not a supported repository configuration")
 		return
 	}

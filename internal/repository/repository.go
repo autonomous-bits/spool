@@ -277,6 +277,13 @@ func (r *Repository) Initialization() (Initialization, error) {
 	return Initialization{DefaultBranch: r.defaultBranch, ActiveBranch: r.activeBranch}, nil
 }
 
+// StateDir returns the durable repository state directory path, or "" for in-memory repositories.
+func (r *Repository) StateDir() string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.mergeStateDir
+}
+
 func (r *Repository) ensureOpenLocked() error {
 	if r.closed {
 		return ErrMergeRepositoryClosed

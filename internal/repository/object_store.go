@@ -446,3 +446,8 @@ func objectIDForEncoded(objectType string, encoded []byte) ObjectID {
 	sum := blake3.Sum256(append([]byte(header), encoded...))
 	return ObjectID(hex.EncodeToString(sum[:]))
 }
+
+// ObjectIDForEncoded computes the deterministic Blake3 content identifier for an object type and payload.
+func ObjectIDForEncoded(objectType string, encoded []byte) ObjectID {
+	return objectIDForEncoded(objectType, encoded)
+}
