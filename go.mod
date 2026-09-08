@@ -6,7 +6,7 @@ require (
 	github.com/fxamacker/cbor/v2 v2.9.3
 	github.com/gofrs/flock v0.13.1
 	github.com/google/uuid v1.6.0
-	github.com/klauspost/compress v1.19.2
+	github.com/klauspost/compress v1.20.0
 	github.com/mattn/go-isatty v0.0.24
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/zalando/go-keyring v0.2.8
