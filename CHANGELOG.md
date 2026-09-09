@@ -8,6 +8,18 @@ generated from commits since the preceding `v*` tag. Commits prefixed with `docs
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-09-09
+
+### Added
+
+- Support for non-linear commit DAG histories (including merge commits with multiple parents)
+  in `spl push` and `spl pull`:
+  - `spl push` performs iterative post-order topological traversal to resolve and push multi-parent
+    commit graphs to Spool Rack remotes, negotiating `PackFormatV3` when merge commits are present
+    while retaining backwards-compatible `PackFormatV2` for linear histories.
+  - `spl pull` unpacks and connects multi-parent DAG commit chains, resolving parent commits cleanly
+    across converging branches.
+
 ## [1.6.0] - 2026-09-07
 
 ### Added
