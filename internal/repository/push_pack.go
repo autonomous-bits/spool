@@ -26,6 +26,9 @@ const (
 	// PushPackFormatV2 identifies a canonical Rack push pack frame, matching
 	// Rack's sync.PackFormatV2.
 	PushPackFormatV2 uint32 = 2
+	// PushPackFormatV3 identifies a canonical Rack push pack frame supporting general
+	// DAG commit histories, matching Rack's sync.PackFormatV3.
+	PushPackFormatV3 uint32 = 3
 	// pushSnapshotEnvelopeVersion identifies Rack's materialized graph
 	// snapshot envelope (review.SnapshotEnvelopeVersion): the full node/edge
 	// map representation Rack's push validator decodes, distinct from this
@@ -39,14 +42,9 @@ var (
 	// base commit, so there is no new history to publish.
 	ErrNothingToPush = errors.New("repository: nothing to push")
 	// ErrPushBaseNotFound reports that the given base commit does not name
-	// any commit in the branch's local first-parent history, so the CLI
+	// any commit in the branch's local DAG history, so the CLI
 	// cannot determine which local commits are new.
 	ErrPushBaseNotFound = errors.New("repository: push base commit not found in local branch history")
-	// ErrPushMergeCommitUnsupported reports that the commits to push include
-	// a merge commit. Native push currently only supports fast-forward,
-	// single-parent history; reconciling and pushing merge commits is a
-	// separate, not-yet-implemented capability.
-	ErrPushMergeCommitUnsupported = errors.New("repository: push does not yet support merge commits")
 )
 
 var pushCanonicalCBOR, _ = cbor.CanonicalEncOptions().EncMode()
@@ -152,8 +150,8 @@ type pushChainEntry struct {
 // Recomputation is a pure function of each commit's content, so it is
 // always correct, at the cost of walking the full history on every push.
 //
-// Only linear (single-parent) history is supported: a merge commit anywhere
-// in the range being pushed returns ErrPushMergeCommitUnsupported.
+// History is traversed as a DAG and topologically sorted (ancestors before
+// descendants), supporting multi-parent merge commits.
 func (r *Repository) BuildPushPack(ctx context.Context, branch, baseCommit string) (PushPack, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -170,7 +168,7 @@ func (r *Repository) BuildPushPack(ctx context.Context, branch, baseCommit strin
 		return PushPack{}, err
 	}
 
-	startIndex := 0
+	var toPush []pushChainEntry
 	base := pushCommitIdentity{}
 	if baseCommit != "" {
 		found := -1
@@ -183,13 +181,37 @@ func (r *Repository) BuildPushPack(ctx context.Context, branch, baseCommit strin
 		if found == -1 {
 			return PushPack{}, ErrPushBaseNotFound
 		}
-		startIndex = found + 1
 		base = pushCommitIdentity{Format: PushCommitFormatV2, ID: baseCommit}
+
+		// Filter out baseCommit and all of its ancestors (already on Rack).
+		knownCommits := make(map[ObjectID]struct{})
+		queue := []ObjectID{chain[found].localID}
+		knownCommits[chain[found].localID] = struct{}{}
+		for len(queue) > 0 {
+			curr := queue[0]
+			queue = queue[1:]
+			if c, ok := r.commits[curr]; ok {
+				for _, p := range c.Parents {
+					if _, seen := knownCommits[p]; !seen {
+						knownCommits[p] = struct{}{}
+						queue = append(queue, p)
+					}
+				}
+			}
+		}
+
+		toPush = make([]pushChainEntry, 0, len(chain))
+		for _, entry := range chain {
+			if _, seen := knownCommits[entry.localID]; !seen {
+				toPush = append(toPush, entry)
+			}
+		}
+	} else {
+		toPush = chain
 	}
-	if startIndex >= len(chain) {
+	if len(toPush) == 0 {
 		return PushPack{}, ErrNothingToPush
 	}
-	toPush := chain[startIndex:]
 
 	commits := make([]PushCommitRecord, 0, len(toPush))
 	frames := make([]pushCommitFrame, 0, len(toPush))
@@ -212,8 +234,13 @@ func (r *Repository) BuildPushPack(ctx context.Context, branch, baseCommit strin
 	}
 	target := toPush[len(toPush)-1].wireID
 
+	packFormat := PushPackFormatV2
+	if !isLinearPush(baseCommit, toPush) {
+		packFormat = PushPackFormatV3
+	}
+
 	frame := pushPackFrame{
-		Version: PushPackFormatV2,
+		Version: packFormat,
 		Base:    base,
 		Target:  pushCommitIdentity{Format: PushCommitFormatV2, ID: target},
 		Commits: frames,
@@ -233,29 +260,99 @@ func (r *Repository) BuildPushPack(ctx context.Context, branch, baseCommit strin
 		TargetCommit: target,
 		Commits:      commits,
 		Objects:      objects,
-		PackFormat:   PushPackFormatV2,
+		PackFormat:   packFormat,
 		PackHash:     pushContentID(packData),
 		PackData:     packData,
 	}, nil
 }
 
-// recomputePushChainLocked walks branch's local first-parent history from
-// head back to its root commit, recomputing each commit's Rack wire ID and
-// materialized graph snapshot along the way. The returned chain is ordered
-// oldest-ancestor first.
+// isLinearPush reports whether toPush forms a strictly linear first-parent chain
+// extending from baseCommit (or empty base).
+func isLinearPush(baseCommit string, toPush []pushChainEntry) bool {
+	if len(toPush) == 0 {
+		return true
+	}
+	previous := baseCommit
+	for i, entry := range toPush {
+		if len(entry.commit.Parents) > 1 {
+			return false
+		}
+		if len(entry.commit.Parents) == 0 {
+			if i != 0 || previous != "" {
+				return false
+			}
+		} else {
+			if string(entry.commit.Parents[0]) != previous {
+				return false
+			}
+		}
+		previous = entry.wireID
+	}
+	return true
+}
+
+// recomputePushChainLocked walks branch's commit DAG backwards from head
+// traversing all parent paths until root commits are reached, topologically
+// sorts all commits (ancestors before descendants), and recomputes each
+// commit's Rack wire ID and materialized graph snapshot along the way.
+// The returned chain is ordered oldest-ancestor first.
 func (r *Repository) recomputePushChainLocked(ctx context.Context, head ObjectID) ([]pushChainEntry, error) {
-	var reversed []pushChainEntry
-	current := head
-	for {
+	type visitState uint8
+	const (
+		visitUnvisited visitState = iota
+		visitVisiting
+		visitVisited
+	)
+
+	var order []ObjectID
+	state := make(map[ObjectID]visitState)
+
+	type stackFrame struct {
+		id          ObjectID
+		parentIndex int
+	}
+
+	stack := []stackFrame{{id: head, parentIndex: 0}}
+	state[head] = visitVisiting
+
+	for len(stack) > 0 {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		localCommit, ok := r.commits[current]
+		top := &stack[len(stack)-1]
+		localCommit, ok := r.commits[top.id]
 		if !ok {
 			return nil, ErrCommitNotFound
 		}
-		if len(localCommit.Parents) > 1 {
-			return nil, ErrPushMergeCommitUnsupported
+		if top.parentIndex < len(localCommit.Parents) {
+			parentID := localCommit.Parents[top.parentIndex]
+			top.parentIndex++
+			switch state[parentID] {
+			case visitVisiting:
+				return nil, fmt.Errorf("repository: cycle detected in commit graph at %s", parentID)
+			case visitVisited:
+				continue
+			default:
+				state[parentID] = visitVisiting
+				stack = append(stack, stackFrame{id: parentID, parentIndex: 0})
+			}
+		} else {
+			state[top.id] = visitVisited
+			order = append(order, top.id)
+			stack = stack[:len(stack)-1]
+		}
+	}
+
+	wireIDMap := make(map[ObjectID]string, len(order))
+	chain := make([]pushChainEntry, len(order))
+
+	for i, localID := range order {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		localCommit, ok := r.commits[localID]
+		if !ok {
+			return nil, ErrCommitNotFound
 		}
 
 		snapshotData, err := r.materializePushSnapshotLocked(localCommit.Snapshot)
@@ -264,49 +361,49 @@ func (r *Repository) recomputePushChainLocked(ctx context.Context, head ObjectID
 		}
 		snapshotRoot := pushContentID(snapshotData)
 
-		reversed = append(reversed, pushChainEntry{
-			localID:      current,
-			snapshotRoot: snapshotRoot,
-			snapshotData: snapshotData,
-			commit: graphcontract.Commit{
-				Message: localCommit.Message,
-				Author:  localCommit.Author,
-				Time:    localCommit.Time,
-			},
-		})
-
-		if len(localCommit.Parents) == 0 {
-			break
+		wireParents := make([]graphcontract.ObjectID, len(localCommit.Parents))
+		wireIdentities := make([]pushCommitIdentity, len(localCommit.Parents))
+		for j, p := range localCommit.Parents {
+			wireParentID, ok := wireIDMap[p]
+			if !ok {
+				return nil, fmt.Errorf("repository: missing wire ID for parent commit %s", p)
+			}
+			wireParents[j] = graphcontract.ObjectID(wireParentID)
+			wireIdentities[j] = pushCommitIdentity{
+				Format: PushCommitFormatV2,
+				ID:     wireParentID,
+			}
 		}
-		current = localCommit.Parents[0]
-	}
 
-	// reversed is newest-first; build the oldest-first chain, resolving each
-	// entry's wire commit ID and wire parent identity from its (already
-	// resolved) parent.
-	chain := make([]pushChainEntry, len(reversed))
-	var parentIdentity []pushCommitIdentity
-	for i := len(reversed) - 1; i >= 0; i-- {
-		entry := reversed[i]
-		entry.commit.Snapshot = graphcontract.ObjectID(entry.snapshotRoot)
-		if len(parentIdentity) > 0 {
-			entry.commit.Parents = []graphcontract.ObjectID{graphcontract.ObjectID(parentIdentity[0].ID)}
+		commit := graphcontract.Commit{
+			Snapshot: graphcontract.ObjectID(snapshotRoot),
+			Parents:  wireParents,
+			Message:  localCommit.Message,
+			Author:   localCommit.Author,
+			Time:     localCommit.Time,
 		}
-		normalized, err := entry.commit.Normalize()
+
+		normalized, err := commit.Normalize()
 		if err != nil {
-			return nil, fmt.Errorf("repository: normalize push commit %s: %w", entry.localID, err)
+			return nil, fmt.Errorf("repository: normalize push commit %s: %w", localID, err)
 		}
 		encoded, err := graphcontract.MarshalCommit(normalized)
 		if err != nil {
-			return nil, fmt.Errorf("repository: encode push commit %s: %w", entry.localID, err)
+			return nil, fmt.Errorf("repository: encode push commit %s: %w", localID, err)
 		}
-		entry.commit = normalized
-		entry.wireID = pushContentID(encoded)
-		entry.wireParents = parentIdentity
+		wireID := pushContentID(encoded)
+		wireIDMap[localID] = wireID
 
-		chain[len(reversed)-1-i] = entry
-		parentIdentity = []pushCommitIdentity{{Format: PushCommitFormatV2, ID: entry.wireID}}
+		chain[i] = pushChainEntry{
+			localID:      localID,
+			wireID:       wireID,
+			wireParents:  wireIdentities,
+			snapshotRoot: snapshotRoot,
+			snapshotData: snapshotData,
+			commit:       normalized,
+		}
 	}
+
 	return chain, nil
 }
 
