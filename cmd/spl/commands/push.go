@@ -21,8 +21,7 @@ func NewPushCommand(repoProvider func() (*repository.Repository, error)) *cobra.
 		Short: "Push local commits to the repository's configured Rack remote",
 		Long: "Push builds a native pack from the local commits reachable from --branch that are not yet " +
 			"known to Rack (per --base-commit), then sends it to the repository's configured Rack remote. " +
-			"Push only supports linear, fast-forward history: it fails if any commit in range has more than " +
-			"one parent, or if Rack reports the remote branch has moved past --base-commit.\n\n" +
+			"Push fails if Rack reports the remote branch has moved past --base-commit.\n\n" +
 			"With --reconcile, a non-fast-forward rejection is handled automatically instead of just " +
 			"reported: push fetches Rack's complete current history for --branch into a local " +
 			"reconciliation branch, rebases --branch's independent local changes onto it with the graph " +

@@ -102,7 +102,12 @@ func (r *Repository) InstallPullPack(ctx context.Context, branch string, packs [
 	restore := r.beginPullInstallLocked()
 	defer func() { r.objectBatch = nil }()
 
-	currentLocalHead, installed, _, err := r.installPullFramesLocked(ctx, frames, map[string]ObjectID{localHeadWireID: head}, head, expectedHead)
+	seedWireToLocal := make(map[string]ObjectID, len(chain))
+	for _, entry := range chain {
+		seedWireToLocal[entry.wireID] = entry.localID
+	}
+
+	currentLocalHead, installed, _, err := r.installPullFramesLocked(ctx, frames, seedWireToLocal, head, expectedHead)
 	if err != nil {
 		restore()
 		return InstallPullResult{}, err

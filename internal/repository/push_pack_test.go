@@ -92,6 +92,9 @@ func TestBuildPushPackIncrementalPushOnlyIncludesNewCommits(t *testing.T) {
 	if incremental.BaseCommit != base.TargetCommit {
 		t.Fatalf("BaseCommit = %q, want %q", incremental.BaseCommit, base.TargetCommit)
 	}
+	if incremental.PackFormat != PushPackFormatV2 {
+		t.Fatalf("incremental PackFormat = %d, want %d", incremental.PackFormat, PushPackFormatV2)
+	}
 	if incremental.Commits[0].ID == base.TargetCommit {
 		t.Fatal("incremental push resent the already-known base commit")
 	}
@@ -142,25 +145,93 @@ func TestBuildPushPackUnknownBranch(t *testing.T) {
 	}
 }
 
-func TestBuildPushPackRejectsMergeCommits(t *testing.T) {
+func TestBuildPushPackSupportsMergeCommits(t *testing.T) {
 	repo := newTestSeedRepository(t)
-	commitTestMutation(t, repo, "push-node-1", "First", "alice", "first commit")
-
-	// Synthesize a merge commit directly: a real two-parent commit requires
-	// the full branch/preview/apply merge lifecycle, which is unrelated to
-	// what BuildPushPack itself needs to reject. It only inspects
-	// commit.Parents before touching a commit's snapshot, so a minimal
-	// fixture commit exercises the same guard.
 	root := repo.branches["main"]
 	rootCommit := repo.commits[root]
-	mergeCommit := rootCommit
-	mergeCommit.Parents = []ObjectID{root, root}
-	mergeCommit.Message = "synthetic merge commit"
+
+	commitTestMutation(t, repo, "push-node-1", "First", "alice", "first commit")
+	c1ID := repo.branches["main"]
+
+	// Synthesize a diverged commit c2 branching off root.
+	c2Commit := rootCommit
+	c2Commit.Parents = []ObjectID{root}
+	c2Commit.Message = "feature branch commit"
+	c2ID := repo.store("commit", c2Commit)
+	repo.commits[c2ID] = c2Commit
+
+	// Synthesize a merge commit m with parents [c1ID, c2ID].
+	mergeCommit := repo.commits[c1ID]
+	mergeCommit.Parents = []ObjectID{c1ID, c2ID}
+	mergeCommit.Message = "merge commit"
 	mergeID := repo.store("commit", mergeCommit)
 	repo.commits[mergeID] = mergeCommit
 	repo.branches["main"] = mergeID
 
-	if _, err := repo.BuildPushPack(context.Background(), "main", ""); err != ErrPushMergeCommitUnsupported {
-		t.Fatalf("err = %v, want ErrPushMergeCommitUnsupported", err)
+	// 1. Root push includes all 4 commits (root, c1, c2, merge).
+	pack, err := repo.BuildPushPack(context.Background(), "main", "")
+	if err != nil {
+		t.Fatalf("BuildPushPack: %v", err)
+	}
+	if len(pack.Commits) != 4 {
+		t.Fatalf("commits = %d, want 4", len(pack.Commits))
+	}
+
+	// Map local commits to wire IDs.
+	commitIndices := make(map[string]int)
+	for idx, record := range pack.Commits {
+		commitIndices[record.ID] = idx
+	}
+
+	mergeWireRecord := pack.Commits[len(pack.Commits)-1]
+	if len(mergeWireRecord.Commit.Parents) != 2 {
+		t.Fatalf("merge commit parents = %d, want 2", len(mergeWireRecord.Commit.Parents))
+	}
+
+	// Verify topological ordering: parents appear before the merge commit.
+	p0 := string(mergeWireRecord.Commit.Parents[0])
+	p1 := string(mergeWireRecord.Commit.Parents[1])
+	if commitIndices[p0] >= commitIndices[mergeWireRecord.ID] {
+		t.Fatalf("parent 0 index %d not before merge index %d", commitIndices[p0], commitIndices[mergeWireRecord.ID])
+	}
+	if commitIndices[p1] >= commitIndices[mergeWireRecord.ID] {
+		t.Fatalf("parent 1 index %d not before merge index %d", commitIndices[p1], commitIndices[mergeWireRecord.ID])
+	}
+
+	// Verify decoded CBOR pack frame.
+	var decoded pushPackFrame
+	if err := cbor.Unmarshal(pack.PackData, &decoded); err != nil {
+		t.Fatalf("decode pack: %v", err)
+	}
+	decodedMerge := decoded.Commits[len(decoded.Commits)-1]
+	if len(decodedMerge.Parents) != 2 {
+		t.Fatalf("decoded merge commit parents = %d, want 2", len(decodedMerge.Parents))
+	}
+	if decodedMerge.Parents[0].ID != p0 || decodedMerge.Parents[1].ID != p1 {
+		t.Fatalf("decoded merge parents = [%q, %q], want [%q, %q]",
+			decodedMerge.Parents[0].ID, decodedMerge.Parents[1].ID, p0, p1)
+	}
+
+	// 2. Incremental push where baseCommit is c1 wire ID:
+	// Only c2 and merge commit should be pushed, since root and c1 are already on remote.
+	c1WireID := p0
+	incPack, err := repo.BuildPushPack(context.Background(), "main", c1WireID)
+	if err != nil {
+		t.Fatalf("BuildPushPack (incremental): %v", err)
+	}
+	if len(incPack.Commits) != 2 {
+		t.Fatalf("incremental commits = %d, want 2 (c2 and merge)", len(incPack.Commits))
+	}
+	if incPack.BaseCommit != c1WireID {
+		t.Fatalf("incremental BaseCommit = %q, want %q", incPack.BaseCommit, c1WireID)
+	}
+	if incPack.TargetCommit != mergeWireRecord.ID {
+		t.Fatalf("incremental TargetCommit = %q, want %q", incPack.TargetCommit, mergeWireRecord.ID)
+	}
+	if pack.PackFormat != PushPackFormatV3 {
+		t.Fatalf("PackFormat = %d, want %d", pack.PackFormat, PushPackFormatV3)
+	}
+	if incPack.PackFormat != PushPackFormatV3 {
+		t.Fatalf("incPack.PackFormat = %d, want %d", incPack.PackFormat, PushPackFormatV3)
 	}
 }

@@ -35,6 +35,10 @@ const (
 	// PushPackFormatV2. Every pack declared by a v2 pull manifest must use
 	// this format.
 	pullPackFormatV2 = uint32(2)
+	// pullPackFormatV3 identifies a canonical Rack push/pull pack frame supporting
+	// DAG histories, matching Rack's sync.PackFormatV3 and internal/repository's
+	// PushPackFormatV3.
+	pullPackFormatV3 = uint32(3)
 )
 
 // ErrInvalidPullEnvelope indicates Rack's pull response body was malformed,
@@ -205,7 +209,7 @@ func decodePullEnvelope(data []byte) (head string, packs [][]byte, err error) {
 	packs = make([][]byte, len(manifest.Packs))
 	offset := manifestEnd
 	for i, pack := range manifest.Packs {
-		if pack.Format != pullPackFormatV2 {
+		if pack.Format != pullPackFormatV2 && pack.Format != pullPackFormatV3 {
 			return "", nil, fmt.Errorf("%w: pack %d has unsupported format %d", ErrInvalidPullEnvelope, i, pack.Format)
 		}
 		if pack.Length > uint64(len(data)-offset) {
