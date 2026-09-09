@@ -32,8 +32,8 @@ const (
 	pullEnvelopeHeaderSize = 16
 	// pullPackFormatV2 identifies a canonical Rack push/pull pack frame,
 	// matching Rack's sync.PackFormatV2 and internal/repository's
-	// PushPackFormatV2. Every pack declared by a v2 pull manifest must use
-	// this format.
+	// PushPackFormatV2. Packs declared by a v2 pull manifest may use either
+	// this format or pullPackFormatV3.
 	pullPackFormatV2 = uint32(2)
 	// pullPackFormatV3 identifies a canonical Rack push/pull pack frame supporting
 	// DAG histories, matching Rack's sync.PackFormatV3 and internal/repository's
@@ -160,7 +160,7 @@ func (c *Client) pull(ctx context.Context, cfg Config, credential string, branch
 }
 
 // decodePullResponse reads and decompresses a 200 OK pull response body and
-// splits it into a hash-verified, canonically-framed set of raw v2 packs.
+// splits it into a hash-verified, canonically-framed set of raw packs (v2 or v3).
 func decodePullResponse(response *http.Response) (PullResult, error) {
 	var body io.Reader = response.Body
 	if response.Header.Get("Content-Encoding") == "zstd" {
