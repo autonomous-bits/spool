@@ -8,6 +8,13 @@ generated from commits since the preceding `v*` tag. Commits prefixed with `docs
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-09-12
+
+### Added
+
+- Contextual reference asset storage and CLI commands for managing assets associated with graph
+  entities, with remote synchronization support.
+
 ## [1.7.0] - 2026-09-09
 
 ### Added
