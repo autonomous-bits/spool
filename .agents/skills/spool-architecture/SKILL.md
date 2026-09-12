@@ -124,34 +124,50 @@ Create an `spl add` batch JSON file:
 
 Stage and commit the batch:
 
-```sh
-spl add --branch main --batch arch-batch.json
-spl status --branch main
-spl commit --branch main --author "Architect <arch@example.com>" --message "Record transactional outbox architecture decision"
-```
+- **MCP (Default)**: Call `spl_add` directly with the mutations array (in-memory staging), inspect status with `spl_status`, and commit with `spl_commit`:
+  ```json
+  // spl_add: {"branch": "main", "mutations": [ ... ]}
+  // spl_status: {"branch": "main"}
+  // spl_commit: {"branch": "main", "author": "Architect <arch@example.com>", "message": "Record transactional outbox architecture decision"}
+  ```
+- **CLI (Fallback)**:
+  ```sh
+  spl add --branch main --batch arch-batch.json
+  spl status --branch main
+  spl commit --branch main --author "Architect <arch@example.com>" --message "Record transactional outbox architecture decision"
+  ```
 
 ---
 
 ## 5. Querying Architecture Knowledge
 
-When querying architecture context, limit scope to **Architecture** and **Product** nodes:
+When querying architecture context, limit scope to **Architecture** and **Product** nodes using MCP tools by default:
 
-```sh
-# Search architecture decisions regarding messaging or storage
-spl search --branch main --query "outbox Kafka"
+- **MCP (Default)**:
+  - `spl_search(branch: "main", query: "outbox Kafka")`
+  - `spl_filter(branch: "main", labels: ["Decision"])`
+  - `spl_resolve(branch: "main", node: "req-deferred-billing-address")`
+  - `spl_context(branch: "main", query: "deferred billing", direction: "both", max_depth: 2)`
+  - `spl_filter(branch: "main", labels: ["Tradeoff"])`
+  - `spl_filter(branch: "main", labels: ["Component"])`
 
-# List all architecture decisions
-spl filter --branch main --label Decision
+- **CLI (Fallback)**:
+  ```sh
+  # Search architecture decisions regarding messaging or storage
+  spl search --branch main --query "outbox Kafka"
 
-# Resolve a specific node by its exact ID
-spl resolve --branch main --node req-deferred-billing-address
+  # List all architecture decisions
+  spl filter --branch main --label Decision
 
-# Inspect bounded context around an architectural decision or requirement
-spl context --branch main --query "deferred billing" --direction both --max-depth 2
+  # Resolve a specific node by its exact ID
+  spl resolve --branch main --node req-deferred-billing-address
 
-# Inspect all tradeoffs incurred by system decisions
-spl filter --branch main --label Tradeoff
+  # Inspect bounded context around an architectural decision or requirement
+  spl context --branch main --query "deferred billing" --direction both --max-depth 2
 
-# Filter for all components in the system architecture
-spl filter --branch main --label Component
-```
+  # Inspect all tradeoffs incurred by system decisions
+  spl filter --branch main --label Tradeoff
+
+  # Filter for all components in the system architecture
+  spl filter --branch main --label Component
+  ```
