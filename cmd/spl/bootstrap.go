@@ -53,12 +53,15 @@ func bootstrapRootCommand(stdout io.Writer, stateDir string) (*cobra.Command, fu
 	migrateProvider := func(from, to int) (*repository.MigrationResult, error) {
 		return repository.MigrateRepositoryFormat(stateDir, from, to)
 	}
+	stateDirProvider := func() (string, error) {
+		return stateDir, nil
+	}
 	return newRootCommandWithLifecycle(stdout, repoProvider, toolProvider, initialize, func(ctx context.Context) (repository.FsckResult, error) {
 		if err := ctx.Err(); err != nil {
 			return repository.FsckResult{}, err
 		}
 		return repository.FsckRepository(stateDir)
-	}, migrateProvider), close
+	}, migrateProvider, stateDirProvider), close
 }
 
 func openPersistentRepository(stateDir string) (*repository.Repository, func() error, error) {
