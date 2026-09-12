@@ -211,6 +211,21 @@ Use `--max-rows`, `--max-response-bytes`, and `--timeout` for read budgets; `res
 `search-expand` and `context` require exactly one lexical `--query` or one or more typed filter
 flags, and accept `--seed-limit`, repeatable `--edge-type`, and `--direction out|in|both`.
 
+Store contextual reference documents as content-addressed Asset nodes:
+
+```sh
+spl asset add --branch main --file docs/architecture.md --title "Architecture notes"
+spl commit --branch main --author alice --message "Add architecture notes"
+spl asset read --node asset-<hash-prefix> --branch main > architecture.md
+```
+
+`asset add` stores the file under `.spl/assets/loose`, computes its BLAKE3-256 hash and MIME
+type, and stages an `Asset` node with a `spool://assets/<hash>` locator. `asset read` accepts an
+Asset node ID, a locator, or a raw hash and streams the original bytes without buffering the full
+file. When a configured Rack remote has the blob but the local cache does not, `asset read`
+retrieves and caches it on demand. `spl push` negotiates missing asset blobs and uploads them
+alongside the graph history.
+
 Export a branch's complete immutable graph snapshot as JSON for visualization or offline
 inspection:
 
@@ -387,6 +402,8 @@ The command and flag inventory is:
 | `gc` | `--dry-run`, `--repack`, `--grace-period` (default `336h`) |
 | `prune` | `--branch` (required), `--dry-run`, `--force`, `--author`, `--message` |
 | `cherry-pick` | `--commit` (required), `--target-branch` (required), `--dry-run`, `--author`, `--message` |
+| `asset add` | `--branch` and `--file` (required), `--title`, `--id` |
+| `asset read` | positional locator/node ID or `--locator`/`--node`, `--branch` |
 | `workspace init <name>` | positional name |
 | `workspace attach [path]` | `--workspace` and `--repository-id` (required); path defaults to current directory |
 | `workspace migrate`, `migrate` | `--from` (required), `--to` (required) |

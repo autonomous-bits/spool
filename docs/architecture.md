@@ -17,6 +17,7 @@ flowchart LR
     Contextual --> Repository
     Repository --> Memory[In-memory graph and ref indexes]
     Repository --> Objects["state-dir/objects/{loose,pack,info}"]
+    Repository --> Assets["state-dir/assets/loose"]
     Repository --> Projection["state-dir/graph.db (derived SQLite/FTS5)"]
     Repository --> State["state-dir/config.toml, reflog-retention, HEAD, refs, staged, logs"]
     Repository --> Merge["state-dir/merge/<hashed-branch>.json"]
@@ -47,6 +48,8 @@ operation, persist any state change, and release the lock at process exit.
 | `internal/repository/merge` | Merge transaction lifecycle service boundary. The repository supplies its durable, atomic store contract. |
 | `internal/repository/prune` | Graph pruning and ephemeral node excision service boundary. |
 | `internal/workspace` | Central detached-workspace provisioning plus manifest validation/discovery/writing and immutable workspace-ID lookup. Exposed to the CLI through the repository facade. |
+| `internal/repository/asset` | Content-addressed reference-asset blob storage, locator parsing, MIME detection, and local cache lifecycle. |
+| `internal/remote` | Rack remote configuration, native history synchronization, and asset negotiation, upload, and on-demand retrieval. |
 
 ## CLI command surface
 
@@ -63,6 +66,7 @@ operation:
 | History and comparison | `history`, `branches-containing`, `diff` |
 | Merge lifecycle | `merge preview/apply/conflicts/resolve/finalize/abort` |
 | Maintenance | `fsck`, `gc`, `prune` |
+| Contextual assets | `asset add`, `asset read` |
 | Detached workspaces | `workspace init/attach` |
 
 The complete syntax, flags, examples, and selector constraints are maintained in
@@ -139,6 +143,14 @@ Mutable state is intentionally separate from immutable objects:
 
 The old monolithic `.spl/repository.json` format is rejected rather than
 migrated implicitly.
+
+Reference assets are immutable, content-addressed blobs stored separately from graph objects
+under `state-dir/assets/loose/<first-two-hex>/<rest>`. An Asset graph node records the canonical
+`spool://assets/<hash>` locator, byte size, MIME type, and optional original filename. Asset blobs
+are not embedded in graph snapshots or commit packs. `spl asset add` writes and stages the blob
+with the branch's staged mutation set; `spl asset read` streams a local blob or, when configured,
+retrieves a missing blob from Rack and caches it locally. Push negotiation identifies missing
+hashes before uploading asset blobs alongside graph history.
 
 ## Primary flows
 
