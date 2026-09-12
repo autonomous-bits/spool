@@ -39,12 +39,15 @@ func newRootCommandWithLifecycle(
 ) *cobra.Command {
 	var fsckProvider func(context.Context) (repository.FsckResult, error)
 	var migrateProvider func(from, to int) (*repository.MigrationResult, error)
+	var stateDirProvider func() (string, error)
 	for _, p := range providers {
 		switch fn := p.(type) {
 		case func(context.Context) (repository.FsckResult, error):
 			fsckProvider = fn
 		case func(from, to int) (*repository.MigrationResult, error):
 			migrateProvider = fn
+		case func() (string, error):
+			stateDirProvider = fn
 		}
 	}
 	if fsckProvider == nil {
@@ -72,6 +75,18 @@ func newRootCommandWithLifecycle(
 				return nil, errors.New("repository has no durable state directory")
 			}
 			return repository.MigrateRepositoryFormat(repo.StateDir(), from, to)
+		}
+	}
+	if stateDirProvider == nil {
+		stateDirProvider = func() (string, error) {
+			repo, err := repoProvider()
+			if err != nil {
+				return "", err
+			}
+			if repo.StateDir() == "" {
+				return "", errors.New("repository has no durable state directory")
+			}
+			return repo.StateDir(), nil
 		}
 	}
 	root := &cobra.Command{
@@ -115,5 +130,6 @@ func newRootCommandWithLifecycle(
 	root.AddCommand(commands.NewPullCommand(repoProvider))
 	root.AddCommand(commands.NewAssetCommand(repoProvider))
 	root.AddCommand(commands.NewVersionCommand())
+	root.AddCommand(commands.NewMCPCommand(stateDirProvider))
 	return root
 }
