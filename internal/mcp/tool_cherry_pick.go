@@ -63,7 +63,7 @@ func toolCherryPick(stateDirProvider func() (string, error)) Tool {
 				if err != nil {
 					var warning *repository.CherryPickCommittedWithWarningError
 					if errors.As(err, &warning) || errors.Is(err, repository.ErrCherryPickConflicts) {
-						return result, nil
+						return result, err
 					}
 					return nil, err
 				}

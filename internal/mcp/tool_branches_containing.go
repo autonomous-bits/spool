@@ -11,7 +11,7 @@ import (
 func toolBranchesContaining(stateDirProvider func() (string, error)) Tool {
 	return Tool{
 		Name:        "spl_branches_containing",
-		Description: "Find all repository branches containing a specific entity, snapshot ID, or schema-defined natural key.",
+		Description: "Find all repository branches containing a specific entity or snapshot ID.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -23,10 +23,6 @@ func toolBranchesContaining(stateDirProvider func() (string, error)) Tool {
 					"type":        "string",
 					"description": "Exact graph snapshot object ID to find",
 				},
-				"natural_key": map[string]any{
-					"type":        "string",
-					"description": "Schema-defined natural key to find",
-				},
 				"continuation": map[string]any{
 					"type":        "string",
 					"description": "Optional pagination continuation token",
@@ -37,7 +33,6 @@ func toolBranchesContaining(stateDirProvider func() (string, error)) Tool {
 			var in struct {
 				EntityID     string `json:"entity_id,omitempty"`
 				SnapshotID   string `json:"snapshot_id,omitempty"`
-				NaturalKey   string `json:"natural_key,omitempty"`
 				Continuation string `json:"continuation,omitempty"`
 			}
 			if err := json.Unmarshal(args, &in); err != nil {
@@ -48,7 +43,6 @@ func toolBranchesContaining(stateDirProvider func() (string, error)) Tool {
 					Selector: resolve.ContainmentSelector{
 						EntityID:   in.EntityID,
 						SnapshotID: repository.ObjectID(in.SnapshotID),
-						NaturalKey: in.NaturalKey,
 					},
 					ContinuationToken: in.Continuation,
 				})

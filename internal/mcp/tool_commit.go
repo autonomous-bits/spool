@@ -54,7 +54,7 @@ func toolCommit(stateDirProvider func() (string, error)) Tool {
 				if err != nil {
 					var warning *repository.CommittedWithWarningError
 					if errors.As(err, &warning) {
-						return result, nil
+						return result, err
 					}
 					return nil, err
 				}

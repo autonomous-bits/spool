@@ -21,42 +21,65 @@ type Tool struct {
 	Handler     ToolHandler    `json:"-"`
 }
 
-func withRepo[T any](stateDirProvider func() (string, error), fn func(repo *repository.Repository) (T, error)) (T, error) {
-	var zero T
+func withRepo[T any](stateDirProvider func() (string, error), fn func(repo *repository.Repository) (T, error)) (res T, err error) {
 	stateDir, err := stateDirProvider()
 	if err != nil {
-		return zero, fmt.Errorf("resolve repository state directory: %w", err)
+		return res, fmt.Errorf("resolve repository state directory: %w", err)
 	}
 	repo, err := repository.OpenRepository(stateDir)
 	if err != nil {
-		return zero, fmt.Errorf("open repository: %w", err)
+		return res, fmt.Errorf("open repository: %w", err)
 	}
-	defer repo.Close()
+	defer func() {
+		if closeErr := repo.Close(); err == nil && closeErr != nil {
+			err = fmt.Errorf("close repository: %w", closeErr)
+		}
+	}()
 	return fn(repo)
 }
 
-func withTool[T any](stateDirProvider func() (string, error), fn func(tool *resolve.ResolveTool) (T, error)) (T, error) {
-	var zero T
+func withTool[T any](stateDirProvider func() (string, error), fn func(tool *resolve.ResolveTool) (T, error)) (res T, err error) {
 	stateDir, err := stateDirProvider()
 	if err != nil {
-		return zero, fmt.Errorf("resolve repository state directory: %w", err)
+		return res, fmt.Errorf("resolve repository state directory: %w", err)
 	}
 	repo, err := repository.OpenRepository(stateDir)
 	if err != nil {
-		return zero, fmt.Errorf("open repository: %w", err)
+		return res, fmt.Errorf("open repository: %w", err)
 	}
-	defer repo.Close()
+	defer func() {
+		if closeErr := repo.Close(); err == nil && closeErr != nil {
+			err = fmt.Errorf("close repository: %w", closeErr)
+		}
+	}()
 	return fn(resolve.NewResolveTool(repo))
 }
 
 func wrapHandler(fn ToolHandler) mcp.ToolHandler {
 	return func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		var args json.RawMessage
+		args := json.RawMessage("{}")
 		if req.Params != nil && len(req.Params.Arguments) > 0 {
 			args = req.Params.Arguments
 		}
 		res, err := fn(ctx, args)
 		if err != nil {
+			if res != nil {
+				data, marshalErr := json.Marshal(res)
+				if marshalErr == nil {
+					var mapped map[string]any
+					if json.Unmarshal(data, &mapped) == nil {
+						mapped["warning"] = err.Error()
+						if enhancedData, err := json.Marshal(mapped); err == nil {
+							data = enhancedData
+						}
+					}
+					return &mcp.CallToolResult{
+						Content:           []mcp.Content{&mcp.TextContent{Text: string(data)}},
+						StructuredContent: json.RawMessage(data),
+						IsError:           true,
+					}, nil
+				}
+			}
 			return &mcp.CallToolResult{
 				Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}},
 				IsError: true,

@@ -27,14 +27,24 @@ func toolPrune(stateDirProvider func() (string, error)) Tool {
 					"type":        "boolean",
 					"description": "Allow pruning on default protected branch",
 				},
+				"author": map[string]any{
+					"type":        "string",
+					"description": "Optional override commit author",
+				},
+				"message": map[string]any{
+					"type":        "string",
+					"description": "Optional override commit message",
+				},
 			},
 			"required": []string{"branch"},
 		},
 		Handler: func(_ context.Context, args json.RawMessage) (any, error) {
 			var in struct {
-				Branch string `json:"branch"`
-				DryRun bool   `json:"dry_run,omitempty"`
-				Force  bool   `json:"force,omitempty"`
+				Branch  string `json:"branch"`
+				DryRun  bool   `json:"dry_run,omitempty"`
+				Force   bool   `json:"force,omitempty"`
+				Author  string `json:"author,omitempty"`
+				Message string `json:"message,omitempty"`
 			}
 			if err := json.Unmarshal(args, &in); err != nil {
 				return nil, err
@@ -43,11 +53,21 @@ func toolPrune(stateDirProvider func() (string, error)) Tool {
 				return nil, errors.New("branch is required")
 			}
 			return withRepo(stateDirProvider, func(repo *repository.Repository) (any, error) {
-				return repo.Prune(repository.PruneRequest{
-					Branch: in.Branch,
-					DryRun: in.DryRun,
-					Force:  in.Force,
+				result, err := repo.Prune(repository.PruneRequest{
+					Branch:  in.Branch,
+					DryRun:  in.DryRun,
+					Force:   in.Force,
+					Author:  in.Author,
+					Message: in.Message,
 				})
+				if err != nil {
+					var warning *repository.PruneCommittedWithWarningError
+					if errors.As(err, &warning) {
+						return result, err
+					}
+					return nil, err
+				}
+				return result, nil
 			})
 		},
 	}

@@ -93,7 +93,9 @@ func toolRemoteBranch(stateDirProvider func() (string, error)) Tool {
 					if err != nil {
 						return nil, err
 					}
-					_ = repo.SetRemoteBranchTracking(in.Name, result.Name, result.HeadCommit)
+					if err := repo.SetRemoteBranchTracking(in.Name, result.Name, result.HeadCommit); err != nil {
+						return nil, fmt.Errorf("set remote branch tracking: %w", err)
+					}
 					return result, nil
 
 				case "delete":

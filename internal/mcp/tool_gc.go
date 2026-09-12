@@ -58,7 +58,7 @@ func toolGC(stateDirProvider func() (string, error)) Tool {
 				if err != nil {
 					var warning *repository.GCCommittedWithWarningError
 					if errors.As(err, &warning) {
-						return result, nil
+						return result, err
 					}
 					return nil, err
 				}

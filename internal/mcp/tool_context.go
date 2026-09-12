@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/autonomous-bits/spool/internal/contextual"
 	"github.com/autonomous-bits/spool/internal/resolve"
@@ -71,10 +72,14 @@ func toolContext(stateDirProvider func() (string, error)) Tool {
 
 			dir := contextual.DirectionOut
 			switch in.Direction {
+			case "", "out":
+				dir = contextual.DirectionOut
 			case "in":
 				dir = contextual.DirectionIn
 			case "both":
 				dir = contextual.DirectionBoth
+			default:
+				return nil, fmt.Errorf("invalid direction %q: must be 'out', 'in', or 'both'", in.Direction)
 			}
 
 			seeds := contextual.SeedSelector{}

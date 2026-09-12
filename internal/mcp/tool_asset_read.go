@@ -2,12 +2,17 @@ package mcp
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"unicode/utf8"
 
 	"github.com/autonomous-bits/spool/internal/repository"
 )
+
+const maxAssetReadBytes = 32 * 1024 * 1024 // 32MB limit for MCP tool responses
 
 func toolAssetRead(stateDirProvider func() (string, error)) Tool {
 	return Tool{
@@ -39,19 +44,33 @@ func toolAssetRead(stateDirProvider func() (string, error)) Tool {
 				return nil, errors.New("target is required")
 			}
 			return withRepo(stateDirProvider, func(repo *repository.Repository) (any, error) {
-				reader, mimeType, size, err := repo.ReadAsset(ctx, in.Branch, in.Target)
+				reader, size, meta, err := repo.ReadAsset(ctx, in.Branch, in.Target)
 				if err != nil {
 					return nil, err
 				}
 				defer func() { _ = reader.Close() }()
-				data, err := io.ReadAll(reader)
+
+				limitedReader := io.LimitReader(reader, maxAssetReadBytes+1)
+				data, err := io.ReadAll(limitedReader)
 				if err != nil {
 					return nil, err
 				}
+				if len(data) > maxAssetReadBytes {
+					return nil, fmt.Errorf("asset size (%d bytes) exceeds maximum readable size (%d bytes) for MCP", size, maxAssetReadBytes)
+				}
+
+				encoding := "utf-8"
+				content := string(data)
+				if !utf8.Valid(data) {
+					encoding = "base64"
+					content = base64.StdEncoding.EncodeToString(data)
+				}
+
 				return map[string]any{
-					"mimeType": mimeType,
+					"mimeType": meta.MIMEType,
 					"size":     size,
-					"content":  string(data),
+					"encoding": encoding,
+					"content":  content,
 				}, nil
 			})
 		},

@@ -14,7 +14,7 @@ import (
 func toolPush(stateDirProvider func() (string, error)) Tool {
 	return Tool{
 		Name:        "spl_push",
-		Description: "Push verified local commits for a branch to the repository's configured Rack remote.",
+		Description: "Push verified local commits for a branch to the repository's configured Rack remote. Returns rejection details if the remote branch has advanced (pull and merge locally before retrying).",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -108,7 +108,21 @@ func toolPush(stateDirProvider func() (string, error)) Tool {
 				}
 				result, err := remote.Push(ctx, client, cfg, credential.Value, req)
 				if err != nil {
+					var nffErr *remote.NonFastForwardError
+					if errors.As(err, &nffErr) {
+						return map[string]any{
+							"branch":        in.Branch,
+							"pushed":        false,
+							"rejected":      true,
+							"actualHead":    nffErr.ActualHead,
+							"message":       nffErr.Guidance,
+							"correlationId": nffErr.CorrelationID,
+						}, nil
+					}
 					return nil, err
+				}
+				if err := repo.SetRemoteBranchTracking(in.Branch, result.Branch, result.HeadCommit); err != nil {
+					return nil, fmt.Errorf("update remote branch tracking: %w", err)
 				}
 				return result, nil
 			})
