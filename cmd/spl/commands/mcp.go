@@ -39,10 +39,7 @@ func NewMCPCommand(stateDirProvider func() (string, error)) *cobra.Command {
 				Reader: r,
 				Writer: w,
 			})
-			if err != nil {
-				println("DEBUG ERR:", err.Error())
-			}
-			if err != nil && (errors.Is(err, io.EOF) || strings.Contains(err.Error(), "EOF") || strings.Contains(err.Error(), "server is closing") || command.Context().Err() != nil) {
+			if err != nil && (errors.Is(err, io.EOF) || strings.Contains(err.Error(), "server is closing") || command.Context().Err() != nil) {
 				return nil
 			}
 			return err

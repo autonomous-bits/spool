@@ -96,6 +96,11 @@ func toolMergeApply(stateDirProvider func() (string, error)) Tool {
 			return withRepo(stateDirProvider, func(repo *repository.Repository) (any, error) {
 				commit, err := repo.ApplyMergePreview(in.Source, in.Target, in.TransactionID, repository.ObjectID(in.PreviewID), in.Author, in.Message)
 				if err != nil {
+					if errors.Is(err, repository.ErrMergeConflicted) {
+						if result, inspectErr := repo.InspectMergeTransaction(in.Target, in.TransactionID); inspectErr == nil {
+							return result, err
+						}
+					}
 					return nil, err
 				}
 				return map[string]any{"commit": commit}, nil

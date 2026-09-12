@@ -146,17 +146,24 @@ func toolBranchesContaining(stateDirProvider func() (string, error)) Tool {
 					"type":        "string",
 					"description": "Exact graph snapshot object ID to find",
 				},
+				"natural_key": map[string]any{
+					"type":        "string",
+					"description": "Schema-defined natural key to find",
+				},
 				"continuation": map[string]any{
 					"type":        "string",
 					"description": "Optional pagination continuation token",
 				},
+				"budget": budgetSchema,
 			},
 		},
 		Handler: func(ctx context.Context, args json.RawMessage) (any, error) {
 			var in struct {
-				EntityID     string `json:"entity_id,omitempty"`
-				SnapshotID   string `json:"snapshot_id,omitempty"`
-				Continuation string `json:"continuation,omitempty"`
+				EntityID     string       `json:"entity_id,omitempty"`
+				SnapshotID   string       `json:"snapshot_id,omitempty"`
+				NaturalKey   string       `json:"natural_key,omitempty"`
+				Continuation string       `json:"continuation,omitempty"`
+				Budget       *budgetInput `json:"budget,omitempty"`
 			}
 			if err := json.Unmarshal(args, &in); err != nil {
 				return nil, err
@@ -166,8 +173,10 @@ func toolBranchesContaining(stateDirProvider func() (string, error)) Tool {
 					Selector: resolve.ContainmentSelector{
 						EntityID:   in.EntityID,
 						SnapshotID: repository.ObjectID(in.SnapshotID),
+						NaturalKey: in.NaturalKey,
 					},
 					ContinuationToken: in.Continuation,
+					Budget:            in.Budget.toBudget(),
 				})
 			})
 		},

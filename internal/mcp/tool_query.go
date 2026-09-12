@@ -7,8 +7,25 @@ import (
 	"fmt"
 
 	"github.com/autonomous-bits/spool/internal/contextual"
+	"github.com/autonomous-bits/spool/internal/repository"
 	"github.com/autonomous-bits/spool/internal/resolve"
 )
+
+var predicatesSchema = map[string]any{
+	"type":        "array",
+	"description": "Optional indexed property predicates",
+	"items": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"key":          map[string]any{"type": "string", "description": "Indexed property name"},
+			"textEquals":   map[string]any{"type": "string", "description": "String property equality"},
+			"numberEquals": map[string]any{"type": "number", "description": "Numeric property equality"},
+			"numberMin":    map[string]any{"type": "number", "description": "Inclusive numeric lower bound"},
+			"numberMax":    map[string]any{"type": "number", "description": "Inclusive numeric upper bound"},
+		},
+		"required": []string{"key"},
+	},
+}
 
 func toolResolve(stateDirProvider func() (string, error)) Tool {
 	return Tool{
@@ -29,14 +46,16 @@ func toolResolve(stateDirProvider func() (string, error)) Tool {
 					"type":        "string",
 					"description": "Optional reachable commit ID to resolve against",
 				},
+				"budget": budgetSchema,
 			},
 			"required": []string{"branch", "node"},
 		},
 		Handler: func(ctx context.Context, args json.RawMessage) (any, error) {
 			var in struct {
-				Branch string  `json:"branch"`
-				Node   string  `json:"node"`
-				Commit *string `json:"commit,omitempty"`
+				Branch string       `json:"branch"`
+				Node   string       `json:"node"`
+				Commit *string      `json:"commit,omitempty"`
+				Budget *budgetInput `json:"budget,omitempty"`
 			}
 			if err := json.Unmarshal(args, &in); err != nil {
 				return nil, err
@@ -54,6 +73,7 @@ func toolResolve(stateDirProvider func() (string, error)) Tool {
 						Commit: in.Commit,
 					},
 					NodeID: in.Node,
+					Budget: in.Budget.toBudget(),
 				})
 			})
 		},
@@ -79,14 +99,21 @@ func toolSearch(stateDirProvider func() (string, error)) Tool {
 					"type":        "string",
 					"description": "Optional pagination continuation token",
 				},
+				"commit": map[string]any{
+					"type":        "string",
+					"description": "Optional reachable commit ID to search against",
+				},
+				"budget": budgetSchema,
 			},
 			"required": []string{"branch", "query"},
 		},
 		Handler: func(ctx context.Context, args json.RawMessage) (any, error) {
 			var in struct {
-				Branch       string `json:"branch"`
-				Query        string `json:"query"`
-				Continuation string `json:"continuation,omitempty"`
+				Branch       string       `json:"branch"`
+				Query        string       `json:"query"`
+				Commit       *string      `json:"commit,omitempty"`
+				Continuation string       `json:"continuation,omitempty"`
+				Budget       *budgetInput `json:"budget,omitempty"`
 			}
 			if err := json.Unmarshal(args, &in); err != nil {
 				return nil, err
@@ -99,9 +126,13 @@ func toolSearch(stateDirProvider func() (string, error)) Tool {
 			}
 			return withTool(stateDirProvider, func(tool *resolve.ResolveTool) (any, error) {
 				return tool.SPLSearch(ctx, resolve.SearchRequest{
-					Selector:          resolve.SnapshotSelector{Branch: in.Branch},
+					Selector: resolve.SnapshotSelector{
+						Branch: in.Branch,
+						Commit: in.Commit,
+					},
 					Query:             in.Query,
 					ContinuationToken: in.Continuation,
+					Budget:            in.Budget.toBudget(),
 				})
 			})
 		},
@@ -127,6 +158,18 @@ func toolSearchExpand(stateDirProvider func() (string, error)) Tool {
 					"type":        "string",
 					"description": "Label filter for seed matching (mutually exclusive with query)",
 				},
+				"commit": map[string]any{
+					"type":        "string",
+					"description": "Optional reachable commit ID to query against",
+				},
+				"labels": map[string]any{
+					"type":        "array",
+					"description": "Optional node labels for seed matching (mutually exclusive with query)",
+					"items": map[string]any{
+						"type": "string",
+					},
+				},
+				"predicates": predicatesSchema,
 				"direction": map[string]any{
 					"type":        "string",
 					"description": "Edge traversal direction: 'out', 'in', or 'both' (default 'out')",
@@ -143,17 +186,22 @@ func toolSearchExpand(stateDirProvider func() (string, error)) Tool {
 					"type":        "integer",
 					"description": "Maximum number of seed nodes to expand from",
 				},
+				"budget": budgetSchema,
 			},
 			"required": []string{"branch"},
 		},
 		Handler: func(ctx context.Context, args json.RawMessage) (any, error) {
 			var in struct {
-				Branch    string   `json:"branch"`
-				Query     string   `json:"query,omitempty"`
-				Label     string   `json:"label,omitempty"`
-				Direction string   `json:"direction,omitempty"`
-				EdgeTypes []string `json:"edge_types,omitempty"`
-				SeedLimit int      `json:"seed_limit,omitempty"`
+				Branch     string                         `json:"branch"`
+				Commit     *string                        `json:"commit,omitempty"`
+				Query      string                         `json:"query,omitempty"`
+				Label      string                         `json:"label,omitempty"`
+				Labels     []string                       `json:"labels,omitempty"`
+				Predicates []repository.MetadataPredicate `json:"predicates,omitempty"`
+				Direction  string                         `json:"direction,omitempty"`
+				EdgeTypes  []string                       `json:"edge_types,omitempty"`
+				SeedLimit  int                            `json:"seed_limit,omitempty"`
+				Budget     *budgetInput                   `json:"budget,omitempty"`
 			}
 			if err := json.Unmarshal(args, &in); err != nil {
 				return nil, err
@@ -161,11 +209,11 @@ func toolSearchExpand(stateDirProvider func() (string, error)) Tool {
 			if in.Branch == "" {
 				return nil, errors.New("branch is required")
 			}
-			if in.Query != "" && in.Label != "" {
-				return nil, errors.New("query and label are mutually exclusive")
+			if in.Query != "" && (in.Label != "" || len(in.Labels) > 0 || len(in.Predicates) > 0) {
+				return nil, errors.New("query is mutually exclusive with label, labels, and predicates")
 			}
-			if in.Query == "" && in.Label == "" {
-				return nil, errors.New("either query or label must be specified")
+			if in.Query == "" && in.Label == "" && len(in.Labels) == 0 && len(in.Predicates) == 0 {
+				return nil, errors.New("either query, label, labels, or predicates must be specified")
 			}
 
 			dir := contextual.DirectionOut
@@ -184,16 +232,25 @@ func toolSearchExpand(stateDirProvider func() (string, error)) Tool {
 			if in.Query != "" {
 				seeds.Query = in.Query
 			} else {
-				seeds.Labels = []string{in.Label}
+				labels := in.Labels
+				if in.Label != "" && len(labels) == 0 {
+					labels = []string{in.Label}
+				}
+				seeds.Labels = labels
+				seeds.Predicates = in.Predicates
 			}
 
 			return withTool(stateDirProvider, func(tool *resolve.ResolveTool) (any, error) {
 				return tool.SPLSearchExpand(ctx, resolve.SearchExpandRequest{
-					Selector:  resolve.SnapshotSelector{Branch: in.Branch},
+					Selector: resolve.SnapshotSelector{
+						Branch: in.Branch,
+						Commit: in.Commit,
+					},
 					Seeds:     seeds,
 					Direction: dir,
 					EdgeTypes: in.EdgeTypes,
 					SeedLimit: in.SeedLimit,
+					Budget:    in.Budget.toBudget(),
 				})
 			})
 		},
@@ -203,13 +260,17 @@ func toolSearchExpand(stateDirProvider func() (string, error)) Tool {
 func toolFilter(stateDirProvider func() (string, error)) Tool {
 	return Tool{
 		Name:        "spl_filter",
-		Description: "Filter nodes in a branch head snapshot by label.",
+		Description: "Filter nodes in a branch head snapshot by label and indexed property predicates.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"branch": map[string]any{
 					"type":        "string",
 					"description": "Branch to filter",
+				},
+				"commit": map[string]any{
+					"type":        "string",
+					"description": "Optional reachable commit ID to filter against",
 				},
 				"labels": map[string]any{
 					"type":        "array",
@@ -218,18 +279,23 @@ func toolFilter(stateDirProvider func() (string, error)) Tool {
 						"type": "string",
 					},
 				},
+				"predicates": predicatesSchema,
 				"continuation": map[string]any{
 					"type":        "string",
 					"description": "Optional pagination continuation token",
 				},
+				"budget": budgetSchema,
 			},
 			"required": []string{"branch"},
 		},
 		Handler: func(ctx context.Context, args json.RawMessage) (any, error) {
 			var in struct {
-				Branch       string   `json:"branch"`
-				Labels       []string `json:"labels,omitempty"`
-				Continuation string   `json:"continuation,omitempty"`
+				Branch       string                         `json:"branch"`
+				Commit       *string                        `json:"commit,omitempty"`
+				Labels       []string                       `json:"labels,omitempty"`
+				Predicates   []repository.MetadataPredicate `json:"predicates,omitempty"`
+				Continuation string                         `json:"continuation,omitempty"`
+				Budget       *budgetInput                   `json:"budget,omitempty"`
 			}
 			if err := json.Unmarshal(args, &in); err != nil {
 				return nil, err
@@ -239,9 +305,14 @@ func toolFilter(stateDirProvider func() (string, error)) Tool {
 			}
 			return withTool(stateDirProvider, func(tool *resolve.ResolveTool) (any, error) {
 				return tool.SPLFilter(ctx, resolve.FilterRequest{
-					Selector:          resolve.SnapshotSelector{Branch: in.Branch},
+					Selector: resolve.SnapshotSelector{
+						Branch: in.Branch,
+						Commit: in.Commit,
+					},
 					Labels:            in.Labels,
+					Predicates:        in.Predicates,
 					ContinuationToken: in.Continuation,
+					Budget:            in.Budget.toBudget(),
 				})
 			})
 		},
@@ -251,7 +322,7 @@ func toolFilter(stateDirProvider func() (string, error)) Tool {
 func toolContext(stateDirProvider func() (string, error)) Tool {
 	return Tool{
 		Name:        "spl_context",
-		Description: "Assemble evidence-focused bounded graph context (nodes, incident edges, supporting paths) from either a lexical query OR label filter.",
+		Description: "Assemble evidence-focused bounded graph context (nodes, incident edges, supporting paths) from either a lexical query OR label/predicate filter.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -259,14 +330,26 @@ func toolContext(stateDirProvider func() (string, error)) Tool {
 					"type":        "string",
 					"description": "Branch to query",
 				},
+				"commit": map[string]any{
+					"type":        "string",
+					"description": "Optional reachable commit ID to query against",
+				},
 				"query": map[string]any{
 					"type":        "string",
-					"description": "Lexical search query for seed matching (mutually exclusive with label)",
+					"description": "Lexical search query for seed matching (mutually exclusive with label/predicates)",
 				},
 				"label": map[string]any{
 					"type":        "string",
 					"description": "Label filter for seed matching (mutually exclusive with query)",
 				},
+				"labels": map[string]any{
+					"type":        "array",
+					"description": "Optional node labels for seed matching (mutually exclusive with query)",
+					"items": map[string]any{
+						"type": "string",
+					},
+				},
+				"predicates": predicatesSchema,
 				"direction": map[string]any{
 					"type":        "string",
 					"description": "Edge traversal direction: 'out', 'in', or 'both' (default 'out')",
@@ -283,17 +366,22 @@ func toolContext(stateDirProvider func() (string, error)) Tool {
 					"type":        "integer",
 					"description": "Maximum number of seed nodes to expand from",
 				},
+				"budget": budgetSchema,
 			},
 			"required": []string{"branch"},
 		},
 		Handler: func(ctx context.Context, args json.RawMessage) (any, error) {
 			var in struct {
-				Branch    string   `json:"branch"`
-				Query     string   `json:"query,omitempty"`
-				Label     string   `json:"label,omitempty"`
-				Direction string   `json:"direction,omitempty"`
-				EdgeTypes []string `json:"edge_types,omitempty"`
-				SeedLimit int      `json:"seed_limit,omitempty"`
+				Branch     string                         `json:"branch"`
+				Commit     *string                        `json:"commit,omitempty"`
+				Query      string                         `json:"query,omitempty"`
+				Label      string                         `json:"label,omitempty"`
+				Labels     []string                       `json:"labels,omitempty"`
+				Predicates []repository.MetadataPredicate `json:"predicates,omitempty"`
+				Direction  string                         `json:"direction,omitempty"`
+				EdgeTypes  []string                       `json:"edge_types,omitempty"`
+				SeedLimit  int                            `json:"seed_limit,omitempty"`
+				Budget     *budgetInput                   `json:"budget,omitempty"`
 			}
 			if err := json.Unmarshal(args, &in); err != nil {
 				return nil, err
@@ -301,11 +389,11 @@ func toolContext(stateDirProvider func() (string, error)) Tool {
 			if in.Branch == "" {
 				return nil, errors.New("branch is required")
 			}
-			if in.Query != "" && in.Label != "" {
-				return nil, errors.New("query and label are mutually exclusive")
+			if in.Query != "" && (in.Label != "" || len(in.Labels) > 0 || len(in.Predicates) > 0) {
+				return nil, errors.New("query is mutually exclusive with label, labels, and predicates")
 			}
-			if in.Query == "" && in.Label == "" {
-				return nil, errors.New("either query or label must be specified")
+			if in.Query == "" && in.Label == "" && len(in.Labels) == 0 && len(in.Predicates) == 0 {
+				return nil, errors.New("either query, label, labels, or predicates must be specified")
 			}
 
 			dir := contextual.DirectionOut
@@ -324,16 +412,25 @@ func toolContext(stateDirProvider func() (string, error)) Tool {
 			if in.Query != "" {
 				seeds.Query = in.Query
 			} else {
-				seeds.Labels = []string{in.Label}
+				labels := in.Labels
+				if in.Label != "" && len(labels) == 0 {
+					labels = []string{in.Label}
+				}
+				seeds.Labels = labels
+				seeds.Predicates = in.Predicates
 			}
 
 			return withTool(stateDirProvider, func(tool *resolve.ResolveTool) (any, error) {
 				return tool.SPLContext(ctx, resolve.ContextRequest{
-					Selector:  resolve.SnapshotSelector{Branch: in.Branch},
+					Selector: resolve.SnapshotSelector{
+						Branch: in.Branch,
+						Commit: in.Commit,
+					},
 					Seeds:     seeds,
 					Direction: dir,
 					EdgeTypes: in.EdgeTypes,
 					SeedLimit: in.SeedLimit,
+					Budget:    in.Budget.toBudget(),
 				})
 			})
 		},
@@ -363,15 +460,48 @@ func toolDiff(stateDirProvider func() (string, error)) Tool {
 					"type":        "string",
 					"description": "Optional explicit reachable target commit",
 				},
+				"node_ids": map[string]any{
+					"type":        "array",
+					"description": "Optional filter for specific node IDs",
+					"items": map[string]any{
+						"type": "string",
+					},
+				},
+				"edge_ids": map[string]any{
+					"type":        "array",
+					"description": "Optional filter for specific edge IDs",
+					"items": map[string]any{
+						"type": "string",
+					},
+				},
+				"node_title_contains": map[string]any{
+					"type":        "string",
+					"description": "Optional node title substring filter",
+				},
+				"one_hop": map[string]any{
+					"type":        "boolean",
+					"description": "Include one-hop context around diff matches",
+				},
+				"continuation": map[string]any{
+					"type":        "string",
+					"description": "Optional pagination continuation token",
+				},
+				"budget": budgetSchema,
 			},
 			"required": []string{"base_branch", "target_branch"},
 		},
 		Handler: func(ctx context.Context, args json.RawMessage) (any, error) {
 			var in struct {
-				BaseBranch   string  `json:"base_branch"`
-				BaseCommit   *string `json:"base_commit,omitempty"`
-				TargetBranch string  `json:"target_branch"`
-				TargetCommit *string `json:"target_commit,omitempty"`
+				BaseBranch        string       `json:"base_branch"`
+				BaseCommit        *string      `json:"base_commit,omitempty"`
+				TargetBranch      string       `json:"target_branch"`
+				TargetCommit      *string      `json:"target_commit,omitempty"`
+				NodeIDs           []string     `json:"node_ids,omitempty"`
+				EdgeIDs           []string     `json:"edge_ids,omitempty"`
+				NodeTitleContains string       `json:"node_title_contains,omitempty"`
+				OneHop            bool         `json:"one_hop,omitempty"`
+				Continuation      string       `json:"continuation,omitempty"`
+				Budget            *budgetInput `json:"budget,omitempty"`
 			}
 			if err := json.Unmarshal(args, &in); err != nil {
 				return nil, err
@@ -389,6 +519,14 @@ func toolDiff(stateDirProvider func() (string, error)) Tool {
 						Branch: in.TargetBranch,
 						Commit: in.TargetCommit,
 					},
+					Filter: repository.DiffFilter{
+						NodeIDs:         in.NodeIDs,
+						EdgeIDs:         in.EdgeIDs,
+						NodeTitleSubstr: in.NodeTitleContains,
+					},
+					IncludeOneHop:     in.OneHop,
+					ContinuationToken: in.Continuation,
+					Budget:            in.Budget.toBudget(),
 				})
 			})
 		},
@@ -410,24 +548,56 @@ func toolHistory(stateDirProvider func() (string, error)) Tool {
 					"type":        "string",
 					"description": "Entity or node ID",
 				},
+				"entity_id": map[string]any{
+					"type":        "string",
+					"description": "Alias for node: stable entity ID",
+				},
+				"commit": map[string]any{
+					"type":        "string",
+					"description": "Optional starting commit ID for history traversal",
+				},
+				"all_parents": map[string]any{
+					"type":        "boolean",
+					"description": "Traverse all merge parents rather than first-parent only",
+				},
+				"continuation": map[string]any{
+					"type":        "string",
+					"description": "Optional pagination continuation token",
+				},
+				"budget": budgetSchema,
 			},
-			"required": []string{"branch", "node"},
+			"required": []string{"branch"},
 		},
 		Handler: func(ctx context.Context, args json.RawMessage) (any, error) {
 			var in struct {
-				Branch string `json:"branch"`
-				Node   string `json:"node"`
+				Branch       string       `json:"branch"`
+				Node         string       `json:"node,omitempty"`
+				EntityID     string       `json:"entity_id,omitempty"`
+				Commit       *string      `json:"commit,omitempty"`
+				AllParents   bool         `json:"all_parents,omitempty"`
+				Continuation string       `json:"continuation,omitempty"`
+				Budget       *budgetInput `json:"budget,omitempty"`
 			}
 			if err := json.Unmarshal(args, &in); err != nil {
 				return nil, err
 			}
-			if in.Branch == "" || in.Node == "" {
-				return nil, errors.New("branch and node are required")
+			entityID := in.Node
+			if entityID == "" {
+				entityID = in.EntityID
+			}
+			if in.Branch == "" || entityID == "" {
+				return nil, errors.New("branch and node (or entity_id) are required")
 			}
 			return withTool(stateDirProvider, func(tool *resolve.ResolveTool) (any, error) {
 				return tool.SPLHistory(ctx, resolve.HistoryRequest{
-					Selector: resolve.SnapshotSelector{Branch: in.Branch},
-					EntityID: in.Node,
+					Selector: resolve.SnapshotSelector{
+						Branch: in.Branch,
+						Commit: in.Commit,
+					},
+					EntityID:          entityID,
+					AllParents:        in.AllParents,
+					ContinuationToken: in.Continuation,
+					Budget:            in.Budget.toBudget(),
 				})
 			})
 		},

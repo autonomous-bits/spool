@@ -68,12 +68,16 @@ func toolRemoteSet(stateDirProvider func() (string, error)) Tool {
 				if err := repo.SetRemote(cfg); err != nil {
 					return nil, err
 				}
+				repoID := cfg.RepoID
+				if repoID == "" {
+					repoID = cfg.WorkspaceID
+				}
 				return map[string]string{
 					"endpoint":    cfg.Endpoint,
 					"authMode":    string(cfg.AuthMode),
 					"tenantId":    cfg.TenantID,
 					"workspaceId": cfg.WorkspaceID,
-					"repoId":      cfg.RepoID,
+					"repoId":      repoID,
 				}, nil
 			})
 		},
@@ -269,6 +273,10 @@ func toolPush(stateDirProvider func() (string, error)) Tool {
 					"type":        "string",
 					"description": "Optional base commit known to remote",
 				},
+				"reconcile": map[string]any{
+					"type":        "boolean",
+					"description": "On a non-fast-forward rejection, fetch remote history, rebase local changes onto it with the merge engine, and retry the push",
+				},
 			},
 			"required": []string{"branch"},
 		},
@@ -276,6 +284,7 @@ func toolPush(stateDirProvider func() (string, error)) Tool {
 			var in struct {
 				Branch     string `json:"branch"`
 				BaseCommit string `json:"base_commit,omitempty"`
+				Reconcile  bool   `json:"reconcile,omitempty"`
 			}
 			if err := json.Unmarshal(args, &in); err != nil {
 				return nil, err
@@ -302,7 +311,53 @@ func toolPush(stateDirProvider func() (string, error)) Tool {
 				}
 
 				client := remote.NewClient()
-				pack, err := repo.BuildPushPack(ctx, in.Branch, in.BaseCommit)
+
+				attempt := func(base string) (remote.PushResult, repository.PushPack, error) {
+					pack, err := repo.BuildPushPack(ctx, in.Branch, base)
+					if err != nil {
+						return remote.PushResult{}, repository.PushPack{}, err
+					}
+					if len(pack.AssetHashes) > 0 {
+						negRes, negErr := remote.NegotiateAssets(ctx, client, cfg, credential.Value, remote.AssetNegotiationRequest{
+							Hashes: pack.AssetHashes,
+						})
+						if negErr != nil {
+							return remote.PushResult{}, repository.PushPack{}, fmt.Errorf("negotiate assets: %w", negErr)
+						}
+						for _, missingHash := range negRes.Missing {
+							reader, _, _, readErr := repo.ReadAsset(ctx, in.Branch, missingHash)
+							if readErr != nil {
+								return remote.PushResult{}, repository.PushPack{}, fmt.Errorf("open missing asset %s: %w", missingHash, readErr)
+							}
+							uploadErr := remote.UploadAsset(ctx, client, cfg, credential.Value, missingHash, "application/octet-stream", reader)
+							_ = reader.Close()
+							if uploadErr != nil {
+								return remote.PushResult{}, repository.PushPack{}, fmt.Errorf("upload asset %s: %w", missingHash, uploadErr)
+							}
+						}
+					}
+
+					remoteCommits := make([]remote.PushCommitRecord, len(pack.Commits))
+					for i, commit := range pack.Commits {
+						remoteCommits[i] = remote.PushCommitRecord{ID: commit.ID, Commit: commit.Commit}
+					}
+
+					req := remote.PushRequest{
+						Branch:       pack.Branch,
+						BaseCommit:   pack.BaseCommit,
+						TargetCommit: pack.TargetCommit,
+						Commits:      remoteCommits,
+						PackHash:     pack.PackHash,
+						PackFormat:   uint32(pack.PackFormat),
+						PackData:     pack.PackData,
+						AssetHashes:  pack.AssetHashes,
+					}
+					res, err := remote.Push(ctx, client, cfg, credential.Value, req)
+					return res, pack, err
+				}
+
+				reconciled := false
+				result, pack, err := attempt(in.BaseCommit)
 				if err != nil {
 					if errors.Is(err, repository.ErrNothingToPush) {
 						return map[string]any{
@@ -311,48 +366,11 @@ func toolPush(stateDirProvider func() (string, error)) Tool {
 							"message": "nothing to push",
 						}, nil
 					}
-					return nil, err
-				}
-
-				if len(pack.AssetHashes) > 0 {
-					negRes, negErr := remote.NegotiateAssets(ctx, client, cfg, credential.Value, remote.AssetNegotiationRequest{
-						Hashes: pack.AssetHashes,
-					})
-					if negErr != nil {
-						return nil, fmt.Errorf("negotiate assets: %w", negErr)
-					}
-					for _, missingHash := range negRes.Missing {
-						reader, _, _, readErr := repo.ReadAsset(ctx, in.Branch, missingHash)
-						if readErr != nil {
-							return nil, fmt.Errorf("open missing asset %s: %w", missingHash, readErr)
-						}
-						uploadErr := remote.UploadAsset(ctx, client, cfg, credential.Value, missingHash, "application/octet-stream", reader)
-						_ = reader.Close()
-						if uploadErr != nil {
-							return nil, fmt.Errorf("upload asset %s: %w", missingHash, uploadErr)
-						}
-					}
-				}
-
-				remoteCommits := make([]remote.PushCommitRecord, len(pack.Commits))
-				for i, commit := range pack.Commits {
-					remoteCommits[i] = remote.PushCommitRecord{ID: commit.ID, Commit: commit.Commit}
-				}
-
-				req := remote.PushRequest{
-					Branch:       pack.Branch,
-					BaseCommit:   pack.BaseCommit,
-					TargetCommit: pack.TargetCommit,
-					Commits:      remoteCommits,
-					PackHash:     pack.PackHash,
-					PackFormat:   uint32(pack.PackFormat),
-					PackData:     pack.PackData,
-					AssetHashes:  pack.AssetHashes,
-				}
-				result, err := remote.Push(ctx, client, cfg, credential.Value, req)
-				if err != nil {
 					var nffErr *remote.NonFastForwardError
-					if errors.As(err, &nffErr) {
+					if !errors.As(err, &nffErr) {
+						return nil, err
+					}
+					if !in.Reconcile {
 						return map[string]any{
 							"branch":        in.Branch,
 							"pushed":        false,
@@ -362,12 +380,64 @@ func toolPush(stateDirProvider func() (string, error)) Tool {
 							"correlationId": nffErr.CorrelationID,
 						}, nil
 					}
-					return nil, err
+
+					pulled, pullErr := remote.Pull(ctx, client, cfg, credential.Value, in.Branch, "")
+					if pullErr != nil {
+						return nil, fmt.Errorf("fetch remote history: %w", pullErr)
+					}
+					if pulled.UpToDate {
+						return nil, errors.New("remote reported the branch is up to date immediately after rejecting push as non-fast-forward")
+					}
+					reconciliationBranch := repository.ReconciliationBranchName(in.Branch)
+					if _, err := repo.InstallReconciliationPack(ctx, reconciliationBranch, pulled.Packs, pulled.HeadCommit); err != nil {
+						return nil, fmt.Errorf("install remote history: %w", err)
+					}
+					message := fmt.Sprintf("reconcile onto remote head %s", pulled.HeadCommit)
+					reconcileRes, err := repo.ReconcileBranch(in.Branch, reconciliationBranch, "", message)
+					if err != nil {
+						if errors.Is(err, repository.ErrMergeConflicted) {
+							return map[string]any{
+								"branch":               in.Branch,
+								"pushed":               false,
+								"reconciled":           false,
+								"conflicted":           true,
+								"reconciliationBranch": reconciliationBranch,
+								"message":              fmt.Sprintf("reconciliation found conflicts between %s and remote history; resolve them before retrying", in.Branch),
+								"conflicts":            reconcileRes.Preview.Conflicts,
+							}, nil
+						}
+						return nil, fmt.Errorf("reconcile %s: %w", in.Branch, err)
+					}
+
+					result, pack, err = attempt(pulled.HeadCommit)
+					if err != nil {
+						var retryNFF *remote.NonFastForwardError
+						if errors.As(err, &retryNFF) {
+							return map[string]any{
+								"branch":        in.Branch,
+								"pushed":        false,
+								"rejected":      true,
+								"reconciled":    true,
+								"actualHead":    retryNFF.ActualHead,
+								"message":       retryNFF.Guidance,
+								"correlationId": retryNFF.CorrelationID,
+							}, nil
+						}
+						return nil, fmt.Errorf("push post-reconciliation retry: %w", err)
+					}
+					reconciled = true
 				}
+
 				if err := repo.SetRemoteBranchTracking(in.Branch, result.Branch, result.HeadCommit); err != nil {
 					return nil, fmt.Errorf("update remote branch tracking: %w", err)
 				}
-				return result, nil
+				return map[string]any{
+					"branch":      result.Branch,
+					"pushed":      true,
+					"headCommit":  result.HeadCommit,
+					"commitsSent": len(pack.Commits),
+					"reconciled":  reconciled,
+				}, nil
 			})
 		},
 	}
@@ -446,16 +516,16 @@ func toolPull(stateDirProvider func() (string, error)) Tool {
 				}
 
 				installed, err := repo.InstallPullPack(ctx, in.Branch, pulled.Packs, pulled.HeadCommit)
-				if err != nil {
-					return nil, fmt.Errorf("install pulled pack: %w", err)
-				}
-
-				return map[string]any{
+				res := map[string]any{
 					"branch":           installed.Branch,
-					"pulled":           true,
+					"pulled":           installed.CommitsInstalled > 0,
 					"commitsInstalled": installed.CommitsInstalled,
 					"headCommit":       pulled.HeadCommit,
-				}, nil
+				}
+				if err != nil {
+					return res, fmt.Errorf("install pulled pack: %w", err)
+				}
+				return res, nil
 			})
 		},
 	}

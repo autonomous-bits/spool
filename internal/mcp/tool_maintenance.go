@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/autonomous-bits/spool/internal/repository"
@@ -324,15 +325,15 @@ func toolSchemaMigrate(stateDirProvider func() (string, error)) Tool {
 			}
 
 			schemaBytes := []byte(in.SchemaTOML)
-			// Check if schema_toml is a file path
-			if _, err := os.Stat(in.SchemaTOML); err == nil {
-				data, readErr := os.ReadFile(in.SchemaTOML)
-				if readErr != nil {
-					return nil, fmt.Errorf("read schema file: %w", readErr)
+			// Check if schema_toml is an existing file path rather than inline TOML
+			if !strings.Contains(in.SchemaTOML, "\n") && len(in.SchemaTOML) < 1024 {
+				if fi, err := os.Stat(in.SchemaTOML); err == nil && !fi.IsDir() {
+					data, readErr := os.ReadFile(in.SchemaTOML)
+					if readErr != nil {
+						return nil, fmt.Errorf("read schema file: %w", readErr)
+					}
+					schemaBytes = data
 				}
-				schemaBytes = data
-			} else if !errors.Is(err, os.ErrNotExist) {
-				return nil, fmt.Errorf("stat schema file: %w", err)
 			}
 
 			return withRepo(stateDirProvider, func(repo *repository.Repository) (any, error) {

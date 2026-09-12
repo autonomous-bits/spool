@@ -367,6 +367,18 @@ spl workspace migrate --from 1 --to 2
 
 `migrate` acquires an exclusive lock on repository control state, creates a durable backup copy of the state directory (e.g. `.v1.backup-<timestamp>`), canonicalizes commit objects to current graph contracts, remaps references and reflogs, updates configuration format version and tracking metadata, and validates the upgraded repository with `fsck`.
 
+## MCP server (`spl mcp`)
+
+Spool includes a native Model Context Protocol (MCP) server built on the official Go SDK (`github.com/modelcontextprotocol/go-sdk`). It exposes the entire Spool tool and query suite (42 tools) over standard I/O for AI agent pair-programming and tool integration:
+
+```sh
+# Start the MCP server over standard I/O
+spl mcp
+
+# Start with an explicit repository state directory
+spl mcp --state-dir /path/to/.spl
+```
+
 ## CLI command reference
 
 The complete installed surface, including generated help and every flag, is documented in
@@ -417,6 +429,7 @@ The command and flag inventory is:
 | `clone`, `workspace clone` | positional `[url]` or flags (`--endpoint`, `--workspace-id`/`--workspace`, `--tenant-id`/`--tenant`), optional `[directory]`, `--branch`/`-b`, `--auth-mode` |
 | `push` | `--branch` (required), `--base-commit`, `--reconcile` |
 | `pull` | `--branch` (required) |
+| `mcp` | none; runs the official Model Context Protocol server over standard I/O |
 | `version` | none |
 | `completion` | shell subcommand: `bash`, `zsh`, `fish`, or `powershell` |
 | `help [command path]` | optional command path |
