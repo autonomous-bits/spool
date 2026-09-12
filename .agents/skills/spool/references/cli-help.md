@@ -43,6 +43,7 @@ repository discovery.
 | `history`, `branches-containing`, `diff` | Inspect history, branch containment, and snapshot changes |
 | `merge preview/apply/conflicts/resolve/finalize/abort` | Run the merge transaction lifecycle |
 | `fsck`, `gc`, `prune` | Check integrity, maintain objects, and remove ephemeral graph data |
+| `asset add/read` | Store contextual reference documents and stream content-addressed asset blobs |
 | `workspace init/attach/migrate`, `migrate` | Provision central detached state, bind repository manifests, and upgrade format |
 | `remote set/show/remove/branch` | Configure a non-secret Rack remote, check version compatibility, and manage remote branches |
 | `push`, `pull` | Exchange commits with the configured Rack remote over the native push/pull protocol |
@@ -247,6 +248,43 @@ branches-containing
 its corresponding branch. It supports `--node-id` and `--edge-id` (repeatable filters),
 `--node-title-contains`, `--one-hop`, `--continuation`, `--max-rows`, `--max-response-bytes`, and
 `--timeout`.
+
+## Contextual reference assets
+
+```sh
+spl asset add --branch main --file docs/architecture.md
+spl asset add --branch main --file diagram.svg --title "System topology" --id asset-topology
+spl asset read --node asset-topology --branch main > diagram.svg
+spl asset read --locator spool://assets/<blake3-hash> > artifact.bin
+spl asset read <blake3-hash> > artifact.bin
+```
+
+`asset add` requires `--branch` and `--file`. It writes the input into local
+`.spl/assets/loose` content-addressable storage, computes a BLAKE3-256 hash and MIME type, and
+stages an `Asset` node. The node includes `assetUri`, `byteSize`, `mimeType`, and, when available,
+`originalFilename`; the default node ID is `asset-<first-16-hash-characters>`. `--title` and
+`--id` override the derived title and node ID.
+
+```text
+asset add
+  --branch <name>  branch on which to stage the asset node (required)
+  --file <path>    reference document to ingest (required)
+  --title <text>   descriptive Asset node title
+  --id <id>        explicit Asset node ID
+```
+
+`asset read` accepts exactly one positional locator/node ID, or `--locator`/`--node`. A locator
+may be `spool://assets/<64-lowercase-hex-hash>` or a raw BLAKE3 hash. `--branch` selects the
+branch when resolving a node ID and otherwise defaults to the active branch. The command streams
+raw bytes to stdout rather than emitting JSON. If the blob is absent locally and a Rack remote is
+configured, it is fetched and cached on demand.
+
+```text
+asset read [locator-or-node-id]
+  --locator <uri-or-hash>  canonical asset URI or raw BLAKE3 hash
+  --node <id>              Asset graph node ID
+  --branch <name>          branch for node resolution
+```
 
 ## Merges
 
