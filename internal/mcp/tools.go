@@ -1,46 +1,87 @@
 package mcp
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/autonomous-bits/spool/internal/repository"
 	"github.com/autonomous-bits/spool/internal/resolve"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// withRepo opens the repository at stateDir, runs fn, and guarantees repo.Close() is called.
-func withRepo[T any](stateDirProvider func() (string, error), fn func(*repository.Repository) (T, error)) (T, error) {
+// ToolHandler handles execution of a Spool tool.
+type ToolHandler func(ctx context.Context, args json.RawMessage) (any, error)
+
+// Tool represents a Spool tool specification and its execution handler.
+type Tool struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	InputSchema map[string]any `json:"inputSchema"`
+	Handler     ToolHandler    `json:"-"`
+}
+
+func withRepo[T any](stateDirProvider func() (string, error), fn func(repo *repository.Repository) (T, error)) (T, error) {
+	var zero T
 	stateDir, err := stateDirProvider()
 	if err != nil {
-		var zero T
-		return zero, fmt.Errorf("locate state directory: %w", err)
+		return zero, fmt.Errorf("resolve repository state directory: %w", err)
 	}
 	repo, err := repository.OpenRepository(stateDir)
 	if err != nil {
-		var zero T
-		return zero, err
+		return zero, fmt.Errorf("open repository: %w", err)
 	}
 	defer repo.Close()
 	return fn(repo)
 }
 
-// withTool opens the repository at stateDir, instantiates ResolveTool, and closes repo when done.
-func withTool[T any](stateDirProvider func() (string, error), fn func(*resolve.ResolveTool) (T, error)) (T, error) {
-	return withRepo(stateDirProvider, func(repo *repository.Repository) (T, error) {
-		tool := resolve.NewResolveTool(repo)
-		return fn(tool)
-	})
+func withTool[T any](stateDirProvider func() (string, error), fn func(tool *resolve.ResolveTool) (T, error)) (T, error) {
+	var zero T
+	stateDir, err := stateDirProvider()
+	if err != nil {
+		return zero, fmt.Errorf("resolve repository state directory: %w", err)
+	}
+	repo, err := repository.OpenRepository(stateDir)
+	if err != nil {
+		return zero, fmt.Errorf("open repository: %w", err)
+	}
+	defer repo.Close()
+	return fn(resolve.NewResolveTool(repo))
 }
 
-// NewSpoolTools returns the suite of Spool MCP tools bound to the stateDirProvider.
-// Each tool is defined in its own individual source file within this package.
-func NewSpoolTools(stateDirProvider func() (string, error)) []Tool {
-	return []Tool{
-		// Staging & Working Changes
+func wrapHandler(fn ToolHandler) mcp.ToolHandler {
+	return func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		var args json.RawMessage
+		if req.Params != nil && len(req.Params.Arguments) > 0 {
+			args = req.Params.Arguments
+		}
+		res, err := fn(ctx, args)
+		if err != nil {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}},
+				IsError: true,
+			}, nil
+		}
+		data, err := json.Marshal(res)
+		if err != nil {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}},
+				IsError: true,
+			}, nil
+		}
+		return &mcp.CallToolResult{
+			Content:           []mcp.Content{&mcp.TextContent{Text: string(data)}},
+			StructuredContent: json.RawMessage(data),
+		}, nil
+	}
+}
+
+// RegisterAllTools registers all 42 Spool tools onto the given official MCP server.
+func RegisterAllTools(s *mcp.Server, stateDirProvider func() (string, error)) {
+	tools := []Tool{
 		toolStatus(stateDirProvider),
 		toolAdd(stateDirProvider),
 		toolCommit(stateDirProvider),
-
-		// Graph Retrieval & Queries
 		toolResolve(stateDirProvider),
 		toolSearch(stateDirProvider),
 		toolSearchExpand(stateDirProvider),
@@ -50,44 +91,28 @@ func NewSpoolTools(stateDirProvider func() (string, error)) []Tool {
 		toolHistory(stateDirProvider),
 		toolBranchesContaining(stateDirProvider),
 		toolGraph(stateDirProvider),
-
-		// Branch Management
 		toolBranchList(stateDirProvider),
 		toolBranchCreate(stateDirProvider),
 		toolBranchDelete(stateDirProvider),
 		toolSwitch(stateDirProvider),
-
-		// Merge Operations
 		toolMergePreview(stateDirProvider),
 		toolMergeApply(stateDirProvider),
 		toolMergeConflicts(stateDirProvider),
 		toolMergeResolve(stateDirProvider),
 		toolMergeAbort(stateDirProvider),
 		toolMergeFinalize(stateDirProvider),
-
-		// Advanced VCS
 		toolCherryPick(stateDirProvider),
-
-		// Schema & Validation
 		toolSchemaMigrate(stateDirProvider),
 		toolValidate(stateDirProvider),
-
-		// Maintenance & Storage
 		toolInit(stateDirProvider),
 		toolPrune(stateDirProvider),
 		toolFsck(stateDirProvider),
 		toolGC(stateDirProvider),
 		toolMigrate(stateDirProvider),
-
-		// Reference Assets
 		toolAssetAdd(stateDirProvider),
 		toolAssetRead(stateDirProvider),
-
-		// Workspaces
 		toolWorkspaceInit(),
 		toolWorkspaceAttach(),
-
-		// Remotes & Networking
 		toolRemoteSet(stateDirProvider),
 		toolRemoteShow(stateDirProvider),
 		toolRemoteRemove(stateDirProvider),
@@ -95,8 +120,14 @@ func NewSpoolTools(stateDirProvider func() (string, error)) []Tool {
 		toolPush(stateDirProvider),
 		toolPull(stateDirProvider),
 		toolClone(),
-
-		// Metadata
 		toolVersion(),
+	}
+
+	for _, t := range tools {
+		s.AddTool(&mcp.Tool{
+			Name:        t.Name,
+			Description: t.Description,
+			InputSchema: t.InputSchema,
+		}, wrapHandler(t.Handler))
 	}
 }
