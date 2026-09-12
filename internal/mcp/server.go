@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 
+	"github.com/autonomous-bits/spool/assets"
 	"github.com/autonomous-bits/spool/internal/version"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -10,8 +11,17 @@ import (
 // NewSpoolServer creates and configures an MCP server with all Spool tools registered.
 func NewSpoolServer(stateDirProvider func() (string, error)) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{
-		Name:    "spool",
-		Version: version.Version,
+		Name:        "spool",
+		Title:       "Spool",
+		Description: "A graph-based version control system for autonomous agent workflows",
+		Version:     version.Version,
+		Icons: []mcp.Icon{
+			{
+				Source:   assets.IconPNGDataURI,
+				MIMEType: "image/png",
+				Sizes:    []string{"192x192"},
+			},
+		},
 	}, nil)
 
 	RegisterAllTools(server, stateDirProvider)
