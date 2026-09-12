@@ -15,6 +15,7 @@ import (
 	"unicode"
 
 	"github.com/autonomous-bits/spool/internal/remote"
+	"github.com/autonomous-bits/spool/internal/repository/asset"
 	"github.com/fxamacker/cbor/v2"
 	"github.com/gofrs/flock"
 	"github.com/pelletier/go-toml/v2"
@@ -93,6 +94,7 @@ func NewSeedRepositoryWithMergeState(stateDir string) (*Repository, error) {
 	repo := newRepository()
 	repo.mergeStateDir = stateDir
 	repo.objectStore = newLooseObjectStore(stateDir, &repo.objects)
+	repo.assetStore = asset.NewStore(stateDir)
 	repo.stateLock = flock.New(filepath.Join(stateDir, "repository.lock"))
 	locked, err := repo.stateLock.TryLock()
 	if err != nil {
@@ -179,6 +181,7 @@ func openControlRepository(stateDir string, recorder *PerformanceRecorder) (*Rep
 	repo.performanceRecorder = recorder
 	repo.mergeStateDir = stateDir
 	repo.objectStore = newLooseObjectStore(stateDir, &repo.objects)
+	repo.assetStore = asset.NewStore(stateDir)
 	repo.stateLock = flock.New(filepath.Join(stateDir, "repository.lock"))
 	locked, err := repo.stateLock.TryLock()
 	if err != nil {

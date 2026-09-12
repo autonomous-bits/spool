@@ -414,3 +414,73 @@ func hasFsckInformation(result FsckResult, code string, object ObjectID) bool {
 	}
 	return false
 }
+
+func TestFsckReportsMissingAndCorruptAssetBlobs(t *testing.T) {
+	stateDir := t.TempDir()
+	repo, err := InitializeRepository(stateDir)
+	if err != nil {
+		t.Fatalf("InitializeRepository: %v", err)
+	}
+
+	docPath := filepath.Join(t.TempDir(), "doc.md")
+	if err := os.WriteFile(docPath, []byte("asset data content"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	res, err := repo.StageAsset(nil, AssetAddRequest{
+		Branch:   "main",
+		FilePath: docPath,
+	})
+	if err != nil {
+		t.Fatalf("StageAsset: %v", err)
+	}
+
+	// Commit asset
+	_, err = repo.CommitStagedMutationBatch(CommitStagedMutationRequest{
+		Branch:  "main",
+		Author:  "Tester",
+		Message: "add asset",
+	})
+	if err != nil {
+		t.Fatalf("CommitStagedMutationBatch: %v", err)
+	}
+
+	// Fsck should be valid now
+	r1, err := repo.Fsck()
+	if err != nil || !r1.Valid {
+		t.Fatalf("Fsck expected valid, got err=%v, res=%#v", err, r1)
+	}
+
+	// Corrupt the asset blob
+	blobPath, err := repo.assetStore.BlobPath(res.Hash)
+	if err != nil {
+		t.Fatalf("BlobPath: %v", err)
+	}
+	if err := os.WriteFile(blobPath, []byte("tampered content"), 0o644); err != nil {
+		t.Fatalf("corrupt blob: %v", err)
+	}
+
+	if err := repo.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	r2, err := FsckRepository(stateDir)
+	if !errors.Is(err, ErrFsckCorrupt) {
+		t.Fatalf("expected ErrFsckCorrupt, got %v", err)
+	}
+	if !hasFsckDiagnostic(r2, "corrupt-asset-blob") {
+		t.Fatalf("expected corrupt-asset-blob diagnostic, got %#v", r2.Diagnostics)
+	}
+
+	// Remove blob entirely
+	_ = os.Remove(blobPath)
+
+	r3, err := FsckRepository(stateDir)
+	if !errors.Is(err, ErrFsckCorrupt) {
+		t.Fatalf("expected ErrFsckCorrupt, got %v", err)
+	}
+	if !hasFsckDiagnostic(r3, "missing-asset-blob") {
+		t.Fatalf("expected missing-asset-blob diagnostic, got %#v", r3.Diagnostics)
+	}
+}
+

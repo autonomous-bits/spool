@@ -12,6 +12,7 @@ import (
 
 	"github.com/autonomous-bits/spool/graphcontract"
 	"github.com/autonomous-bits/spool/internal/remote"
+	"github.com/autonomous-bits/spool/internal/repository/asset"
 	"github.com/autonomous-bits/spool/internal/repository/branch"
 	"github.com/fxamacker/cbor/v2"
 	"github.com/gofrs/flock"
@@ -79,7 +80,15 @@ var (
 	ErrMergeRepositoryLocked = errors.New("merge repository is locked by another process")
 	// ErrMergeRepositoryClosed reports use after Close.
 	ErrMergeRepositoryClosed = errors.New("merge repository is closed")
-	canonicalCBOR, _         = cbor.CanonicalEncOptions().EncMode()
+	// ErrAssetNotFound reports an asset blob missing from storage.
+	ErrAssetNotFound = asset.ErrAssetNotFound
+	// ErrInvalidAssetURI reports a malformed or unsupported asset locator URI.
+	ErrInvalidAssetURI = asset.ErrInvalidAssetURI
+	// ErrInvalidAssetHash reports an invalid BLAKE3 asset hash.
+	ErrInvalidAssetHash = asset.ErrInvalidAssetHash
+	// ErrCorruptAsset reports an asset blob that does not match its expected checksum.
+	ErrCorruptAsset = asset.ErrCorruptAsset
+	canonicalCBOR, _ = cbor.CanonicalEncOptions().EncMode()
 )
 
 // Branch types re-exported from the branch subpackage.
@@ -92,6 +101,14 @@ type (
 	BranchDeleteResult  = branch.DeleteResult
 	BranchSwitchRequest = branch.SwitchRequest
 	BranchSwitchResult  = branch.SwitchResult
+)
+
+// Asset types re-exported from the asset subpackage.
+type (
+	AssetStore      = asset.Store
+	AssetAddRequest = asset.AddRequest
+	AssetAddResult  = asset.AddResult
+	AssetMetadata   = asset.Metadata
 )
 
 // ObjectID is the content-derived identifier of a durable repository object.
@@ -164,6 +181,7 @@ type Repository struct {
 	historicalProjectionLRU         []ObjectID
 	objects                         map[ObjectID][]byte
 	objectStore                     *looseObjectStore
+	assetStore                      *asset.Store
 	objectBatch                     *objectWriteBatch
 	projectionDB                    *sql.DB
 	stagedMutations                 map[string]StagedMutationSet
@@ -218,6 +236,7 @@ func newRepository() *Repository {
 		now:                   time.Now,
 	}
 	repo.objectStore = newLooseObjectStore("", &repo.objects)
+	repo.assetStore = asset.NewStore("")
 	return repo
 }
 

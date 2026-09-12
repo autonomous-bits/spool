@@ -2,9 +2,11 @@ package repository
 
 import (
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -12,8 +14,10 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/autonomous-bits/spool/internal/repository/asset"
 	"github.com/fxamacker/cbor/v2"
 	"github.com/pelletier/go-toml/v2"
+	"lukechampine.com/blake3"
 )
 
 // ErrFsckCorrupt reports that Fsck found one or more integrity violations.
@@ -60,6 +64,7 @@ func FsckRepository(stateDir string) (FsckResult, error) {
 	checker.checkStagedState()
 	checker.checkMergeTransactions()
 	checker.checkLooseObjects()
+	checker.checkAssets()
 	return checker.result()
 }
 
@@ -83,6 +88,7 @@ func (r *Repository) Fsck() (FsckResult, error) {
 		checker.checkCommit(checker.branches[branch], branch, make(map[ObjectID]bool))
 	}
 	checker.checkStagedState()
+	checker.checkAssets()
 	return checker.result()
 }
 
@@ -1081,3 +1087,132 @@ func sortedFsckStaged(staged map[string]StagedMutationSet) []string {
 	sort.Strings(names)
 	return names
 }
+
+// checkAssets verifies that all asset references across reachable node snapshots and staged
+// mutations exist locally and match their BLAKE3 content checksums, and that files in loose asset storage
+// have valid hexadecimal paths and uncorrupted content.
+func (c *fsckChecker) checkAssets() {
+	if c.stateDir == "" {
+		return
+	}
+
+	assetStore := asset.NewStore(c.stateDir)
+	looseDir := assetStore.LooseDir()
+
+	// 1. Collect all referenced asset hashes from reachable snapshots and staged mutations
+	referencedAssets := make(map[string]struct{})
+
+	// Check snapshots loaded into c.nodes
+	for _, nodeMap := range c.nodes {
+		for _, node := range nodeMap {
+			if val, ok := node.Properties["assetUri"]; ok && val.Kind == PropertyString {
+				if hash, err := asset.ParseLocator(val.String); err == nil {
+					referencedAssets[hash] = struct{}{}
+				} else {
+					c.issue("invalid-asset-uri", "", "", "", fmt.Sprintf("node %s has invalid asset locator %q: %v", node.ID, val.String, err))
+				}
+			}
+		}
+	}
+
+	// Check staged mutations
+	for branch, stagedSet := range c.staged {
+		for _, op := range stagedSet.Operations {
+			if op.Entity == "node" && op.Action != "delete" {
+				if val, ok := op.Properties["assetUri"]; ok && val.Kind == PropertyString {
+					if hash, err := asset.ParseLocator(val.String); err == nil {
+						referencedAssets[hash] = struct{}{}
+					} else {
+						c.issue("invalid-asset-uri", filepath.ToSlash(filepath.Join("staged", branch+".json")), branch, "", fmt.Sprintf("staged node %s has invalid asset locator %q: %v", op.ID, val.String, err))
+					}
+				}
+			}
+		}
+	}
+
+	// 2. Verify all referenced assets exist in local storage and verify their checksums
+	for hash := range referencedAssets {
+		has, err := assetStore.HasBlob(hash)
+		if err != nil || !has {
+			c.issue("missing-asset-blob", "", "", "", fmt.Sprintf("referenced asset blob %s is missing from storage", hash))
+			continue
+		}
+		reader, _, err := assetStore.ReadBlob(hash)
+		if err != nil {
+			c.issue("corrupt-asset-blob", "", "", "", fmt.Sprintf("cannot read referenced asset blob %s: %v", hash, err))
+			continue
+		}
+		hasher := blake3.New(32, nil)
+		if _, copyErr := io.Copy(hasher, reader); copyErr != nil {
+			_ = reader.Close()
+			c.issue("corrupt-asset-blob", "", "", "", fmt.Sprintf("cannot stream referenced asset blob %s: %v", hash, copyErr))
+			continue
+		}
+		_ = reader.Close()
+		computed := hex.EncodeToString(hasher.Sum(nil))
+		if computed != hash {
+			c.issue("corrupt-asset-blob", "", "", "", fmt.Sprintf("referenced asset blob %s checksum mismatch: got %s", hash, computed))
+		}
+	}
+
+	// 3. Scan loose assets directory if it exists
+	if _, err := os.Stat(looseDir); os.IsNotExist(err) {
+		return
+	}
+
+	err := filepath.WalkDir(looseDir, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			c.issue("read-asset", "assets/loose", "", "", "cannot walk loose assets")
+			return nil
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		relative, relErr := filepath.Rel(looseDir, path)
+		if relErr != nil {
+			return nil
+		}
+		relSlash := filepath.ToSlash(relative)
+		displayPath := filepath.ToSlash(filepath.Join("assets", "loose", relSlash))
+
+		// Check sharded or flat format
+		parts := strings.Split(relSlash, "/")
+		var hash string
+		if len(parts) == 2 && len(parts[0]) == 2 && len(parts[1]) == asset.HashHexLength-2 {
+			hash = parts[0] + parts[1]
+		} else if len(parts) == 1 && len(parts[0]) == asset.HashHexLength {
+			hash = parts[0]
+		} else {
+			c.issue("invalid-asset-path", displayPath, "", "", "loose asset path does not match a valid BLAKE3 hash")
+			return nil
+		}
+
+		if !asset.IsValidHash(hash) {
+			c.issue("invalid-asset-hash", displayPath, "", "", "loose asset path contains non-hexadecimal characters")
+			return nil
+		}
+
+		// Verify loose file checksum
+		f, openErr := os.Open(path)
+		if openErr != nil {
+			c.issue("read-asset", displayPath, "", "", "cannot open loose asset file")
+			return nil
+		}
+		defer func() { _ = f.Close() }()
+
+		hasher := blake3.New(32, nil)
+		if _, copyErr := io.Copy(hasher, f); copyErr != nil {
+			c.issue("corrupt-asset-blob", displayPath, "", "", "cannot read loose asset payload")
+			return nil
+		}
+		sum := hex.EncodeToString(hasher.Sum(nil))
+		if sum != hash {
+			c.issue("corrupt-asset-blob", displayPath, "", "", fmt.Sprintf("loose asset payload hash mismatch: got %s, want %s", sum, hash))
+		}
+		return nil
+	})
+	if err != nil && !os.IsNotExist(err) {
+		c.issue("read-asset", "assets/loose", "", "", fmt.Sprintf("failed to scan loose assets: %v", err))
+	}
+}
+

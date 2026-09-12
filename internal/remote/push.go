@@ -37,6 +37,7 @@ type PushRequest struct {
 	PackHash     string
 	PackFormat   uint32
 	PackData     []byte
+	AssetHashes  []string
 }
 
 // PushResult is Rack's success response to a push: the branch that advanced

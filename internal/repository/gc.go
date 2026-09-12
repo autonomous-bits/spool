@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/autonomous-bits/spool/internal/repository/asset"
 	"github.com/klauspost/compress/zstd"
 )
 
@@ -105,6 +106,16 @@ func (r *Repository) GC(options GCOptions) (GCResult, error) {
 	}
 
 	now := r.now()
+	reachableAssets, err := r.collectReachableAssetsLocked(scan)
+	if err != nil {
+		return result, gcCorruption(err)
+	}
+	staleAssets, retainedAssets, err := r.scanStaleAssetBlobsLocked(reachableAssets, grace, now)
+	if err != nil {
+		return result, gcCorruption(err)
+	}
+	result.RetainedUnreachableObjects += retainedAssets
+
 	duplicateLoose, staleLoose := make([]looseObjectFile, 0), make([]looseObjectFile, 0)
 	for _, file := range loose {
 		if _, reachable := scan.reachable[file.id]; reachable {
@@ -128,9 +139,12 @@ func (r *Repository) GC(options GCOptions) (GCResult, error) {
 	for _, file := range staleLoose {
 		plannedReclaimed += uint64(file.size)
 	}
+	for _, assetFile := range staleAssets {
+		plannedReclaimed += uint64(assetFile.size)
+	}
 	if options.DryRun {
 		result.PackedObjects = uint64(len(replacement))
-		result.PrunedLooseObjects = uint64(len(staleLoose))
+		result.PrunedLooseObjects = uint64(len(staleLoose) + len(staleAssets))
 		result.ReclaimedBytes = plannedReclaimed
 		if options.Repack {
 			result.RetiredPacks = uint64(len(manifest.Packs))
@@ -171,6 +185,12 @@ func (r *Repository) GC(options GCOptions) (GCResult, error) {
 	if len(staleLoose) != 0 {
 		count, bytes, err := removeLooseObjectFiles(staleLoose)
 		result.PrunedLooseObjects = count
+		removedBytes += bytes
+		cleanupErr = errors.Join(cleanupErr, err)
+	}
+	if len(staleAssets) != 0 {
+		count, bytes, err := removeStaleAssetFiles(staleAssets)
+		result.PrunedLooseObjects += count
 		removedBytes += bytes
 		cleanupErr = errors.Join(cleanupErr, err)
 	}
@@ -558,3 +578,179 @@ func sortedDirectories(directories map[string]struct{}) []string {
 	sort.Strings(result)
 	return result
 }
+
+type staleAssetFile struct {
+	hash    string
+	path    string
+	size    int64
+	modTime time.Time
+}
+
+func (r *Repository) collectReachableAssetsLocked(scan *retentionScanner) (map[string]struct{}, error) {
+	reachableAssets := make(map[string]struct{})
+
+	// 1. Traverse all reachable snapshots identified by scanRetentionLocked
+	for id := range scan.reachable {
+		snapshot, isSnapshot := r.snapshots[id]
+		if !isSnapshot {
+			continue
+		}
+		if err := r.ensureSnapshotProjectionLocked(id); err != nil {
+			return nil, fmt.Errorf("materialize snapshot %s for asset GC: %w", id, err)
+		}
+		if nodes, ok := r.projections[snapshot.NodeRoot]; ok {
+			for _, h := range asset.ExtractAssetHashes(nodes) {
+				reachableAssets[h] = struct{}{}
+			}
+		}
+	}
+
+	// 2. Traverse all staged mutations across all local branches
+	for _, staged := range r.stagedMutations {
+		for _, op := range staged.Operations {
+			if op.Entity == "node" && op.Action != "delete" {
+				if val, ok := op.Properties["assetUri"]; ok && val.Kind == PropertyString {
+					if h, err := asset.ParseLocator(val.String); err == nil {
+						reachableAssets[h] = struct{}{}
+					}
+				}
+			}
+		}
+	}
+
+	// 3. Traverse merge transactions
+	for _, tx := range r.mergeTransactions {
+		if tx.Resolved && tx.StagedSnapshot != "" {
+			if err := r.ensureSnapshotProjectionLocked(tx.StagedSnapshot); err == nil {
+				if snapshot, ok := r.snapshots[tx.StagedSnapshot]; ok {
+					if nodes, ok := r.projections[snapshot.NodeRoot]; ok {
+						for _, h := range asset.ExtractAssetHashes(nodes) {
+							reachableAssets[h] = struct{}{}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return reachableAssets, nil
+}
+
+func (r *Repository) scanStaleAssetBlobsLocked(
+	reachableAssets map[string]struct{}, grace time.Duration, now time.Time,
+) ([]staleAssetFile, uint64, error) {
+	if r.assetStore == nil {
+		return nil, 0, nil
+	}
+	looseDir := r.assetStore.LooseDir()
+	if looseDir == "" {
+		return nil, 0, nil
+	}
+	if _, err := os.Stat(looseDir); os.IsNotExist(err) {
+		return nil, 0, nil
+	}
+
+	cutoff := now.Add(-grace)
+	var stale []staleAssetFile
+	var retainedUnreachable uint64
+
+	err := filepath.WalkDir(looseDir, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+		// Ignore temporary ingestion files (.tmp-asset-*)
+		base := entry.Name()
+		if strings.HasPrefix(base, ".") {
+			return nil
+		}
+
+		rel, err := filepath.Rel(looseDir, path)
+		if err != nil {
+			return err
+		}
+		relSlash := filepath.ToSlash(rel)
+		parts := strings.Split(relSlash, "/")
+
+		var hash string
+		if len(parts) == 2 && len(parts[0]) == 2 && len(parts[1]) == asset.HashHexLength-2 {
+			hash = parts[0] + parts[1]
+		} else if len(parts) == 1 && len(parts[0]) == asset.HashHexLength {
+			hash = parts[0]
+		} else {
+			// Skip unknown layout or non-hash file
+			return nil
+		}
+
+		if !asset.IsValidHash(hash) {
+			return nil
+		}
+
+		if _, reachable := reachableAssets[hash]; reachable {
+			return nil
+		}
+
+		if info.ModTime().Before(cutoff) {
+			stale = append(stale, staleAssetFile{
+				hash:    hash,
+				path:    path,
+				size:    info.Size(),
+				modTime: info.ModTime(),
+			})
+		} else {
+			retainedUnreachable++
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, 0, fmt.Errorf("scan loose asset directory: %w", err)
+	}
+
+	sort.Slice(stale, func(i, j int) bool { return stale[i].hash < stale[j].hash })
+	return stale, retainedUnreachable, nil
+}
+
+func removeStaleAssetFiles(files []staleAssetFile) (uint64, uint64, error) {
+	var count, reclaimed uint64
+	directories := make(map[string]struct{})
+	var result error
+
+	for _, file := range files {
+		info, err := os.Lstat(file.path)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			result = errors.Join(result, fmt.Errorf("inspect stale asset %s before removal: %w", file.hash, err))
+			continue
+		}
+		if !info.Mode().IsRegular() {
+			result = errors.Join(result, fmt.Errorf("stale asset %s changed to a non-regular file", file.hash))
+			continue
+		}
+		if err := os.Remove(file.path); err != nil {
+			result = errors.Join(result, fmt.Errorf("remove stale asset %s: %w", file.hash, err))
+			continue
+		}
+		count++
+		reclaimed += uint64(info.Size())
+		directories[filepath.Dir(file.path)] = struct{}{}
+	}
+
+	for _, directory := range sortedDirectories(directories) {
+		if err := syncDirectory(directory); err != nil {
+			result = errors.Join(result, fmt.Errorf("sync asset directory: %w", err))
+		}
+	}
+	return count, reclaimed, result
+}
+

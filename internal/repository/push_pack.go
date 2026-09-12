@@ -5,9 +5,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/autonomous-bits/spool/graphcontract"
+	"github.com/autonomous-bits/spool/internal/repository/asset"
 	"github.com/fxamacker/cbor/v2"
 	"lukechampine.com/blake3"
 )
@@ -126,6 +128,9 @@ type PushPack struct {
 	PackHash string
 	// PackData is the canonical CBOR-encoded pack frame to upload verbatim.
 	PackData []byte
+	// AssetHashes contains the sorted unique list of candidate asset hashes referenced
+	// by nodes across the pushed commits.
+	AssetHashes []string
 }
 
 // pushChainEntry is one recomputed commit along the branch's local
@@ -234,6 +239,24 @@ func (r *Repository) BuildPushPack(ctx context.Context, branch, baseCommit strin
 	}
 	target := toPush[len(toPush)-1].wireID
 
+	seenAssets := make(map[string]struct{})
+	var assetHashes []string
+	for _, entry := range toPush {
+		if localCommit, ok := r.commits[entry.localID]; ok {
+			if s, ok := r.snapshots[localCommit.Snapshot]; ok {
+				if nodes, ok := r.projections[s.NodeRoot]; ok {
+					for _, h := range asset.ExtractAssetHashes(nodes) {
+						if _, seen := seenAssets[h]; !seen {
+							seenAssets[h] = struct{}{}
+							assetHashes = append(assetHashes, h)
+						}
+					}
+				}
+			}
+		}
+	}
+	sort.Strings(assetHashes)
+
 	packFormat := PushPackFormatV2
 	if !isLinearPush(baseCommit, toPush) {
 		packFormat = PushPackFormatV3
@@ -263,6 +286,7 @@ func (r *Repository) BuildPushPack(ctx context.Context, branch, baseCommit strin
 		PackFormat:   packFormat,
 		PackHash:     pushContentID(packData),
 		PackData:     packData,
+		AssetHashes:  assetHashes,
 	}, nil
 }
 

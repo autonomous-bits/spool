@@ -66,6 +66,26 @@ func NewPushCommand(repoProvider func() (*repository.Repository, error)) *cobra.
 				if err != nil {
 					return remote.PushResult{}, repository.PushPack{}, false, err
 				}
+				if len(pack.AssetHashes) > 0 {
+					negRes, err := remote.NegotiateAssets(ctx, client, cfg, credential, remote.AssetNegotiationRequest{
+						Hashes: pack.AssetHashes,
+					})
+					if err != nil {
+						return remote.PushResult{}, repository.PushPack{}, true, fmt.Errorf("negotiate assets with rack: %w", err)
+					}
+					for _, missingHash := range negRes.Missing {
+						reader, _, _, err := repo.ReadAsset(ctx, branchName, missingHash)
+						if err != nil {
+							return remote.PushResult{}, repository.PushPack{}, false, fmt.Errorf("open missing asset %s for upload: %w", missingHash, err)
+						}
+						err = remote.UploadAsset(ctx, client, cfg, credential, missingHash, "application/octet-stream", reader)
+						_ = reader.Close()
+						if err != nil {
+							return remote.PushResult{}, repository.PushPack{}, true, fmt.Errorf("upload asset %s to rack: %w", missingHash, err)
+						}
+					}
+				}
+
 				req := remote.PushRequest{
 					Branch:       pack.Branch,
 					BaseCommit:   pack.BaseCommit,
@@ -74,6 +94,7 @@ func NewPushCommand(repoProvider func() (*repository.Repository, error)) *cobra.
 					PackHash:     pack.PackHash,
 					PackFormat:   uint32(pack.PackFormat),
 					PackData:     pack.PackData,
+					AssetHashes:  pack.AssetHashes,
 				}
 				result, err = remote.Push(ctx, client, cfg, credential, req)
 				return result, pack, true, err

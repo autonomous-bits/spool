@@ -113,6 +113,7 @@ func newRootCommandWithLifecycle(
 	root.AddCommand(commands.NewCloneCommand())
 	root.AddCommand(commands.NewPushCommand(repoProvider))
 	root.AddCommand(commands.NewPullCommand(repoProvider))
+	root.AddCommand(commands.NewAssetCommand(repoProvider))
 	root.AddCommand(commands.NewVersionCommand())
 	return root
 }
