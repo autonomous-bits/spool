@@ -112,11 +112,17 @@ func FormatLocator(hash string) string {
 // the normalized lowercase BLAKE3 hash.
 func ParseLocator(locator string) (string, error) {
 	trimmed := strings.TrimSpace(locator)
-	if strings.HasPrefix(trimmed, URIPrefix) {
+	hasPrefix := strings.HasPrefix(trimmed, URIPrefix)
+	if hasPrefix {
 		trimmed = strings.TrimPrefix(trimmed, URIPrefix)
+	} else if strings.Contains(trimmed, "://") {
+		return "", fmt.Errorf("%w: %q (unsupported URI scheme)", ErrInvalidAssetURI, locator)
 	}
 	trimmed = strings.ToLower(trimmed)
 	if !IsValidHash(trimmed) {
+		if hasPrefix {
+			return "", fmt.Errorf("%w: %q (invalid hash in URI)", ErrInvalidAssetURI, locator)
+		}
 		return "", fmt.Errorf("%w: %q", ErrInvalidAssetHash, locator)
 	}
 	return trimmed, nil
@@ -129,7 +135,7 @@ func IsValidHash(hash string) bool {
 	}
 	for i := 0; i < len(hash); i++ {
 		c := hash[i]
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 			return false
 		}
 	}
@@ -240,11 +246,10 @@ func (s *Store) WriteBlob(r io.Reader) (hash string, size int64, err error) {
 
 	// Check if already durably present (deduplication)
 	if _, err := os.Stat(destPath); err == nil {
-		// Already exists; remove temp file and return
 		return hash, size, nil
 	}
 
-	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
+	if err := ensureDurableDirectory(filepath.Dir(destPath)); err != nil {
 		return "", 0, fmt.Errorf("create asset shard directory: %w", err)
 	}
 
@@ -397,6 +402,39 @@ func replaceDurableFile(tempPath, path string) error {
 		return err
 	}
 	return syncDirectory(filepath.Dir(path))
+}
+
+func ensureDurableDirectory(path string) error {
+	var missing []string
+	for current := path; ; current = filepath.Dir(current) {
+		info, err := os.Stat(current)
+		if err == nil {
+			if !info.IsDir() {
+				return fmt.Errorf("durable directory %q is not a directory", current)
+			}
+			break
+		}
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("inspect durable directory: %w", err)
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return fmt.Errorf("find existing durable directory parent for %q", path)
+		}
+		missing = append(missing, current)
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		return err
+	}
+	for index := len(missing) - 1; index >= 0; index-- {
+		if err := syncDirectory(filepath.Dir(missing[index])); err != nil {
+			return err
+		}
+	}
+	return syncDirectory(path)
 }
 
 func syncDirectory(path string) (err error) {

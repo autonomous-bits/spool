@@ -1168,6 +1168,10 @@ func (c *fsckChecker) checkAssets() {
 		if entry.IsDir() {
 			return nil
 		}
+		// Ignore temporary ingestion debris (.tmp-asset-*)
+		if strings.HasPrefix(entry.Name(), ".") {
+			return nil
+		}
 		relative, relErr := filepath.Rel(looseDir, path)
 		if relErr != nil {
 			return nil
@@ -1215,4 +1219,3 @@ func (c *fsckChecker) checkAssets() {
 		c.issue("read-asset", "assets/loose", "", "", fmt.Sprintf("failed to scan loose assets: %v", err))
 	}
 }
-

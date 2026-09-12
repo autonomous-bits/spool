@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -427,7 +428,7 @@ func TestFsckReportsMissingAndCorruptAssetBlobs(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	res, err := repo.StageAsset(nil, AssetAddRequest{
+	res, err := repo.StageAsset(context.Background(), AssetAddRequest{
 		Branch:   "main",
 		FilePath: docPath,
 	})
@@ -483,4 +484,3 @@ func TestFsckReportsMissingAndCorruptAssetBlobs(t *testing.T) {
 		t.Fatalf("expected missing-asset-blob diagnostic, got %#v", r3.Diagnostics)
 	}
 }
-

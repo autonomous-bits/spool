@@ -234,6 +234,8 @@ func TestRepositoryReadAssetRemoteFallback(t *testing.T) {
 	}))
 	defer ts.Close()
 
+	t.Setenv("SPOOL_RACK_TOKEN", "test-bearer-token")
+
 	if err := repo.SetRemote(RemoteConfig{
 		Endpoint: ts.URL,
 		RepoID:   "my-repo",
@@ -274,6 +276,79 @@ func TestRepositoryReadAssetRemoteFallback(t *testing.T) {
 	hasBlobNow, err := repo.assetStore.HasBlob(hash)
 	if err != nil || !hasBlobNow {
 		t.Fatalf("expected asset to be cached locally after fallback read")
+	}
+}
+
+func TestReadAssetNodePrecedenceOverBareHash(t *testing.T) {
+	stateDir := t.TempDir()
+	repo, err := InitializeRepository(stateDir)
+	if err != nil {
+		t.Fatalf("InitializeRepository: %v", err)
+	}
+	defer func() { _ = repo.Close() }()
+
+	ctx := context.Background()
+
+	// 1. Create and store a raw asset blob A
+	blobA := []byte("blob A content")
+	hashA, _, err := repo.assetStore.WriteBlob(bytes.NewReader(blobA))
+	if err != nil {
+		t.Fatalf("WriteBlob A: %v", err)
+	}
+
+	// 2. Create another asset blob B
+	blobB := []byte("blob B content (different from A)")
+	hashB, _, err := repo.assetStore.WriteBlob(bytes.NewReader(blobB))
+	if err != nil {
+		t.Fatalf("WriteBlob B: %v", err)
+	}
+
+	// 3. Stage a node whose ID is EXACTLY hashA (a 64-char hex string),
+	// but whose assetUri points to blob B.
+	stageRes, err := repo.StageAsset(ctx, AssetAddRequest{
+		Branch: "main",
+		ID:     hashA, // Node ID is formatted as a 64-hex string
+		Reader: bytes.NewReader(blobB),
+		Title:  "Node With 64-Hex ID",
+	})
+	if err != nil {
+		t.Fatalf("StageAsset: %v", err)
+	}
+	if stageRes.Hash != hashB {
+		t.Fatalf("expected staged asset hash %s, got %s", hashB, stageRes.Hash)
+	}
+
+	// 4. Calling ReadAsset with hashA should resolve the NODE first (yielding blob B),
+	// not the bare hash A!
+	reader, size, meta, err := repo.ReadAsset(ctx, "main", hashA)
+	if err != nil {
+		t.Fatalf("ReadAsset: %v", err)
+	}
+	defer func() { _ = reader.Close() }()
+
+	content, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	if !bytes.Equal(content, blobB) {
+		t.Errorf("expected node ID precedence yielding blob B %q, got %q", blobB, content)
+	}
+	if size != int64(len(blobB)) {
+		t.Errorf("expected size %d, got %d", len(blobB), size)
+	}
+	if meta.Hash != hashB {
+		t.Errorf("expected meta hash %s, got %s", hashB, meta.Hash)
+	}
+
+	// 5. Explicit URI "spool://assets/" + hashA should still resolve blob A directly
+	uriReader, _, _, err := repo.ReadAsset(ctx, "main", "spool://assets/"+hashA)
+	if err != nil {
+		t.Fatalf("ReadAsset by URI: %v", err)
+	}
+	defer func() { _ = uriReader.Close() }()
+	uriContent, _ := io.ReadAll(uriReader)
+	if !bytes.Equal(uriContent, blobA) {
+		t.Errorf("expected URI locator yielding blob A %q, got %q", blobA, uriContent)
 	}
 }
 
@@ -398,5 +473,3 @@ func TestGCAssetRetentionAndPruning(t *testing.T) {
 		t.Errorf("Old asset file %s still exists: %v", oldPath, err)
 	}
 }
-
-

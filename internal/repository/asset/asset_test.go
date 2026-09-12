@@ -150,15 +150,26 @@ func TestParseAndFormatLocator(t *testing.T) {
 		t.Errorf("ParseLocator(upper) = (%s, %v), want (%s, nil)", parsedUpper, err, validHash)
 	}
 
-	// Invalid cases
-	invalidCases := []string{
-		"",
+	// Invalid URI cases
+	invalidURICases := []string{
 		"spool://assets/",
 		"spool://assets/short",
 		"spool://assets/not-hex-characters-here-0123456789abcdef0123456789abcdef0123456789",
 		"http://example.com/file",
 	}
-	for _, tc := range invalidCases {
+	for _, tc := range invalidURICases {
+		if _, err := ParseLocator(tc); !errors.Is(err, ErrInvalidAssetURI) {
+			t.Errorf("ParseLocator(%q) error = %v, want ErrInvalidAssetURI", tc, err)
+		}
+	}
+
+	// Invalid bare hash cases
+	invalidHashCases := []string{
+		"",
+		"short",
+		"not-hex-characters-here-0123456789abcdef0123456789abcdef0123456789",
+	}
+	for _, tc := range invalidHashCases {
 		if _, err := ParseLocator(tc); !errors.Is(err, ErrInvalidAssetHash) {
 			t.Errorf("ParseLocator(%q) error = %v, want ErrInvalidAssetHash", tc, err)
 		}
@@ -264,7 +275,7 @@ func TestLargeBlobStreaming(t *testing.T) {
 	}
 
 	hasher := blake3.New(32, nil)
-	hasher.Write(data)
+	_, _ = hasher.Write(data)
 	expectedHash := hex.EncodeToString(hasher.Sum(nil))
 
 	hash, size, err := store.WriteBlob(bytes.NewReader(data))

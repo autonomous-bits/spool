@@ -753,4 +753,3 @@ func removeStaleAssetFiles(files []staleAssetFile) (uint64, uint64, error) {
 	}
 	return count, reclaimed, result
 }
-

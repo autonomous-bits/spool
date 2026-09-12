@@ -87,7 +87,7 @@ var (
 	// ErrInvalidAssetHash reports an invalid BLAKE3 asset hash.
 	ErrInvalidAssetHash = asset.ErrInvalidAssetHash
 	// ErrCorruptAsset reports an asset blob that does not match its expected checksum.
-	ErrCorruptAsset = asset.ErrCorruptAsset
+	ErrCorruptAsset  = asset.ErrCorruptAsset
 	canonicalCBOR, _ = cbor.CanonicalEncOptions().EncMode()
 )
 

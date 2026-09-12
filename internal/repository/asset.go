@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/autonomous-bits/spool/internal/remote"
 	"github.com/autonomous-bits/spool/internal/repository/asset"
@@ -258,6 +259,37 @@ func (r *Repository) ReadAsset(ctx context.Context, branch, locatorOrNode string
 		}
 	}
 
+	// 1. If it's a canonical URI scheme (spool://assets/{hash}), parse locator directly
+	if strings.HasPrefix(strings.TrimSpace(locatorOrNode), asset.URIPrefix) {
+		cleanHash, err := asset.ParseLocator(locatorOrNode)
+		if err != nil {
+			return nil, 0, AssetMetadata{}, err
+		}
+		reader, size, err := r.openOrFetchAsset(ctx, cleanHash)
+		if err != nil {
+			return nil, 0, AssetMetadata{}, err
+		}
+		return reader, size, AssetMetadata{
+			AssetURI: asset.FormatLocator(cleanHash),
+			Hash:     cleanHash,
+			ByteSize: size,
+		}, nil
+	}
+
+	// 2. Check if locatorOrNode is an existing node ID on the branch
+	hash, meta, nodeErr := r.ResolveAssetNode(branch, locatorOrNode)
+	if nodeErr == nil {
+		reader, size, err := r.openOrFetchAsset(ctx, hash)
+		if err != nil {
+			return nil, 0, AssetMetadata{}, err
+		}
+		if meta.ByteSize == 0 {
+			meta.ByteSize = size
+		}
+		return reader, size, meta, nil
+	}
+
+	// 3. Fall back to parsing as a bare 64-hex BLAKE3 hash
 	cleanHash, parseErr := asset.ParseLocator(locatorOrNode)
 	if parseErr == nil {
 		reader, size, err := r.openOrFetchAsset(ctx, cleanHash)
@@ -271,20 +303,8 @@ func (r *Repository) ReadAsset(ctx context.Context, branch, locatorOrNode string
 		}, nil
 	}
 
-	// Try resolving as a node ID on branch
-	hash, meta, err := r.ResolveAssetNode(branch, locatorOrNode)
-	if err != nil {
-		return nil, 0, AssetMetadata{}, fmt.Errorf("resolve locator or node %q: %w", locatorOrNode, err)
-	}
-
-	reader, size, err := r.openOrFetchAsset(ctx, hash)
-	if err != nil {
-		return nil, 0, AssetMetadata{}, err
-	}
-	if meta.ByteSize == 0 {
-		meta.ByteSize = size
-	}
-	return reader, size, meta, nil
+	// Neither an existing node ID nor a valid hash locator
+	return nil, 0, AssetMetadata{}, fmt.Errorf("resolve locator or node %q: %w", locatorOrNode, nodeErr)
 }
 
 func (r *Repository) openOrFetchAsset(ctx context.Context, hash string) (io.ReadCloser, int64, error) {
@@ -303,10 +323,13 @@ func (r *Repository) openOrFetchAsset(ctx context.Context, hash string) (io.Read
 	}
 
 	// Resolve credential (from Keychain or Env)
-	credential, _ := remote.ResolveCredential(cfg.WorkspaceOrRepoID(), cfg.AuthMode, remote.ResolveOptions{
+	credential, credErr := remote.ResolveCredential(cfg.WorkspaceOrRepoID(), cfg.AuthMode, remote.ResolveOptions{
 		Keychain: remote.KeyringStore{},
 		Getenv:   os.Getenv,
 	})
+	if credErr != nil {
+		return nil, 0, fmt.Errorf("resolve remote credential for asset fetch: %w", credErr)
+	}
 
 	body, _, _, streamErr := remote.StreamAsset(ctx, nil, cfg, credential.Value, hash)
 	if streamErr != nil {
@@ -326,4 +349,3 @@ func (r *Repository) openOrFetchAsset(ctx context.Context, hash string) (io.Read
 
 	return r.OpenAsset(hash)
 }
-

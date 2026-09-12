@@ -72,7 +72,7 @@ func TestRemote_AssetNegotiateUploadStream(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StreamAsset: %v", err)
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 	data, _ := io.ReadAll(rc)
 	if !bytes.Equal(data, payload1) {
 		t.Fatalf("streamed data mismatch: got %q, want %q", string(data), string(payload1))
