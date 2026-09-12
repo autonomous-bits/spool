@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/autonomous-bits/spool/internal/repository/asset"
 	"github.com/gofrs/flock"
 )
 
@@ -32,6 +33,7 @@ func InitializeClonedRepository(stateDir string, cfg RemoteConfig, branch string
 	repo := newRepository()
 	repo.mergeStateDir = stateDir
 	repo.objectStore = newLooseObjectStore(stateDir, &repo.objects)
+	repo.assetStore = asset.NewStore(stateDir)
 	repo.stateLock = flock.New(filepath.Join(stateDir, "repository.lock"))
 	locked, err := repo.stateLock.TryLock()
 	if err != nil {
