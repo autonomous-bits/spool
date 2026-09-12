@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -31,6 +32,31 @@ func TestSpoolMCPServer(t *testing.T) {
 		t.Fatalf("client.Connect failed: %v", err)
 	}
 	defer func() { _ = session.Close() }()
+
+	// Verify server metadata and icons
+	initResult := session.InitializeResult()
+	if initResult == nil || initResult.ServerInfo == nil {
+		t.Fatalf("expected InitializeResult with ServerInfo")
+	}
+	if initResult.ServerInfo.Name != "spool" {
+		t.Errorf("expected server name 'spool', got %q", initResult.ServerInfo.Name)
+	}
+	if initResult.ServerInfo.Title != "Spool" {
+		t.Errorf("expected server title 'Spool', got %q", initResult.ServerInfo.Title)
+	}
+	if len(initResult.ServerInfo.Icons) != 1 {
+		t.Fatalf("expected 1 icon, got %d", len(initResult.ServerInfo.Icons))
+	}
+	icon := initResult.ServerInfo.Icons[0]
+	if icon.MIMEType != "image/png" {
+		t.Errorf("expected MIMEType 'image/png', got %q", icon.MIMEType)
+	}
+	if !strings.HasPrefix(icon.Source, "data:image/png;base64,") {
+		t.Errorf("expected icon source to have data URI prefix, got %q", icon.Source)
+	}
+	if len(icon.Sizes) == 0 || icon.Sizes[0] != "192x192" {
+		t.Errorf("expected icon sizes [192x192], got %v", icon.Sizes)
+	}
 
 	// 1. Verify tools list
 	toolsList, err := session.ListTools(ctx, nil)
