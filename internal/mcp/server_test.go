@@ -30,7 +30,7 @@ func TestSpoolMCPServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("client.Connect failed: %v", err)
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	// 1. Verify tools list
 	toolsList, err := session.ListTools(ctx, nil)
