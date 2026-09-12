@@ -8,6 +8,14 @@ generated from commits since the preceding `v*` tag. Commits prefixed with `docs
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-09-12
+
+### Added
+
+- Official Spool icon embedded in the native Model Context Protocol (MCP) server implementation
+  metadata (`serverInfo.icons`), enabling MCP clients and AI environments (such as Claude Desktop,
+  Cursor, and VS Code) to display Spool branding.
+
 ## [1.9.0] - 2026-09-12
 
 ### Added
