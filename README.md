@@ -369,7 +369,54 @@ spl workspace migrate --from 1 --to 2
 
 ## MCP server (`spl mcp`)
 
-Spool includes a native Model Context Protocol (MCP) server built on the official Go SDK (`github.com/modelcontextprotocol/go-sdk`). It exposes the entire Spool tool and query suite (42 tools) over standard I/O for AI agent pair-programming and tool integration:
+Spool includes a native Model Context Protocol (MCP) server built on the official Go SDK ([`github.com/modelcontextprotocol/go-sdk`](https://github.com/modelcontextprotocol/go-sdk)). It exposes 100% of Spool commands as **42 structured, typed MCP tools (`spl_*`)** over standard I/O for AI agent pair-programming and tool integration.
+
+### Default vs Fallback Behavior for AI Agents
+
+- **Default (MCP Tools)**: For AI agents and pair-programming assistants, the MCP server is the **primary, recommended interface**. It provides structured input schemas, zero-disk in-memory mutation staging (`spl_add` accepts mutations as a JSON array without writing batch files to disk), server-side concurrency serialization, typed conflict resolution, and rich warning preservation.
+- **Fallback (CLI)**: Use the `spl` command-line application directly when running in environments without MCP integration, in terminal scripts, or in CI/CD pipelines.
+
+### Configuration Examples
+
+To connect an AI assistant or MCP client to Spool, add the server to your client configuration:
+
+#### Claude Desktop / Claude Code (`claude_desktop_config.json`)
+```json
+{
+  "mcpServers": {
+    "spool": {
+      "command": "spl",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+To explicitly pin a repository state directory:
+```json
+{
+  "mcpServers": {
+    "spool": {
+      "command": "spl",
+      "args": ["mcp", "--state-dir", "/path/to/project/.spl"]
+    }
+  }
+}
+```
+
+#### VS Code / Cursor (`mcp.json`)
+```json
+{
+  "mcpServers": {
+    "spool": {
+      "command": "spl",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+### Manual Execution
 
 ```sh
 # Start the MCP server over standard I/O

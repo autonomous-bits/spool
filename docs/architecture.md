@@ -2,16 +2,22 @@
 
 ## Overview
 
-Spool is a local, content-addressed version-control system for graph data. Its
-only runtime interface is the `spl` command-line application. Commands produce
-JSON on standard output for machine integration; errors are structured JSON
-logs on standard error.
+Spool is a local, content-addressed version-control system for graph data. It
+provides two runtime interfaces: the `spl` command-line application (for shell
+scripts, manual usage, and CI) and a native Model Context Protocol (MCP) server
+running via `spl mcp` using the official Go SDK (as the primary interface for AI
+agent pair-programming and tool integration). Commands produce JSON on standard
+output for machine integration; errors are structured JSON logs on standard
+error.
 
 ```mermaid
 flowchart LR
+    Agent[AI Agent / MCP Host] --> MCP[spl mcp official go-sdk]
     Client[CLI client or automation] --> CLI[spl Cobra commands]
-    CLI --> Repository[repository.Repository]
-    CLI --> Tool[resolve.ResolveTool]
+    MCP --> Repository[repository.Repository]
+    MCP --> Tool[resolve.ResolveTool]
+    CLI --> Repository
+    CLI --> Tool
     Tool --> Contextual[internal/contextual]
     Tool --> Repository
     Contextual --> Repository
@@ -24,21 +30,23 @@ flowchart LR
     Repository --> Lock["state-dir/repository.lock"]
 ```
 
-The CLI resolves a state directory before running a command. An explicit
-`--state-dir` takes priority, followed by `SPOOL_DIR`, then a validated
-ancestor `.spl/config.toml` workspace manifest. A manifest resolves its
-immutable workspace ID through the detached-state catalog; malformed manifests
-and unknown IDs are errors. Without a manifest, the CLI discovers the nearest
-parent `.spl` directory; `spl init` creates local state at the directory
-containing `go.work`, or at the current directory when none exists. Subsequent
-commands open the resolved repository, acquire its process lock, perform the
-operation, persist any state change, and release the lock at process exit.
+The runtime resolves a state directory before running a command or handling an
+MCP tool request. An explicit `--state-dir` takes priority, followed by
+`SPOOL_DIR`, then a validated ancestor `.spl/config.toml` workspace manifest. A
+manifest resolves its immutable workspace ID through the detached-state
+catalog; malformed manifests and unknown IDs are errors. Without a manifest,
+the system discovers the nearest parent `.spl` directory; `spl init` creates
+local state at the directory containing `go.work`, or at the current directory
+when none exists. Subsequent commands open the resolved repository, acquire its
+process lock, perform the operation, persist any state change, and release the
+lock at process exit.
 
 ## Components
 
 | Component | Responsibility |
 | --- | --- |
 | `cmd/spl` | Cobra command definitions, flag and argument validation, repository discovery, JSON output, and error logging. |
+| `internal/mcp` | Native Model Context Protocol server exposing 42 typed tools over stdio using `github.com/modelcontextprotocol/go-sdk`, with serialized repository locking, in-memory mutation staging, and error envelopes. |
 | `internal/resolve` | Context-aware, policy-constrained adapter for read-only graph queries. It applies query budgets, pins a branch snapshot, and exposes public retrieval results with provenance and completion metadata. |
 | `internal/contextual` | Go use cases that combine branch-head lexical or typed-filter evidence with bounded, deterministic expansion of a pinned graph snapshot. |
 | `internal/repository` | Authoritative graph storage, commits, branches, staging, query implementations, durable state, locking, and recovery. |

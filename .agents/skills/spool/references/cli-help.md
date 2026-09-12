@@ -458,6 +458,20 @@ guidance message rather than attempting a merge — reconciling diverged history
 this command. Installing a branch with no local history in common with Rack (a from-scratch
 bootstrap) is not yet supported. Credentials are resolved the same way as `push`.
 
+## MCP Server
+
+```sh
+# Start MCP server over standard I/O
+spl mcp
+
+# Start with explicit repository state directory
+spl mcp --state-dir /path/to/.spl
+```
+
+`mcp` starts a Model Context Protocol server communicating over standard input/output (`stdio`) using the official SDK (`github.com/modelcontextprotocol/go-sdk`). It exposes 100% of Spool commands as 42 structured, typed MCP tools (`spl_*`), enabling AI pair-programming assistants and autonomous coding agents to inspect, branch, mutate, and merge graph data directly.
+
+For agents operating in MCP-equipped environments, calling the native MCP tools is the default and recommended interaction pattern, while the CLI serves as a fallback for terminal scripts and non-MCP contexts.
+
 ## Version
 
 ```sh

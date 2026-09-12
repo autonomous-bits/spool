@@ -115,31 +115,46 @@ Create a purely business-oriented `spl add` batch JSON file:
 
 Stage and commit the batch:
 
-```sh
-spl add --branch main --batch product-batch.json
-spl status --branch main
-spl commit --branch main --author "Product Manager <pm@example.com>" --message "Record deferred billing address requirement"
-```
+- **MCP (Default)**: Call `spl_add` directly with the mutations array (no temporary file on disk needed), inspect status with `spl_status`, and commit with `spl_commit`:
+  ```json
+  // spl_add: {"branch": "main", "mutations": [ ... ]}
+  // spl_status: {"branch": "main"}
+  // spl_commit: {"branch": "main", "author": "Product Manager <pm@example.com>", "message": "Record deferred billing address requirement"}
+  ```
+- **CLI (Fallback)**:
+  ```sh
+  spl add --branch main --batch product-batch.json
+  spl status --branch main
+  spl commit --branch main --author "Product Manager <pm@example.com>" --message "Record deferred billing address requirement"
+  ```
 
 ---
 
 ## 5. Querying Product Knowledge
 
-Discover and traverse product knowledge using `spl`:
+Discover and traverse product knowledge using Spool MCP tools by default, falling back to CLI commands:
 
-```sh
-# Search for product requirements related to billing
-spl search --branch main --query "billing address"
+- **MCP (Default)**:
+  - `spl_search(branch: "main", query: "billing address")`
+  - `spl_filter(branch: "main", labels: ["Problem"])`
+  - `spl_filter(branch: "main", labels: ["Persona"])`
+  - `spl_resolve(branch: "main", node: "req-deferred-billing-address")`
+  - `spl_context(branch: "main", query: "billing address", direction: "both", max_depth: 2)`
 
-# Filter for all open product problems
-spl filter --branch main --label Problem
+- **CLI (Fallback)**:
+  ```sh
+  # Search for product requirements related to billing
+  spl search --branch main --query "billing address"
 
-# Filter for all product personas
-spl filter --branch main --label Persona
+  # Filter for all open product problems
+  spl filter --branch main --label Problem
 
-# Resolve a specific requirement by its exact ID
-spl resolve --branch main --node req-deferred-billing-address
+  # Filter for all product personas
+  spl filter --branch main --label Persona
 
-# Inspect context around a product domain concept
-spl context --branch main --query "billing address" --direction both --max-depth 2
-```
+  # Resolve a specific requirement by its exact ID
+  spl resolve --branch main --node req-deferred-billing-address
+
+  # Inspect context around a product domain concept
+  spl context --branch main --query "billing address" --direction both --max-depth 2
+  ```
