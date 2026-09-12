@@ -60,6 +60,17 @@ func toolPull(stateDirProvider func() (string, error)) Tool {
 
 				pulled, err := remote.Pull(ctx, remote.NewClient(), cfg, credential.Value, in.Branch, local.TargetCommit)
 				if err != nil {
+					var diverged *remote.DivergedError
+					if errors.As(err, &diverged) {
+						return map[string]any{
+							"branch":        in.Branch,
+							"pulled":        false,
+							"diverged":      true,
+							"actualHead":    diverged.ActualHead,
+							"message":       diverged.Guidance,
+							"correlationId": diverged.CorrelationID,
+						}, nil
+					}
 					return nil, err
 				}
 				if pulled.UpToDate {

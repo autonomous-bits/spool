@@ -11,7 +11,7 @@ import (
 func toolFilter(stateDirProvider func() (string, error)) Tool {
 	return Tool{
 		Name:        "spl_filter",
-		Description: "Filter nodes in a branch head snapshot by labels and optional property predicates.",
+		Description: "Filter nodes in a branch head snapshot by label.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

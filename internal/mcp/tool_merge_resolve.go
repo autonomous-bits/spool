@@ -29,9 +29,21 @@ func toolMergeResolve(stateDirProvider func() (string, error)) Tool {
 				},
 				"selections": map[string]any{
 					"type":        "array",
-					"description": "Array of merge resolution selection objects (entity: 'node'|'edge', id, resolution: 'source'|'target'|'delete'|'custom')",
+					"description": "Array of merge resolution selections specifying conflictId and choice ('source' or 'target')",
 					"items": map[string]any{
 						"type": "object",
+						"properties": map[string]any{
+							"conflictId": map[string]any{
+								"type":        "string",
+								"description": "Conflict identifier from spl_merge_conflicts",
+							},
+							"choice": map[string]any{
+								"type":        "string",
+								"enum":        []string{"source", "target"},
+								"description": "Resolution choice: 'source' or 'target'",
+							},
+						},
+						"required": []string{"conflictId", "choice"},
 					},
 				},
 				"overrides": map[string]any{

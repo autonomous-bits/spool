@@ -70,6 +70,9 @@ func toolClone() Tool {
 				TenantID:    in.TenantID,
 				AuthMode:    repository.RemoteAuthMode(in.AuthMode),
 			}
+			if err := cfg.Validate(); err != nil {
+				return nil, err
+			}
 			targetDir := in.Directory
 			if targetDir == "" {
 				targetDir = in.WorkspaceID
@@ -77,6 +80,21 @@ func toolClone() Tool {
 			absDestDir, err := filepath.Abs(targetDir)
 			if err != nil {
 				return nil, err
+			}
+
+			if info, statErr := os.Stat(absDestDir); statErr == nil {
+				if !info.IsDir() {
+					return nil, fmt.Errorf("destination path %q already exists and is not a directory", absDestDir)
+				}
+				entries, readErr := os.ReadDir(absDestDir)
+				if readErr != nil {
+					return nil, fmt.Errorf("inspect destination directory %q: %w", absDestDir, readErr)
+				}
+				if len(entries) > 0 {
+					return nil, fmt.Errorf("destination path %q already exists and is not an empty directory", absDestDir)
+				}
+			} else if !os.IsNotExist(statErr) {
+				return nil, fmt.Errorf("inspect destination path %q: %w", absDestDir, statErr)
 			}
 
 			credential, _ := remote.ResolveCredential(cfg.WorkspaceOrRepoID(), cfg.AuthMode, remote.ResolveOptions{

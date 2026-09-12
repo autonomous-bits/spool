@@ -22,14 +22,6 @@ func toolMergeFinalize(stateDirProvider func() (string, error)) Tool {
 					"type":        "string",
 					"description": "Transaction ID to finalize",
 				},
-				"author": map[string]any{
-					"type":        "string",
-					"description": "Optional author name",
-				},
-				"message": map[string]any{
-					"type":        "string",
-					"description": "Optional commit message",
-				},
 			},
 			"required": []string{"target", "transaction_id"},
 		},
