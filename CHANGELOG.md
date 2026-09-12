@@ -8,6 +8,21 @@ generated from commits since the preceding `v*` tag. Commits prefixed with `docs
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-09-12
+
+### Added
+
+- Native Model Context Protocol (MCP) stdio server via `spl mcp`, powered by the official
+  `modelcontextprotocol/go-sdk`. It exposes Spool graph version control capabilities directly to
+  AI agents and MCP clients (such as Claude Desktop, Cursor, and VS Code) across 42 tools:
+  - Atomic graph mutations in-memory via `spl_add` without requiring disk writes.
+  - Full workspace and repository lifecycle (`spl_init`, `spl_status`, `spl_diff`, `spl_commit`).
+  - Branch, checkout, merge, and cherry-pick operations.
+  - Graph querying and exploration (`spl_filter`, `spl_search`, `spl_resolve`, `spl_context`).
+  - Remote synchronization (`spl_pull`, `spl_push`, `spl_remote_add`).
+  - Asset management (`spl_asset_put`, `spl_asset_get`, `spl_asset_list`, `spl_asset_delete`).
+  - Verification and maintenance (`spl_fsck`, `spl_prune`, `spl_migrate`).
+
 ## [1.8.0] - 2026-09-12
 
 ### Added
