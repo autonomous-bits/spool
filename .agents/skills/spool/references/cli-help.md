@@ -13,13 +13,18 @@ spl merge --help
 
 ## Repository selection
 
-Every command accepts the persistent global flag:
+Solution context is selected only from an explicit `.spool/context.toml` in the
+code repo (see [docs/context-bind.md](../../docs/context-bind.md)). Remotes are
+never inferred from directory names, monorepo layout, `go.work`, leftover `.spl`
+state, git `origin`, or Rack config.
+
+Every command also accepts the persistent global flag for **local** `.spl` graph-VCS:
 
 ```text
 --state-dir <path>  override the resolved Spool repository state directory
 ```
 
-Before Cobra dispatches a command, the state directory is selected in this order:
+Before Cobra dispatches a local-graph command, that state directory is selected in this order:
 
 1. `--state-dir <path>` (or `--state-dir=<path>`)
 2. `SPOOL_DIR`
@@ -28,7 +33,9 @@ Before Cobra dispatches a command, the state directory is selected in this order
 
 An empty `--state-dir` is invalid. A malformed workspace manifest or unknown
 workspace ID is an error; checkouts without a workspace manifest use local
-repository discovery.
+repository discovery. When `.spool/context.toml` is present, `init`, `workspace`,
+`remote`, `push`, `pull`, and `clone` refuse: those paths are not the durable
+solution-context store.
 
 ## Command index
 
@@ -40,13 +47,14 @@ repository discovery.
 | `schema migrate`, `validate` | Stage schema migrations and validate snapshots |
 | `resolve`, `graph` | Read a node or export a complete branch snapshot |
 | `search`, `filter`, `search-expand`, `context` | Query the branch-head projection |
+| `context init` | Bind this code repo to a solution context git remote and seed layout/`CodeRepository` |
 | `history`, `branches-containing`, `diff` | Inspect history, branch containment, and snapshot changes |
 | `merge preview/apply/conflicts/resolve/finalize/abort` | Run the merge transaction lifecycle |
 | `fsck`, `gc`, `prune` | Check integrity, maintain objects, and remove ephemeral graph data |
 | `asset add/read` | Store contextual reference documents and stream content-addressed asset blobs |
-| `workspace init/attach/migrate`, `migrate` | Provision central detached state, bind repository manifests, and upgrade format |
-| `remote set/show/remove/branch` | Configure a non-secret Rack remote, check version compatibility, and manage remote branches |
-| `push`, `pull` | Exchange commits with the configured Rack remote over the native push/pull protocol |
+| `workspace init/attach/migrate`, `migrate` | Provision central detached state, bind repository manifests, and upgrade format (not the context SoT; refused when bound) |
+| `remote set/show/remove/branch` | Configure a non-secret Rack remote (not the context SoT; refused when bound) |
+| `push`, `pull`, `clone` | Exchange commits with Rack (not the context SoT; refused when bound) |
 | `version` | Print Spool release version and build information as JSON |
 | `completion`, `help` | Generate shell completion and inspect command help |
 
@@ -88,6 +96,29 @@ commit
   --branch <name>   branch whose staged mutations to commit (required)
   --author <text>   commit author
   --message <text>  commit message
+```
+
+## Context bind
+
+```sh
+spl context init --remote https://github.com/org/solution-context.git \
+  --solution-id my-solution \
+  --repository-id github.com/org/svc-api
+```
+
+`context init` writes `.spool/context.toml` in the current code repo, creates
+`schema.toml` / `nodes/` / `edges/` / `assets/` on an empty context remote with
+stock git, and seeds a `CodeRepository` node from this bind. Repeat in each code
+repo that shares the remote. Sibling directories are not scanned. MCP writes
+still use a short-lived branch + PR. See [docs/context-bind.md](../../docs/context-bind.md).
+
+```text
+context init
+  --remote <url>             context git remote URL (required; stock git credentials)
+  --solution-id <id>         solution identifier (defaults to the current directory name)
+  --protected-branch <name>  protected integration branch (default main)
+  --repository-id <id>       code-repo namespace for node IDs
+  --author <text>            git author for the layout commit
 ```
 
 ## Branches and schemas

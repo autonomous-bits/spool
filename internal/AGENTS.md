@@ -14,6 +14,9 @@ component boundaries, data model, and persistence design.
   not projection persistence.
 - `workspace/` owns central detached-workspace provisioning, checkout manifest
   validation/discovery, and immutable workspace-ID lookup; it is independent of
-  any single repository's `.spl` state.
+  any single repository's `.spl` state and is not the N-code-repos context bind.
+- `ctxgit/` owns explicit `.spool/context.toml` bind resolution, stock-git
+  context checkout, human-diffable layout, short-lived branch + PR writes, and
+  local projection rebuild. Git is the durable solution-context source of truth.
 
 Keep repository lifecycle behavior under `repository/`. Add other query use cases in appropriately named packages.
