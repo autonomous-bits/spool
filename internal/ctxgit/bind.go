@@ -85,9 +85,14 @@ func LoadBindFile(path string) (Bind, error) {
 	return bind, nil
 }
 
-// FindBind walks start and its ancestors for an explicit .spool/context.toml.
-// Finding no file is ErrUnbound; a present but invalid file is ErrInvalidBind.
-// This is bind resolution, not remote auto-discovery.
+// FindBind resolves the explicit .spool/context.toml for the code repository
+// containing start. It never infers a context remote from directory names,
+// monorepo layout, go.work, .spl leftovers, git origin URLs, or Rack config.
+//
+// Lookup walks start and its ancestors looking only for BindRelPath. If a git
+// work tree root (a directory containing .git) is reached without a bind file,
+// search stops — nested checkouts do not inherit a parent bind. Finding no
+// file is ErrUnbound; a present but invalid file is ErrInvalidBind.
 func FindBind(start string) (codeRoot string, bindPath string, bind Bind, err error) {
 	directory, err := filepath.Abs(start)
 	if err != nil {
@@ -109,12 +114,23 @@ func FindBind(start string) (codeRoot string, bindPath string, bind Bind, err er
 		if statErr != nil && !os.IsNotExist(statErr) {
 			return "", "", Bind{}, statErr
 		}
+		if isGitWorkTreeRoot(directory) {
+			return "", "", Bind{}, UnboundError()
+		}
 		parent := filepath.Dir(directory)
 		if parent == directory {
 			return "", "", Bind{}, UnboundError()
 		}
 		directory = parent
 	}
+}
+
+func isGitWorkTreeRoot(directory string) bool {
+	info, err := os.Stat(filepath.Join(directory, ".git"))
+	if err != nil {
+		return false
+	}
+	return info.IsDir() || info.Mode().IsRegular()
 }
 
 // WriteBindFile writes an explicit bind file, creating .spool if needed.
