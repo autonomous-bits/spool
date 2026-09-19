@@ -7,9 +7,36 @@ import (
 	"testing"
 )
 
+func repoRoot(t *testing.T) string {
+	t.Helper()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := wd
+	for i := 0; i < 6; i++ {
+		if _, err := os.Stat(filepath.Join(dir, "go.work")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	t.Fatalf("repo root (go.work) not found from %s", wd)
+	return ""
+}
+
 func TestDefaultModulesHaveNoRackDependency(t *testing.T) {
 	t.Parallel()
-	files := []string{"go.mod", "go.sum", filepath.Join("..", "go.mod"), filepath.Join("..", "go.sum")}
+	root := repoRoot(t)
+	files := []string{
+		filepath.Join(root, "go.mod"),
+		filepath.Join(root, "go.sum"),
+		filepath.Join(root, "cmd", "spl", "go.mod"),
+		filepath.Join(root, "cmd", "spl", "go.sum"),
+	}
 	for _, file := range files {
 		data, err := os.ReadFile(file)
 		if err != nil {
@@ -26,7 +53,7 @@ func TestDefaultModulesHaveNoRackDependency(t *testing.T) {
 
 func TestSunsetCopyClosesSoftDoor(t *testing.T) {
 	t.Parallel()
-	root := filepath.Join("..")
+	root := repoRoot(t)
 	softDoor := []string{
 		"remain for local graph-VCS",
 		"remains for local graph-VCS",
