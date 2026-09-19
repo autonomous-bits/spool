@@ -240,7 +240,7 @@ func RegisterAllTools(s *mcp.Server, rt *runtime) {
 			continue
 		}
 		name := t.Name
-		t.Description = t.Description + " Not the durable solution-context source of truth — bind each code repo with .spool/context.toml (or `spl context init --remote`) and sync with stock git clone/PR/history."
+		t.Description = t.Description + " Deprecated and unsupported for solution context — bind each code repo with .spool/context.toml (or `spl context init --remote`) and sync with stock git clone/PR/history. Leftover `.spl`/Rack is migration-only (`spl context export`), not a parallel SoT."
 		t.Handler = func(_ context.Context, _ json.RawMessage) (any, error) {
 			return nil, ctxgit.LegacyContextSoTError(name)
 		}

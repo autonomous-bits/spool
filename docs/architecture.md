@@ -2,28 +2,30 @@
 
 ## Overview
 
-Spool is a local, content-addressed version-control system for graph data. It
-provides two runtime interfaces: the `spl` command-line application (for shell
-scripts, manual usage, and CI) and a native Model Context Protocol (MCP) server
-running via `spl mcp` using the official Go SDK (as the primary interface for AI
-agent pair-programming and tool integration). Commands produce JSON on standard
-output for machine integration; errors are structured JSON logs on standard
-error.
+Spool is the MCP/CLI tool for shared solution context. N code repositories bind
+to **one** context git remote. **Git is the only durable source of truth.**
+Spool validates mutations, writes human-diffable files, opens a short-lived
+branch plus pull request, and rebuilds a local query projection. It provides
+two runtime interfaces: the `spl` command-line application (for shell scripts,
+manual usage, and CI) and a native Model Context Protocol (MCP) server running
+via `spl mcp` using the official Go SDK (the primary interface for AI agents).
+Commands produce JSON on standard output for machine integration; errors are
+structured JSON logs on standard error.
 
-The runtime prefers an explicit `.spool/context.toml` bind to a solution
+The runtime requires an explicit `.spool/context.toml` bind to a solution
 context git remote. Graph writes go to that remote as human-diffable files on a
-short-lived branch plus pull request. Local SQLite/FTS projections rebuild from
-the current checkout on every MCP/process start and are never source of truth.
+short-lived branch plus pull request — never a clean push to the working or
+protected branch. Auth is stock git credentials only. Local SQLite/FTS
+projections rebuild from the current checkout on every MCP/process start and
+are never source of truth.
 
-For **local** graph-VCS (not shared solution context), the runtime resolves a
-state directory before running a command. An explicit `--state-dir` takes
-priority, followed by `SPOOL_DIR`, then a validated ancestor `.spl/config.toml`
-workspace manifest. A manifest resolves its immutable workspace ID through the
-detached-state catalog; malformed manifests and unknown IDs are errors. Without
-a manifest, the system discovers the nearest parent `.spl` directory; `spl init`
-creates local state at the directory containing `go.work`, or at the current
-directory when none exists. Those `.spl` / Rack paths are refused when a
-context bind is present.
+Leftover `.spl` state is **deprecated / migration-only** (`spl context export`),
+not a supported parallel SoT. An explicit `--state-dir` still selects leftover
+local state for that export path, followed by `SPOOL_DIR`, then a validated
+ancestor `.spl/config.toml` workspace manifest. Those `.spl` / Rack paths are
+unsupported for solution context and are refused when a context bind is present.
+There is no Rack module dependency on the default install path, no dual-run,
+and no pack wire-compat.
 
 ```mermaid
 flowchart LR
@@ -32,11 +34,10 @@ flowchart LR
     MCP --> Bind[".spool/context.toml"]
     CLI --> Bind
     Bind --> CtxGit[internal/ctxgit]
-    CtxGit --> GitRemote[Context git remote]
+    CtxGit --> GitRemote["Context git remote SoT"]
     CtxGit --> Projection["local cache projection.db"]
-    MCP --> Repository[repository.Repository]
-    CLI --> Repository
-    Repository --> State["state-dir .spl local graph-VCS"]
+    CtxGit --> Export["spl context export migrate-once"]
+    Export --> Legacy["deprecated leftover .spl"]
 ```
 
 ## Components
@@ -44,19 +45,19 @@ flowchart LR
 | Component | Responsibility |
 | --- | --- |
 | `cmd/spl` | Cobra command definitions, flag and argument validation, bind-aware command gating, JSON output, and error logging. |
-| `internal/ctxgit` | Explicit `.spool/context.toml` bind resolution, stock-git context checkout, human-diffable layout, short-lived branch + PR writes, and local projection rebuild. Git is the durable solution-context SoT. |
+| `internal/ctxgit` | Explicit `.spool/context.toml` bind resolution, stock-git context checkout, human-diffable layout, short-lived branch + PR writes, local projection rebuild, and one-shot `.spl` export. Git is the **only** durable solution-context SoT. |
 | `internal/mcp` | Native Model Context Protocol server exposing 43 typed tools over stdio using `github.com/modelcontextprotocol/go-sdk`, with serialized repository locking, in-memory mutation staging, and error envelopes. |
 | `internal/resolve` | Context-aware, policy-constrained adapter for read-only graph queries. It applies query budgets, pins a branch snapshot, and exposes public retrieval results with provenance and completion metadata. |
 | `internal/contextual` | Go use cases that combine branch-head lexical or typed-filter evidence with bounded, deterministic expansion of a pinned graph snapshot. |
-| `internal/repository` | Authoritative **local** graph storage, commits, branches, staging, query implementations, durable state, locking, and recovery. Not the shared solution-context SoT. |
+| `internal/repository` | Leftover local `.spl` object storage used by migration/export and query internals. **Not** the shared solution-context SoT. |
 | `internal/repository/branch` | Branch request validation and lifecycle service boundary. |
 | `internal/repository/fsck` | Non-opening repository diagnostic and integrity verification service boundary. |
 | `internal/repository/initialization` | Repository initialization service boundary. |
 | `internal/repository/merge` | Merge transaction lifecycle service boundary. The repository supplies its durable, atomic store contract. |
 | `internal/repository/prune` | Graph pruning and ephemeral node excision service boundary. |
-| `internal/workspace` | Central detached-workspace provisioning plus manifest validation/discovery/writing and immutable workspace-ID lookup. Independent of any single repository's `.spl` state; not the N→1 context bind. |
+| `internal/workspace` | Deprecated detached-workspace provisioning. Not the N→1 context bind; unsupported for solution context. |
 | `internal/repository/asset` | Content-addressed reference-asset blob storage, locator parsing, MIME detection, and local cache lifecycle. |
-| `internal/remote` | Rack remote configuration, native history synchronization, and asset negotiation, upload, and on-demand retrieval. Out of the solution-context happy path. |
+| `internal/remote` | Leftover Rack client from the pre-git-SoT protocol. **Unsupported** for solution context: no Rack sync, no pack wire-compat, no dual-run. Default `spl` install has no `spool-rack` module dependency. |
 
 ## CLI command surface
 
@@ -66,7 +67,7 @@ operation:
 
 | Group | Commands |
 | --- | --- |
-| Working changes | `init`, `add`, `status`, `commit` |
+| Working changes | `add`, `status`, `commit` (`init` is deprecated / migration-only) |
 | Branches | `branch create/list/delete`, `switch` |
 | Schemas | `schema migrate`, `validate` |
 | Reads | `resolve`, `graph`, `search`, `filter`, `search-expand`, `context` |
@@ -76,7 +77,8 @@ operation:
 | Merge lifecycle | `merge preview/apply/conflicts/resolve/finalize/abort` |
 | Maintenance | `fsck`, `gc`, `prune` |
 | Contextual assets | `asset add`, `asset read` |
-| Detached workspaces | `workspace init/attach` |
+| Detached workspaces | `workspace init/attach` (**deprecated / unsupported** for solution context) |
+| Legacy Rack (unsupported) | `remote`, `push`, `pull`, `clone` — fail closed when bound; MCP always refuses |
 
 The complete syntax, flags, examples, and selector constraints are maintained in
 `.agents/skills/spool/references/cli-help.md`. In particular, mutation staging and schema
@@ -157,9 +159,10 @@ Reference assets are immutable, content-addressed blobs stored separately from g
 under `state-dir/assets/loose/<first-two-hex>/<rest>`. An Asset graph node records the canonical
 `spool://assets/<hash>` locator, byte size, MIME type, and optional original filename. Asset blobs
 are not embedded in graph snapshots or commit packs. `spl asset add` writes and stages the blob
-with the branch's staged mutation set; `spl asset read` streams a local blob or, when configured,
-retrieves a missing blob from Rack and caches it locally. Push negotiation identifies missing
-hashes before uploading asset blobs alongside graph history.
+with the branch's staged mutation set; bound workspaces store assets in the context git
+tree (Git LFS at or above 512 KiB; text/JSON/TOML stay plain git). `spl asset read`
+streams a blob from the bound checkout. Rack on-demand retrieval is unsupported for
+solution context.
 
 ## Primary flows
 
@@ -322,25 +325,22 @@ or deletes data.
 
 ## Multi-repo workspaces
 
-`internal/workspace` provisions central detached state and resolves checkouts
-through portable `.spl/config.toml` manifests. `workspace init` creates a
-named catalog entry and detached repository state under the platform-appropriate
-XDG (or Windows per-user application-data) root. `workspace attach` explicitly
-writes a repository manifest binding its portable identity to that immutable
-workspace ID. Resolution never uses host-path associations, mutable active
-preferences, or `SPOOL_WORKSPACE`.
+`internal/workspace` leftover detached-state provisioning is **deprecated** and
+unsupported for solution context. N code repos bind to one context git remote
+via `.spool/context.toml`, not via `.spl` workspace manifests.
 
 ## Extension points and current scope
 
-The repository package is the storage authority for **local** graph-VCS.
-Solution context is stored in git via `internal/ctxgit`; Rack wire transport
-and `.spl` packs are out of that happy path. New lifecycle behavior belongs
-in `repository/` or in a focused service package with an explicit contract.
-`resolve` is deliberately a query/tool adapter rather than another storage
-layer, and `contextual` owns bounded evidence-and-expansion use cases rather
-than projection persistence.
+Solution context is stored in git via `internal/ctxgit`. That is the **only**
+durable SoT. The repository package remains leftover `.spl` storage for
+migrate-once export and query internals — not a parallel VCS. Rack wire
+transport, pack wire-compat, and dual-run are non-goals. New lifecycle
+behavior for solution context belongs in `ctxgit/`. `resolve` is deliberately a
+query/tool adapter rather than another storage layer, and `contextual` owns
+bounded evidence-and-expansion use cases rather than projection persistence.
 
-One-shot `.spl` → context git export is migrate-once (`spl context export` /
-`spl_context_export`): keep nodes/edges/schema/assets, drop packs/Rack
-remotes/reflogs/merge leases/projections, one batch → one commit → PR. See
+One-shot `.spl` → context git export is the documented escape hatch
+(`spl context export` / `spl_context_export`): keep nodes/edges/schema/assets,
+drop packs/Rack remotes/reflogs/merge leases/projections, one batch → one
+commit → PR. Re-run is overwrite-at-own-risk. See
 [context-git-migration.md](context-git-migration.md).

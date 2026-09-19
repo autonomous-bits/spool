@@ -13,7 +13,7 @@ import (
 func toolStatus(rt *runtime) Tool {
 	return Tool{
 		Name:        "spl_status",
-		Description: "Report staged mutation delta as JSON. Bound workspaces report the context-git batch; unbound workspaces use local .spl staging.",
+		Description: "Report staged mutation delta as JSON. Bound workspaces report the context-git batch. Unbound leftover `.spl` staging is deprecated and unsupported for solution context (migration-only).",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

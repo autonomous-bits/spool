@@ -19,7 +19,7 @@ func NewSpoolServerWithOptions(opts ServerOptions) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:        "spool",
 		Title:       "Spool",
-		Description: "A graph-based version control system for autonomous agent workflows",
+		Description: "A graph MCP/CLI tool for shared solution context stored in git (short-lived branch + PR; not a second VCS)",
 		Version:     version.Version,
 		Icons: []mcp.Icon{
 			{

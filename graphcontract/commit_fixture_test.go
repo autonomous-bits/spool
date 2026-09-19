@@ -14,7 +14,7 @@ import (
 
 const commitFixtureFormatVersion = 1
 
-// commitFixture is the versioned, Rack-consumable conformance format for
+// commitFixture is the versioned, language-agnostic conformance format for
 // canonical Commit encoding, covering linear (single-parent) and merge
 // (multi-parent) commits plus invalid commits and non-canonical rejection.
 type commitFixture struct {

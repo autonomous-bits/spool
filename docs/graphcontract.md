@@ -1,14 +1,10 @@
-# Graph contract interoperability
+# Graph contract
 
 `github.com/autonomous-bits/spool/graphcontract` is Spool's public,
-dependency-light canonical graph contract. Rack must pin **`v1.4.0` or
-later**, the first release containing the schema API and interoperability
-fixtures; a subsequent release adds the full object, commit, and invalid-pack
-conformance fixture sets described below (see `CHANGELOG.md` for the exact
-version). Before Rack upgrades its pinned Spool dependency, it executes these
-shared contract fixtures in Rack CI, and Spool runs the same fixtures as
-compatibility tests in Spool CI, so neither system owns a divergent
-interpretation.
+dependency-light canonical graph contract. Spool runs the versioned object,
+commit, schema, and pack fixtures in its own CI. This package does **not**
+promise Rack pack wire-compat, dual-run, or a second VCS. Solution context
+uses human-diffable git JSON, not packs, as the durable store.
 
 The package exports canonical `PropertyValue`, `Node`, `Edge`, and `Commit`
 objects; `SchemaSnapshot`, `NodeLabelRule`, `EdgeTypeRule`, `PropertyRule`,
@@ -28,7 +24,7 @@ schema migration and graph mutation batch into one snapshot.
 
 ## Shared fixtures
 
-Versioned Rack-consumable fixtures are under
+Versioned language-agnostic fixtures are under
 `graphcontract/testdata/schema/v1/`. Every JSON candidate has:
 
 ```json
@@ -68,8 +64,8 @@ decoding, and content-addressed object-hash confirmation — is exposed through
 `DecompressPackedObject` (and its `DecodePackedObjectEnvelope` /
 `ObjectIDForEncoded` building blocks). A caller holding a pack's header, its
 index entries, and the corresponding compressed bytes can verify every
-packed object without depending on `internal/repository`, which is what lets
-Rack index native pack uploads directly against this package.
+packed object without depending on `internal/repository`. Pack wire-compat
+with Rack is not a product goal; solution context does not use packs as SoT.
 
 On-disk pack layout, the sidecar index file's binary encoding, pack
 generation/reader lifecycle, and GC orchestration remain
@@ -111,11 +107,11 @@ non-canonical CBOR (`ErrInvalidCanonicalCBOR`).
 
 `graphcontract/testdata/MANIFEST.json` is the single, language-agnostic index
 of every fixture set (schema, pack, objects, commits): its directory,
-`format_version`, and a short description. A second repository's
-conformance runner — such as Rack's — reads this manifest to discover and
-iterate every fixture set without hardcoding per-language paths, and Spool's
-own `TestFixtureManifestListsEveryFixtureSet` proves every listed directory
-exists and stays non-empty.
+`format_version`, and a short description. A conformance runner reads this
+manifest to discover and iterate every fixture set without hardcoding
+per-language paths. This is Spool's own contract surface, not a Rack
+wire-compat promise. Spool's `TestFixtureManifestListsEveryFixtureSet` proves
+every listed directory exists and stays non-empty.
 
 ## Snapshot roots
 
@@ -159,5 +155,4 @@ violations deterministically.
 `"schema"`. `SortMergeConflicts`, `MergeConflictID`, `MergeConflictPaths`, and
 `SchemaViolationPaths` are public so callers that append their own semantic
 conflicts after validation can reuse the exact same deterministic
-ordering, identifiers, and graph paths as Spool itself, including Rack and
-other downstream integrations.
+ordering, identifiers, and graph paths as Spool itself.

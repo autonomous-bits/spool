@@ -16,7 +16,7 @@ const maxWorkspaceIdentityAttempts = 8
 func toolWorkspaceInit() Tool {
 	return Tool{
 		Name:        "spl_workspace_init",
-		Description: "Create a central detached workspace in the user's workspace storage root.",
+		Description: "Deprecated: leftover detached `.spl` workspace. Unsupported for solution context; bind N code repos with `.spool/context.toml` instead.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -103,7 +103,7 @@ func toolWorkspaceInit() Tool {
 func toolWorkspaceAttach() Tool {
 	return Tool{
 		Name:        "spl_workspace_attach",
-		Description: "Write a workspace manifest (.spl manifest) linking a directory to a central workspace.",
+		Description: "Deprecated: leftover `.spl` workspace manifest. Unsupported for solution context; bind with `.spool/context.toml` instead.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

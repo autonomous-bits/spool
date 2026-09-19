@@ -24,10 +24,10 @@ func NewWorkspaceCommand(registryRoot func() (string, error)) *cobra.Command {
 	}
 	command := &cobra.Command{
 		Use:   "workspace",
-		Short: "Provision central detached workspaces (not the solution-context SoT)",
-		Long: "Detached workspaces and `.spl` manifests are not the durable solution-context source of truth. " +
-			"Bind N code repos to one context git remote with `.spool/context.toml` " +
-			"(or `spl context init --remote <url>`). These commands are refused when a context bind is present.",
+		Short: "Provision leftover detached workspaces (deprecated / unsupported for solution context)",
+		Long: "Deprecated and unsupported for solution context. Bind N code repos to one context git remote with `.spool/context.toml` " +
+			"(or `spl context init --remote <url>`). Leftover `.spl` is migration-only (`spl context export`), not a parallel SoT. " +
+			"These commands are refused when a context bind is present.",
 		SilenceUsage: true,
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			return refuseLegacyContextSoT(cmd.CommandPath())

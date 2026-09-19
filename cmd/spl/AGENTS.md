@@ -3,7 +3,8 @@
 `cmd/spl` is the Cobra CLI module; it uses the root module through `go.mod`'s `replace`.
 
 See the [architecture guide](../../docs/architecture.md) for the system-level
-component boundaries, data model, and persistence design.
+component boundaries, data model, and persistence design. Solution context is
+bind + stock git (always branch+PR). Do not teach Rack or `.spl` as a parallel SoT.
 
 Commands:
 

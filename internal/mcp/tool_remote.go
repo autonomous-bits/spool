@@ -15,7 +15,7 @@ import (
 func toolRemoteSet(stateDirProvider func() (string, error)) Tool {
 	return Tool{
 		Name:        "spl_remote_set",
-		Description: "Configure the repository's Rack remote endpoint, tenant, and auth mode.",
+		Description: "Deprecated: leftover Rack remote configuration. Unsupported for solution context (no Rack sync). Bind with `.spool/context.toml` and use stock git.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -87,7 +87,7 @@ func toolRemoteSet(stateDirProvider func() (string, error)) Tool {
 func toolRemoteShow(stateDirProvider func() (string, error)) Tool {
 	return Tool{
 		Name:        "spl_remote_show",
-		Description: "Show the repository's configured Rack remote and version status.",
+		Description: "Deprecated: leftover Rack remote probe. Unsupported for solution context (no Rack sync or pack wire-compat).",
 		InputSchema: map[string]any{
 			"type":       "object",
 			"properties": map[string]any{},
@@ -134,7 +134,7 @@ func toolRemoteShow(stateDirProvider func() (string, error)) Tool {
 func toolRemoteRemove(stateDirProvider func() (string, error)) Tool {
 	return Tool{
 		Name:        "spl_remote_remove",
-		Description: "Remove the repository's configured Rack remote.",
+		Description: "Deprecated: clear leftover Rack remote config. Unsupported for solution context.",
 		InputSchema: map[string]any{
 			"type":       "object",
 			"properties": map[string]any{},
@@ -157,7 +157,7 @@ func toolRemoteRemove(stateDirProvider func() (string, error)) Tool {
 func toolRemoteBranch(stateDirProvider func() (string, error)) Tool {
 	return Tool{
 		Name:        "spl_remote_branch",
-		Description: "Inspect, list, create, or delete remote branches on the configured Rack remote.",
+		Description: "Deprecated: leftover Rack remote branches. Unsupported for solution context; agent writes use short-lived git branches + PRs.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -261,7 +261,7 @@ func toolRemoteBranch(stateDirProvider func() (string, error)) Tool {
 func toolPush(stateDirProvider func() (string, error)) Tool {
 	return Tool{
 		Name:        "spl_push",
-		Description: "Push verified local commits for a branch to the repository's configured Rack remote. Returns rejection details if the remote branch has advanced (pull and merge locally before retrying).",
+		Description: "Deprecated: leftover Rack pack push. Unsupported for solution context; every agent write is a short-lived git branch + PR, not a Rack push.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -446,7 +446,7 @@ func toolPush(stateDirProvider func() (string, error)) Tool {
 func toolPull(stateDirProvider func() (string, error)) Tool {
 	return Tool{
 		Name:        "spl_pull",
-		Description: "Pull new commits for a branch from the repository's configured Rack remote and fast-forward local history.",
+		Description: "Deprecated: leftover Rack pack pull. Unsupported for solution context; sync context with stock git fetch/PR/history.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -534,7 +534,7 @@ func toolPull(stateDirProvider func() (string, error)) Tool {
 func toolClone() Tool {
 	return Tool{
 		Name:        "spl_clone",
-		Description: "Clone a remote workspace from Spool Rack into a new local directory.",
+		Description: "Deprecated: leftover Rack clone. Unsupported for solution context; `git clone` the bind remote instead.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

@@ -1,42 +1,32 @@
 # Working changes
 
-Initialize the resolved Spool state directory once:
+Solution context does **not** start with `spl init`. Bind the code repo and
+write via MCP as a short-lived branch + PR:
 
 ```sh
-spl init
+spl context init --remote https://github.com/org/solution-context.git \
+  --solution-id my-solution
 ```
 
-For a workspace-backed repository, first run `spl workspace init <name>`, then
-use `spl workspace attach --workspace <name> --repository-id <id> [path]` to
-write and commit its manifest. Without a workspace manifest, run `spl init` to
-create local `.spl` state at the nearest parent `.spl` or `go.work` directory,
-or the current directory.
+See [docs/context-bind.md](../../../../docs/context-bind.md). `spl init` and
+detached `workspace init` / `workspace attach` are **deprecated and
+unsupported** for solution context. Leftover `.spl` is migration-only
+(`spl context export`).
 
-## Branch selection
+## Bound writes
 
-Before staging changes, check the active branch (`spl branch list`) and elicit from the user whether
-to work against the current branch or create a new branch:
+Prefer MCP `spl_add` / `spl_commit`. One mutation batch becomes one git commit
+on a short-lived branch and a pull request to `protected_branch`. Do not push
+cleanly to the working or protected branch.
+
+CLI fallback (bound workspace):
 
 ```sh
-# If creating a new branch
-spl branch create feature-idea --from-branch main
-spl switch feature-idea
+spl add --branch main --batch mutations.json
+spl status --branch main
+spl commit --branch main --author alice --message "Describe the graph change"
 ```
 
-## Staging and committing mutations
-
-Stage a JSON array of graph-mutation operations, inspect the staged delta, then create an immutable
-commit:
-
-```sh
-spl add --branch feature-idea --batch mutations.json
-spl status --branch feature-idea
-spl commit --branch feature-idea --author alice --message "Describe the graph change"
-```
-
-`add` validates and stages the entire batch for its branch; it does not commit. `commit` commits all
-staged mutations for the named branch. Use explicit `--branch` values rather than assuming the
-active branch, and inspect the JSON result before using returned IDs in later commands.
-
-For the accepted mutation-array shape, use the installed CLI's `spl add --help` and repository
-examples/tests. Do not invent or edit storage objects in the resolved Spool state directory.
+`add` validates and stages the entire batch; it does not commit. Bound
+`commit` opens the PR. Use explicit `--branch` values, and inspect the JSON
+result before using returned IDs in later commands.

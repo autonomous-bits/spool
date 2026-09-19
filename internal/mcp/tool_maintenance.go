@@ -16,7 +16,7 @@ import (
 func toolInit(stateDirProvider func() (string, error)) Tool {
 	return Tool{
 		Name:        "spl_init",
-		Description: "Initialize a new Spool repository in the resolved state directory.",
+		Description: "Deprecated: initialize leftover local `.spl` state. Unsupported for solution context; use `spl context init --remote` and bind + stock git. Leftover `.spl` is migration-only (`spl context export`).",
 		InputSchema: map[string]any{
 			"type":       "object",
 			"properties": map[string]any{},

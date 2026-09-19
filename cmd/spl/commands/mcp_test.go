@@ -246,7 +246,7 @@ func TestMCPCommand_FullWorkflow(t *testing.T) {
 		t.Fatalf("res14 error: %#v", res14)
 	}
 
-	// 16-18. Rack/.spl remotes are not the durable context SoT
+	// 16-18. Rack/.spl remotes are deprecated and unsupported for solution context
 	send(`{"jsonrpc":"2.0","id":15,"method":"tools/call","params":{"name":"spl_remote_set","arguments":{"endpoint":"http://127.0.0.1:8080","auth_mode":"bearer","workspace_id":"ws-test"}}}`)
 	id15, res15 := parseCallResult(t, recv())
 	if id15 != float64(15) || !res15.IsError {

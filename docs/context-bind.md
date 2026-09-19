@@ -1,6 +1,8 @@
 # Binding code repos to a solution context remote
 
-Spool’s happy path is **N code repositories bound to one solution context git remote**. Git is the durable source of truth for shared context. Spool MCP/CLI validates mutations, writes human-diffable files, opens a short-lived branch and pull request, and rebuilds a **local** query projection. `.spl` and Rack remotes are not that source of truth.
+Spool’s only supported path is **N code repositories bound to one solution context git remote**. Git is the **only** durable source of truth for shared context. Spool MCP/CLI validates mutations, writes human-diffable files, opens a short-lived branch and pull request, and rebuilds a **local** query projection.
+
+Unbound leftover `.spl` and Rack remotes are **unsupported** for solution context. They are deprecated / migration-only (`spl context export`), not a parallel happy path.
 
 ## Bind file
 
@@ -47,14 +49,14 @@ spl context init --remote https://github.com/org/my-solution-context.git \
 This command:
 
 1. Writes `.spool/context.toml` in the current code repo (only).
-2. Ensures the context remote is reachable with **stock git**.
+2. Ensures the context remote is reachable with **stock git** (stock git credentials only; never a Spool-specific token).
 3. Creates `schema.toml`, `nodes/`, `edges/`, `assets/`, and `README.md` when the remote is empty.
 4. Seeds a `CodeRepository` node from **this** bind. Sibling directories are not scanned.
-5. Leaves the workspace ready for MCP writes (short-lived branch + PR).
+5. Leaves the workspace ready for MCP writes. **Every** agent write is a short-lived branch + PR to `protected_branch`. Do not push cleanly to the working or protected branch.
 
 Repeat in every other code repo with the same `--remote` and `--solution-id`. Each init seeds that repo’s `CodeRepository` without discovering the others.
 
-Existing `.spl` graphs move with a **one-shot** export (`spl context export` / `spl context migrate-once` / MCP `spl_context_export`). That path is lossy migrate-once, not sync. See [context-git-migration.md](context-git-migration.md).
+Existing `.spl` graphs move with a **one-shot** export (`spl context export` / `spl context migrate-once` / MCP `spl_context_export`). That path is the documented escape hatch: lossy migrate-once, not sync, not dual-run. See [context-git-migration.md](context-git-migration.md).
 
 ## Context history (stock git)
 
@@ -66,12 +68,14 @@ Context history is ordinary git/GitHub:
 
 Local SQLite/FTS projections rebuild from the current checkout on every MCP/process start. They are never committed, pushed, or treated as a second store.
 
-## What is not the happy path
+Assets use Git LFS at or above **512 KiB** (configurable via `lfs_threshold_kib`). Text, JSON, and TOML stay plain git, with a warning above ~1 MiB.
 
-These remain for local graph-VCS and migration, but they are **not** the durable solution-context store:
+## Deprecated / migration-only (unsupported SoT)
 
-- `spl init` / `.spl` object packs
-- `spl workspace init` / `workspace attach`
-- `spl remote set`, `spl push`, `spl pull`, `spl clone` against Rack
+Do **not** treat the following as a supported parallel store for solution context:
 
-When a bind file is present, the CLI refuses those commands and points at `.spool/context.toml` plus stock git. MCP tools for Rack remotes and detached workspaces always fail closed with the same guidance.
+- `spl init` / `.spl` object packs (Spool-as-VCS)
+- `spl workspace init` / `workspace attach` (detached `.spl` workspaces)
+- `spl remote set`, `spl push`, `spl pull`, `spl clone` against Rack (Rack sync / pack wire-compat)
+
+When a bind file is present, the CLI refuses those commands and points at `.spool/context.toml` plus stock git. MCP tools for Rack remotes and detached workspaces always fail closed with the same guidance. Unbound leftover `.spl` exists only so `spl context export` can migrate once.

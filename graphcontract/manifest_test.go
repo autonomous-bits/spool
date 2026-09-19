@@ -26,8 +26,8 @@ type fixtureManifest struct {
 }
 
 // TestFixtureManifestListsEveryFixtureSet proves testdata/MANIFEST.json is
-// the single authoritative, language-agnostic index a cross-repository
-// conformance runner (Rack) can use to discover every fixture set: every
+// the single authoritative, language-agnostic index a conformance runner
+// can use to discover every fixture set: every
 // listed directory must exist and contain at least one JSON fixture.
 func TestFixtureManifestListsEveryFixtureSet(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("testdata", "MANIFEST.json"))
