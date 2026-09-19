@@ -37,7 +37,7 @@ func newContextualCommand(use, short, long, example string, opts ctxgit.Options,
 	var filters retrievalFilterFlags
 	command := &cobra.Command{
 		Use: use, Short: short, Long: long, Example: "  " + example,
-		Args: cobra.NoArgs, SilenceUsage: true,
+		Aliases: []string{}, Args: cobra.NoArgs, SilenceUsage: true,
 		RunE: func(command *cobra.Command, _ []string) error {
 			predicates, err := filters.predicates()
 			if err != nil {

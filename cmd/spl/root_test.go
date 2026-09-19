@@ -4,19 +4,9 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/autonomous-bits/spool/internal/surface"
 )
-
-var keepTopLevel = []string{
-	"asset", "completion", "context", "filter", "graph", "help", "mcp",
-	"merge", "prune", "query-context", "resolve", "schema", "search",
-	"search-expand", "validate", "version",
-}
-
-var removedTopLevel = []string{
-	"init", "workspace", "remote", "push", "pull", "clone", "migrate",
-	"fsck", "gc", "cherry-pick", "add", "status", "commit", "branch",
-	"switch", "history", "diff", "branches-containing",
-}
 
 func TestRootHelpSurfaceKeepOnly(t *testing.T) {
 	var output bytes.Buffer
@@ -26,27 +16,40 @@ func TestRootHelpSurfaceKeepOnly(t *testing.T) {
 		t.Fatalf("help: %v", err)
 	}
 	help := output.String()
-	for _, name := range keepTopLevel {
-		if !strings.Contains(help, name) {
+	listed := listedAvailableCommands(t, help)
+	want := map[string]struct{}{}
+	for _, name := range surface.KeepCLITopLevel {
+		want[name] = struct{}{}
+		if _, ok := listed[name]; !ok {
 			t.Errorf("help missing KEEP command %q:\n%s", name, help)
 		}
 	}
-	for _, name := range removedTopLevel {
-		// Top-level Available Commands listing: each command starts a help line.
-		for _, line := range strings.Split(help, "\n") {
-			fields := strings.Fields(line)
-			if len(fields) > 0 && fields[0] == name {
-				t.Errorf("removed command %q still listed in spl --help: %s", name, line)
-			}
+	for name := range listed {
+		if _, ok := want[name]; !ok {
+			t.Errorf("unexpected command %q listed in spl --help", name)
+		}
+	}
+	for _, name := range surface.RemovedCLITopLevel {
+		if _, ok := listed[name]; ok {
+			t.Errorf("removed command %q still listed in spl --help", name)
 		}
 	}
 }
 
 func TestRemovedCommandsAreNotRegistered(t *testing.T) {
 	command := newRootCommand(&bytes.Buffer{})
-	for _, name := range removedTopLevel {
+	for _, name := range surface.RemovedCLITopLevel {
 		if _, _, err := command.Find([]string{name}); err == nil {
 			t.Errorf("removed command %q is still registered", name)
+		}
+	}
+	for _, cmd := range command.Commands() {
+		for _, alias := range cmd.Aliases {
+			for _, removed := range surface.RemovedCLITopLevel {
+				if alias == removed || cmd.Name() == removed {
+					t.Errorf("removed name %q still present as command %q alias %q", removed, cmd.Name(), alias)
+				}
+			}
 		}
 	}
 }
@@ -126,4 +129,79 @@ func TestContextNamespaceIsInitExportOnly(t *testing.T) {
 	if strings.Contains(help, "--query") {
 		t.Fatalf("context namespace must not be the query verb:\n%s", help)
 	}
+	parent, _, err := command.Find([]string{"context"})
+	if err != nil {
+		t.Fatalf("find context: %v", err)
+	}
+	if parent.Name() != "context" {
+		t.Fatalf("context resolved to %q", parent.Name())
+	}
+	if len(parent.Aliases) != 0 {
+		t.Fatalf("context aliases = %v, want none", parent.Aliases)
+	}
+	for _, child := range parent.Commands() {
+		switch child.Name() {
+		case "init", "export", "migrate-once", "help":
+		default:
+			t.Errorf("unexpected context subcommand %q", child.Name())
+		}
+	}
+}
+
+func TestQueryContextIsBreakingRenameWithNoAlias(t *testing.T) {
+	command := newRootCommand(&bytes.Buffer{})
+	found, _, err := command.Find([]string{"query-context"})
+	if err != nil {
+		t.Fatalf("find query-context: %v", err)
+	}
+	if found.Name() != "query-context" {
+		t.Fatalf("query-context resolved to %q", found.Name())
+	}
+	if len(found.Aliases) != 0 {
+		t.Fatalf("query-context aliases = %v, want none (no alias to old context query)", found.Aliases)
+	}
+	for _, alias := range found.Aliases {
+		if alias == "context" {
+			t.Fatal("query-context must not alias old context query verb")
+		}
+	}
+
+	var output bytes.Buffer
+	parent := newRootCommand(&output)
+	parent.SetArgs([]string{"context", "--query", "incident"})
+	err = parent.Execute()
+	if err == nil {
+		t.Fatal("spl context --query must not run the query verb")
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "not bound") {
+		t.Fatalf("context --query must fail as unknown flag, not as a query: %v", err)
+	}
+}
+
+func listedAvailableCommands(t *testing.T, help string) map[string]struct{} {
+	t.Helper()
+	listed := map[string]struct{}{}
+	inSection := false
+	for _, line := range strings.Split(help, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "Available Commands:") {
+			inSection = true
+			continue
+		}
+		if inSection && trimmed == "" {
+			break
+		}
+		if !inSection {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		listed[fields[0]] = struct{}{}
+	}
+	if len(listed) == 0 {
+		t.Fatalf("did not parse Available Commands from help:\n%s", help)
+	}
+	return listed
 }

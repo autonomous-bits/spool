@@ -36,7 +36,9 @@ generated from commits since the preceding `v*` tag. Commits prefixed with `docs
   cascading edges (short-lived branch + PR). It is not pack/CAS garbage collection.
   Unbound workspaces are refused.
 - Identical schema migrations are a no-op (no empty commit or PR).
-- MCP advertises the KEEP tool set only. `spl --help` matches that surface.
+- MCP advertises the KEEP tool set only. `spl --help` matches that surface. A golden KEEP/REMOVE
+  list fails `make check` if a removed CLI name or MCP tool reappears (including `spl_context` and
+  Spool VCS wrappers `add`/`status`/`commit`/`branch`/`switch`).
 - **Sunset stop-list for solution context:** Spool-as-VCS, Rack sync, `.spl` as
   durable SoT, and pack wire-compat are stopped. Bind + stock git is the **only**
   durable SoT. Every agent write is a short-lived branch + PR (not push-clean to

@@ -2,9 +2,9 @@ package mcp
 
 import (
 	"context"
-	"strings"
 	"testing"
 
+	"github.com/autonomous-bits/spool/internal/surface"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -53,19 +53,19 @@ func TestSpoolMCPServerKeepToolsOnly(t *testing.T) {
 		t.Fatalf("missing expected tools: %v", expected)
 	}
 
-	removed := []string{
-		"spl_add", "spl_status", "spl_commit", "spl_init", "spl_context",
-		"spl_diff", "spl_history", "spl_branches_containing", "spl_fsck", "spl_gc",
-		"spl_cherry_pick", "spl_clone", "spl_push", "spl_pull", "spl_migrate",
-		"spl_workspace_init", "spl_workspace_attach", "spl_remote_set",
-		"spl_branch_list", "spl_branch_create", "spl_switch",
-	}
+	removed := surface.RemovedMCPTools
 	for _, name := range removed {
 		for _, tool := range toolsList.Tools {
 			if tool.Name == name {
 				t.Errorf("removed tool still registered: %q", name)
 			}
 		}
+	}
+	if !containsTool(toolsList.Tools, "spl_query_context") {
+		t.Fatal("KEEP tools must include spl_query_context")
+	}
+	if containsTool(toolsList.Tools, "spl_context") {
+		t.Fatal("old spl_context query tool must not be registered")
 	}
 
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "spl_version"})
@@ -88,11 +88,27 @@ func TestSpoolMCPServerKeepToolsOnly(t *testing.T) {
 	}
 
 	res, err = session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "spl_context",
+		Arguments: map[string]any{"query": "test"},
+	})
+	if err == nil && (res == nil || !res.IsError) {
+		t.Fatalf("expected error for removed spl_context tool, got res=%v, err=%v", res, err)
+	}
+
+	res, err = session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "spl_nonexistent",
 		Arguments: map[string]any{},
 	})
 	if err == nil && (res == nil || !res.IsError) {
 		t.Fatalf("expected error for nonexistent tool call, got res=%v, err=%v", res, err)
 	}
-	_ = strings.TrimSpace
+}
+
+func containsTool(tools []*mcp.Tool, name string) bool {
+	for _, tool := range tools {
+		if tool.Name == name {
+			return true
+		}
+	}
+	return false
 }

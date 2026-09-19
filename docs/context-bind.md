@@ -78,4 +78,7 @@ Do **not** treat the following as a supported parallel store for solution contex
 - `spl workspace init` / `workspace attach` (detached `.spl` workspaces)
 - `spl remote set`, `spl push`, `spl pull`, `spl clone` against Rack (Rack sync / pack wire-compat)
 
-When a bind file is present, the CLI refuses those commands and points at `.spool/context.toml` plus stock git. MCP tools for Rack remotes and detached workspaces always fail closed with the same guidance. Unbound leftover `.spl` exists only so `spl context export` can migrate once.
+These commands and their MCP twins are **deleted** (no aliases, no deprecation stubs). Use stock
+git (`git log`, `git diff`, `git branch`) on the bind remote, and bind with
+`spl context init --remote`. Unbound leftover `.spl` exists only so `spl context export` can
+migrate once.

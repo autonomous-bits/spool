@@ -11,6 +11,7 @@ func NewContextCommand(opts ctxgit.Options) *cobra.Command {
 		Use:          "context",
 		Short:        "Bind and export solution context git",
 		Long:         "Manage the explicit context-git bind. Querying the graph uses `spl query-context`.",
+		Aliases:      []string{},
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 	}

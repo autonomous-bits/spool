@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/autonomous-bits/spool/internal/ctxgit"
+	"github.com/autonomous-bits/spool/internal/surface"
 )
 
 type jsonRPCResponse struct {
@@ -87,8 +88,27 @@ func TestMCPCommand_KeepSurface(t *testing.T) {
 		t.Fatalf("resp2 missing tools: %#v", resp2)
 	}
 	toolsList := toolsMap["tools"].([]any)
-	if len(toolsList) != 19 {
-		t.Fatalf("expected 19 KEEP tools, got %d", len(toolsList))
+	if len(toolsList) != len(surface.KeepMCPTools) {
+		t.Fatalf("expected %d KEEP tools, got %d", len(surface.KeepMCPTools), len(toolsList))
+	}
+	names := map[string]bool{}
+	for _, raw := range toolsList {
+		tool, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("tool entry = %#v", raw)
+		}
+		name, _ := tool["name"].(string)
+		names[name] = true
+	}
+	for _, name := range surface.KeepMCPTools {
+		if !names[name] {
+			t.Errorf("KEEP tool missing from MCP tools/list: %q", name)
+		}
+	}
+	for _, name := range surface.RemovedMCPTools {
+		if names[name] {
+			t.Errorf("removed tool still advertised: %q", name)
+		}
 	}
 
 	send(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"spl_prune","arguments":{"dry_run":true}}}`)

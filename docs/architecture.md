@@ -36,7 +36,7 @@ VCS commands and do not reopen Rack or `.spl` as source of truth.
 | Component | Responsibility |
 | --- | --- |
 | `cmd/spl` | KEEP Cobra commands. The `context` namespace is init/export/migrate-once only. Graph queries use `query-context`. |
-| `internal/mcp` | KEEP MCP tools (18) over stdio. No Rack/workspace twins of removed commands. |
+| `internal/mcp` | KEEP MCP tools (19) over stdio. No Rack/workspace twins of removed commands. |
 | `internal/ctxgit` | Bind file, checkout, graph load/store, projection rebuild, short-lived branch + PR writes, bound queries, file-graph merge, graph prune, leftover `.spl` export. |
 | `internal/resolve` | Query-budget and retrieval result shapes used by bound ctxgit reads. |
 | `internal/contextual` | Direction and evidence-expansion types used by `query-context` / `search-expand`. |

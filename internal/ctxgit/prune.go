@@ -2,6 +2,7 @@ package ctxgit
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -32,7 +33,13 @@ type PruneResult struct {
 // checkout. Writes go through a short-lived branch and pull request. It never
 // touches CAS packs, gc, or leftover .spl object stores.
 func (s *Session) Prune(ctx context.Context, request PruneRequest) (PruneResult, error) {
-	if s == nil || !s.Bound() {
+	if s == nil || s.CodeRoot == "" {
+		return PruneResult{}, UnboundError()
+	}
+	if _, _, _, err := FindBind(s.CodeRoot); err != nil {
+		return PruneResult{}, err
+	}
+	if !s.Bound() {
 		return PruneResult{}, UnboundError()
 	}
 	if err := ctx.Err(); err != nil {
@@ -46,6 +53,9 @@ func (s *Session) Prune(ctx context.Context, request PruneRequest) (PruneResult,
 		return PruneResult{}, err
 	}
 	s.graph = graph
+	if err := s.rebuildProjection(ctx, s.head); err != nil {
+		return PruneResult{}, fmt.Errorf("rebuild local projection from checkout: %w", err)
+	}
 
 	prunedNodeIDs, prunedEdgeIDs, orphans := pruneSet(graph)
 	result := PruneResult{

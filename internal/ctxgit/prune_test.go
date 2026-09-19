@@ -81,6 +81,103 @@ func TestPruneUnboundRefused(t *testing.T) {
 	}
 }
 
+func TestPruneFailClosedWhenBindRemoved(t *testing.T) {
+	ctx := context.Background()
+	codeRoot, _, cache := setupBoundWorkspace(t)
+	session, err := Start(ctx, Options{WorkspaceDir: codeRoot, CacheDir: cache, Git: isolatedGit(), PROpener: &RecordingPROpener{}})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if err := os.Remove(session.BindPath); err != nil {
+		t.Fatalf("remove bind: %v", err)
+	}
+	_, err = session.Prune(ctx, PruneRequest{DryRun: true})
+	if !errors.Is(err, ErrUnbound) {
+		t.Fatalf("error = %v, want ErrUnbound after bind removal", err)
+	}
+}
+
+func TestPruneRebuildsProjectionAndLeavesSplUntouched(t *testing.T) {
+	ctx := context.Background()
+	codeRoot, remote, cache := setupBoundWorkspace(t)
+	leftover := filepath.Join(codeRoot, ".spl", "objects", "pack")
+	if err := os.MkdirAll(leftover, 0o755); err != nil {
+		t.Fatalf("mkdir leftover: %v", err)
+	}
+	marker := filepath.Join(leftover, "do-not-gc")
+	if err := os.WriteFile(marker, []byte("cas-pack-bytes"), 0o644); err != nil {
+		t.Fatalf("write leftover pack: %v", err)
+	}
+
+	recorder := &RecordingPROpener{}
+	session, err := Start(ctx, Options{WorkspaceDir: codeRoot, CacheDir: cache, Git: isolatedGit(), PROpener: recorder})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if _, err := session.Stage([]repository.MutationOperation{
+		{Action: "add", Entity: "node", ID: "ephemeral-keep-cut", Title: "Temp", Labels: []string{"Ephemeral"}},
+	}); err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+	if _, err := session.Commit(ctx, "tester", "Add ephemeral"); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	pushMerged(t, remote, recorder.Requests[len(recorder.Requests)-1].Head)
+
+	session, err = Start(ctx, Options{WorkspaceDir: codeRoot, CacheDir: cache, Git: isolatedGit(), PROpener: recorder})
+	if err != nil {
+		t.Fatalf("restart: %v", err)
+	}
+	if session.projectionPath == "" {
+		t.Fatal("expected projection after Start")
+	}
+	if err := os.Remove(session.projectionPath); err != nil {
+		t.Fatalf("remove projection: %v", err)
+	}
+
+	result, err := session.Prune(ctx, PruneRequest{Author: "alice", Message: "Prune ephemeral"})
+	if err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	if result.PrunedNodesCount != 1 || result.PullRequest.URL == "" {
+		t.Fatalf("prune = %#v", result)
+	}
+	status, err := session.ProjectionStatus()
+	if err != nil {
+		t.Fatalf("ProjectionStatus: %v", err)
+	}
+	if status.State != "ready" || status.Path == "" {
+		t.Fatalf("projection after prune = %#v", status)
+	}
+	if _, err := os.Stat(status.Path); err != nil {
+		t.Fatalf("rebuilt projection missing: %v", err)
+	}
+	got, err := os.ReadFile(marker)
+	if err != nil || string(got) != "cas-pack-bytes" {
+		t.Fatalf("leftover .spl pack mutated: err=%v content=%q", err, got)
+	}
+}
+
+func TestPruneSourceNeverInvokesCASGC(t *testing.T) {
+	src, err := os.ReadFile("prune.go")
+	if err != nil {
+		t.Fatalf("read prune.go: %v", err)
+	}
+	text := string(src)
+	for _, needle := range []string{
+		"internal/repository/prune",
+		"internal/repository/gc",
+		`"gc"`,
+		`"repack"`,
+		`"pack-objects"`,
+		"git gc",
+	} {
+		if strings.Contains(text, needle) {
+			t.Errorf("graph prune must not invoke CAS/pack GC; found %q", needle)
+		}
+	}
+}
+
 func TestQueryContextBoundSearchExpand(t *testing.T) {
 	ctx := context.Background()
 	codeRoot, remote, cache := setupBoundWorkspace(t)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/autonomous-bits/spool/internal/surface"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -63,27 +64,7 @@ func wrapHandler(fn ToolHandler) mcp.ToolHandler {
 }
 
 // KeepToolNames is the MCP tool surface after the git-SoT command cut.
-var KeepToolNames = []string{
-	"spl_asset_add",
-	"spl_asset_read",
-	"spl_context_export",
-	"spl_filter",
-	"spl_graph",
-	"spl_merge_abort",
-	"spl_merge_apply",
-	"spl_merge_conflicts",
-	"spl_merge_finalize",
-	"spl_merge_preview",
-	"spl_merge_resolve",
-	"spl_prune",
-	"spl_query_context",
-	"spl_resolve",
-	"spl_schema_migrate",
-	"spl_search",
-	"spl_search_expand",
-	"spl_validate",
-	"spl_version",
-}
+var KeepToolNames = surface.KeepMCPTools
 
 // RegisterAllTools registers KEEP-only Spool tools onto the official MCP server.
 func RegisterAllTools(s *mcp.Server, rt *runtime) {
