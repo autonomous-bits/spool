@@ -171,20 +171,24 @@ func wrapHandler(fn ToolHandler) mcp.ToolHandler {
 }
 
 // RegisterAllTools registers all 42 Spool tools onto the given official MCP server.
-func RegisterAllTools(s *mcp.Server, stateDirProvider func() (string, error)) {
+func RegisterAllTools(s *mcp.Server, rt *runtime) {
+	if rt == nil {
+		rt = newRuntime(ServerOptions{})
+	}
+	stateDirProvider := rt.stateDir
 	tools := []Tool{
-		toolStatus(stateDirProvider),
-		toolAdd(stateDirProvider),
-		toolCommit(stateDirProvider),
-		toolResolve(stateDirProvider),
-		toolSearch(stateDirProvider),
+		toolStatus(rt),
+		toolAdd(rt),
+		toolCommit(rt),
+		toolResolve(rt),
+		toolSearch(rt),
 		toolSearchExpand(stateDirProvider),
-		toolFilter(stateDirProvider),
+		toolFilter(rt),
 		toolContext(stateDirProvider),
 		toolDiff(stateDirProvider),
 		toolHistory(stateDirProvider),
 		toolBranchesContaining(stateDirProvider),
-		toolGraph(stateDirProvider),
+		toolGraph(rt),
 		toolBranchList(stateDirProvider),
 		toolBranchCreate(stateDirProvider),
 		toolBranchDelete(stateDirProvider),
@@ -203,8 +207,8 @@ func RegisterAllTools(s *mcp.Server, stateDirProvider func() (string, error)) {
 		toolFsck(stateDirProvider),
 		toolGC(stateDirProvider),
 		toolMigrate(stateDirProvider),
-		toolAssetAdd(stateDirProvider),
-		toolAssetRead(stateDirProvider),
+		toolAssetAdd(rt),
+		toolAssetRead(rt),
 		toolWorkspaceInit(),
 		toolWorkspaceAttach(),
 		toolRemoteSet(stateDirProvider),

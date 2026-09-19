@@ -6,13 +6,14 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/autonomous-bits/spool/internal/ctxgit"
 	"github.com/autonomous-bits/spool/internal/repository"
 )
 
-func toolStatus(stateDirProvider func() (string, error)) Tool {
+func toolStatus(rt *runtime) Tool {
 	return Tool{
 		Name:        "spl_status",
-		Description: "Report a branch's staged mutation delta as JSON. A branch with no staged changes returns an empty delta.",
+		Description: "Report staged mutation delta as JSON. Bound workspaces report the context-git batch; unbound workspaces use local .spl staging.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -23,7 +24,7 @@ func toolStatus(stateDirProvider func() (string, error)) Tool {
 			},
 			"required": []string{"branch"},
 		},
-		Handler: func(_ context.Context, args json.RawMessage) (any, error) {
+		Handler: func(ctx context.Context, args json.RawMessage) (any, error) {
 			var in struct {
 				Branch string `json:"branch"`
 			}
@@ -33,17 +34,24 @@ func toolStatus(stateDirProvider func() (string, error)) Tool {
 			if in.Branch == "" {
 				return nil, errors.New("branch is required")
 			}
-			return withRepo(stateDirProvider, func(repo *repository.Repository) (any, error) {
-				return repo.BranchStagingStatus(in.Branch)
-			})
+			session, err := rt.requireSession(ctx)
+			if err == nil {
+				return session.Status()
+			}
+			if errors.Is(err, ctxgit.ErrUnbound) {
+				return withRepo(rt.stateDir, func(repo *repository.Repository) (any, error) {
+					return repo.BranchStagingStatus(in.Branch)
+				})
+			}
+			return nil, err
 		},
 	}
 }
 
-func toolAdd(stateDirProvider func() (string, error)) Tool {
+func toolAdd(rt *runtime) Tool {
 	return Tool{
 		Name:        "spl_add",
-		Description: "Validate and stage an array of graph-mutation operations on a branch directly in memory, without creating a file on disk.",
+		Description: "Validate a graph-mutation batch. When the workspace is bound, the batch is staged for one context-git commit and PR. Unbound workspaces refuse writes.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -61,7 +69,7 @@ func toolAdd(stateDirProvider func() (string, error)) Tool {
 			},
 			"required": []string{"branch", "operations"},
 		},
-		Handler: func(_ context.Context, args json.RawMessage) (any, error) {
+		Handler: func(ctx context.Context, args json.RawMessage) (any, error) {
 			var in struct {
 				Branch     string                         `json:"branch"`
 				Operations []repository.MutationOperation `json:"operations"`
@@ -75,20 +83,19 @@ func toolAdd(stateDirProvider func() (string, error)) Tool {
 			if len(in.Operations) == 0 {
 				return nil, errors.New("operations must not be empty")
 			}
-			return withRepo(stateDirProvider, func(repo *repository.Repository) (any, error) {
-				return repo.StageMutationBatch(repository.StageMutationRequest{
-					Branch:     in.Branch,
-					Operations: in.Operations,
-				})
-			})
+			session, err := rt.requireSession(ctx)
+			if err != nil {
+				return nil, err
+			}
+			return session.Stage(in.Operations)
 		},
 	}
 }
 
-func toolCommit(stateDirProvider func() (string, error)) Tool {
+func toolCommit(rt *runtime) Tool {
 	return Tool{
 		Name:        "spl_commit",
-		Description: "Commit all staged graph mutations for a branch into an immutable commit object.",
+		Description: "Commit the staged mutation batch to the bound context git remote on a short-lived branch and open a PR to the protected branch.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -107,7 +114,7 @@ func toolCommit(stateDirProvider func() (string, error)) Tool {
 			},
 			"required": []string{"branch", "message"},
 		},
-		Handler: func(_ context.Context, args json.RawMessage) (any, error) {
+		Handler: func(ctx context.Context, args json.RawMessage) (any, error) {
 			var in struct {
 				Branch  string `json:"branch"`
 				Author  string `json:"author"`
@@ -122,21 +129,11 @@ func toolCommit(stateDirProvider func() (string, error)) Tool {
 			if in.Message == "" {
 				return nil, errors.New("message is required")
 			}
-			return withRepo(stateDirProvider, func(repo *repository.Repository) (any, error) {
-				result, err := repo.CommitStagedMutationBatch(repository.CommitStagedMutationRequest{
-					Branch:  in.Branch,
-					Author:  in.Author,
-					Message: in.Message,
-				})
-				if err != nil {
-					var warning *repository.CommittedWithWarningError
-					if errors.As(err, &warning) {
-						return result, err
-					}
-					return nil, err
-				}
-				return result, nil
-			})
+			session, err := rt.requireSession(ctx)
+			if err != nil {
+				return nil, err
+			}
+			return session.Commit(ctx, in.Author, in.Message)
 		},
 	}
 }

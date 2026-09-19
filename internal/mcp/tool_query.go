@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/autonomous-bits/spool/internal/contextual"
+	"github.com/autonomous-bits/spool/internal/ctxgit"
 	"github.com/autonomous-bits/spool/internal/repository"
 	"github.com/autonomous-bits/spool/internal/resolve"
 )
@@ -27,7 +28,7 @@ var predicatesSchema = map[string]any{
 	},
 }
 
-func toolResolve(stateDirProvider func() (string, error)) Tool {
+func toolResolve(rt *runtime) Tool {
 	return Tool{
 		Name:        "spl_resolve",
 		Description: "Resolve an immutable node entity by stable ID from a branch snapshot or explicit commit.",
@@ -66,7 +67,15 @@ func toolResolve(stateDirProvider func() (string, error)) Tool {
 			if in.Node == "" {
 				return nil, errors.New("node is required")
 			}
-			return withTool(stateDirProvider, func(tool *resolve.ResolveTool) (any, error) {
+			if session := rt.boundSession(); session != nil {
+				node, ok := session.ResolveNode(in.Node)
+				if !ok {
+					return nil, fmt.Errorf("%w: %s", resolve.ErrNodeNotFound, in.Node)
+				}
+				snapshot, projection := contextSnapshot(session, in.Branch)
+				return resolve.ResolveResult{Node: node, Snapshot: snapshot, Projection: projection}, nil
+			}
+			return withTool(rt.stateDir, func(tool *resolve.ResolveTool) (any, error) {
 				return tool.SPLResolve(ctx, resolve.ResolveRequest{
 					Selector: resolve.SnapshotSelector{
 						Branch: in.Branch,
@@ -80,7 +89,7 @@ func toolResolve(stateDirProvider func() (string, error)) Tool {
 	}
 }
 
-func toolSearch(stateDirProvider func() (string, error)) Tool {
+func toolSearch(rt *runtime) Tool {
 	return Tool{
 		Name:        "spl_search",
 		Description: "Perform lexical full-text search (FTS5) across nodes in a branch head snapshot.",
@@ -124,7 +133,15 @@ func toolSearch(stateDirProvider func() (string, error)) Tool {
 			if in.Query == "" {
 				return nil, errors.New("query is required")
 			}
-			return withTool(stateDirProvider, func(tool *resolve.ResolveTool) (any, error) {
+			if session := rt.boundSession(); session != nil {
+				matches, err := session.SearchNodes(ctx, in.Query, 20)
+				if err != nil {
+					return nil, err
+				}
+				snapshot, projection := contextSnapshot(session, in.Branch)
+				return resolve.SearchResult{Snapshot: snapshot, Projection: projection, Matches: matches}, nil
+			}
+			return withTool(rt.stateDir, func(tool *resolve.ResolveTool) (any, error) {
 				return tool.SPLSearch(ctx, resolve.SearchRequest{
 					Selector: resolve.SnapshotSelector{
 						Branch: in.Branch,
@@ -257,7 +274,7 @@ func toolSearchExpand(stateDirProvider func() (string, error)) Tool {
 	}
 }
 
-func toolFilter(stateDirProvider func() (string, error)) Tool {
+func toolFilter(rt *runtime) Tool {
 	return Tool{
 		Name:        "spl_filter",
 		Description: "Filter nodes in a branch head snapshot by label and indexed property predicates.",
@@ -303,7 +320,12 @@ func toolFilter(stateDirProvider func() (string, error)) Tool {
 			if in.Branch == "" {
 				return nil, errors.New("branch is required")
 			}
-			return withTool(stateDirProvider, func(tool *resolve.ResolveTool) (any, error) {
+			if session := rt.boundSession(); session != nil {
+				nodes := session.FilterNodes(in.Labels, 50)
+				snapshot, projection := contextSnapshot(session, in.Branch)
+				return resolve.FilterResult{Snapshot: snapshot, Projection: projection, Nodes: nodes}, nil
+			}
+			return withTool(rt.stateDir, func(tool *resolve.ResolveTool) (any, error) {
 				return tool.SPLFilter(ctx, resolve.FilterRequest{
 					Selector: resolve.SnapshotSelector{
 						Branch: in.Branch,
@@ -604,7 +626,7 @@ func toolHistory(stateDirProvider func() (string, error)) Tool {
 	}
 }
 
-func toolGraph(stateDirProvider func() (string, error)) Tool {
+func toolGraph(rt *runtime) Tool {
 	return Tool{
 		Name:        "spl_graph",
 		Description: "Export every node and edge in an immutable branch snapshot as JSON.",
@@ -633,7 +655,17 @@ func toolGraph(stateDirProvider func() (string, error)) Tool {
 			if in.Branch == "" {
 				return nil, errors.New("branch is required")
 			}
-			return withTool(stateDirProvider, func(tool *resolve.ResolveTool) (any, error) {
+			if session := rt.boundSession(); session != nil {
+				nodes, edges := session.GraphDump()
+				snapshot, projection := contextSnapshot(session, in.Branch)
+				return map[string]any{
+					"snapshot":   snapshot,
+					"projection": projection,
+					"nodes":      nodes,
+					"edges":      edges,
+				}, nil
+			}
+			return withTool(rt.stateDir, func(tool *resolve.ResolveTool) (any, error) {
 				return tool.SPLGraph(ctx, resolve.SnapshotSelector{
 					Branch: in.Branch,
 					Commit: in.Commit,
@@ -641,4 +673,22 @@ func toolGraph(stateDirProvider func() (string, error)) Tool {
 			})
 		},
 	}
+}
+
+func contextSnapshot(session *ctxgit.Session, branch string) (resolve.SnapshotMetadata, resolve.ProjectionMetadata) {
+	status, err := session.ProjectionStatus()
+	if err != nil {
+		return resolve.SnapshotMetadata{Repository: session.Bind.SolutionID, Branch: branch, Root: "context-git"},
+			resolve.ProjectionMetadata{State: "unavailable", SchemaVersion: "1"}
+	}
+	return resolve.SnapshotMetadata{
+			Repository: session.Bind.SolutionID,
+			Branch:     branch,
+			Commit:     status.Commit,
+			Root:       "context-git",
+		}, resolve.ProjectionMetadata{
+			NodeRoot:      "checkout",
+			State:         status.State,
+			SchemaVersion: "1",
+		}
 }

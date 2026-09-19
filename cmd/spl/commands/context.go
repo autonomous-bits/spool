@@ -7,7 +7,7 @@ import (
 
 // NewContextCommand creates the spl context command.
 func NewContextCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra.Command {
-	return newContextualCommand(
+	command := newContextualCommand(
 		"context",
 		"Assemble evidence-focused graph context",
 		"Return JSON evidence and bounded graph context from a lexical query or typed filters.",
@@ -15,4 +15,6 @@ func NewContextCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra
 		toolProvider,
 		true,
 	)
+	command.AddCommand(NewContextInitCommand())
+	return command
 }
