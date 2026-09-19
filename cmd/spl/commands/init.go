@@ -12,11 +12,14 @@ func NewInitCommand(initialize func() (*repository.Repository, error)) *cobra.Co
 	return &cobra.Command{
 		Use:          "init",
 		Short:        "Initialize a Spool repository",
-		Long:         "Initialize the resolved Spool state directory and create the default main branch.",
+		Long:         "Initialize the resolved Spool state directory and create the default main branch. Not the solution-context onboarding path: when `.spool/context.toml` is present this command is refused; use `spl context init --remote` instead.",
 		Example:      "  spl init",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(command *cobra.Command, _ []string) error {
+			if err := refuseLegacyContextSoT("spl init"); err != nil {
+				return err
+			}
 			repo, err := initialize()
 			if err != nil {
 				return err

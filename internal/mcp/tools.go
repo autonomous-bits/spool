@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/autonomous-bits/spool/internal/ctxgit"
 	"github.com/autonomous-bits/spool/internal/repository"
 	"github.com/autonomous-bits/spool/internal/resolve"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -170,6 +171,18 @@ func wrapHandler(fn ToolHandler) mcp.ToolHandler {
 	}
 }
 
+var legacyContextSoTTools = map[string]bool{
+	"spl_remote_set":       true,
+	"spl_remote_show":      true,
+	"spl_remote_remove":    true,
+	"spl_remote_branch":    true,
+	"spl_push":             true,
+	"spl_pull":             true,
+	"spl_clone":            true,
+	"spl_workspace_init":   true,
+	"spl_workspace_attach": true,
+}
+
 // RegisterAllTools registers all 42 Spool tools onto the given official MCP server.
 func RegisterAllTools(s *mcp.Server, rt *runtime) {
 	if rt == nil {
@@ -219,6 +232,18 @@ func RegisterAllTools(s *mcp.Server, rt *runtime) {
 		toolPull(stateDirProvider),
 		toolClone(),
 		toolVersion(),
+	}
+
+	for i, t := range tools {
+		if !legacyContextSoTTools[t.Name] {
+			continue
+		}
+		name := t.Name
+		t.Description = t.Description + " Not the durable solution-context source of truth — bind each code repo with .spool/context.toml (or `spl context init --remote`) and sync with stock git clone/PR/history."
+		t.Handler = func(_ context.Context, _ json.RawMessage) (any, error) {
+			return nil, ctxgit.LegacyContextSoTError(name)
+		}
+		tools[i] = t
 	}
 
 	for _, t := range tools {

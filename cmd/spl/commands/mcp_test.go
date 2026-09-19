@@ -246,28 +246,26 @@ func TestMCPCommand_FullWorkflow(t *testing.T) {
 		t.Fatalf("res14 error: %#v", res14)
 	}
 
-	// 16. remote set
+	// 16-18. Rack/.spl remotes are not the durable context SoT
 	send(`{"jsonrpc":"2.0","id":15,"method":"tools/call","params":{"name":"spl_remote_set","arguments":{"endpoint":"http://127.0.0.1:8080","auth_mode":"bearer","workspace_id":"ws-test"}}}`)
 	id15, res15 := parseCallResult(t, recv())
-	if id15 != float64(15) || res15.IsError {
-		t.Fatalf("res15 error: %#v", res15)
+	if id15 != float64(15) || !res15.IsError {
+		t.Fatalf("res15 expected Rack SoT refusal: %#v", res15)
+	}
+	if !strings.Contains(res15.Content[0].Text, ".spool/context.toml") {
+		t.Fatalf("res15 expected bind guidance: %s", res15.Content[0].Text)
 	}
 
-	// 17. remote show
 	send(`{"jsonrpc":"2.0","id":16,"method":"tools/call","params":{"name":"spl_remote_show","arguments":{}}}`)
 	id16, res16 := parseCallResult(t, recv())
-	if id16 != float64(16) || res16.IsError {
-		t.Fatalf("res16 error: %#v", res16)
-	}
-	if !strings.Contains(res16.Content[0].Text, "127.0.0.1:8080") {
-		t.Fatalf("res16 expected 127.0.0.1:8080: %s", res16.Content[0].Text)
+	if id16 != float64(16) || !res16.IsError {
+		t.Fatalf("res16 expected Rack SoT refusal: %#v", res16)
 	}
 
-	// 18. remote remove
-	send(`{"jsonrpc":"2.0","id":17,"method":"tools/call","params":{"name":"spl_remote_remove","arguments":{}}}`)
+	send(`{"jsonrpc":"2.0","id":17,"method":"tools/call","params":{"name":"spl_clone","arguments":{"endpoint":"http://127.0.0.1:8080","workspace_id":"ws-test"}}}`)
 	id17, res17 := parseCallResult(t, recv())
-	if id17 != float64(17) || res17.IsError {
-		t.Fatalf("res17 error: %#v", res17)
+	if id17 != float64(17) || !res17.IsError {
+		t.Fatalf("res17 expected Rack SoT refusal: %#v", res17)
 	}
 
 	// Close stdin and verify server cleanly shuts down

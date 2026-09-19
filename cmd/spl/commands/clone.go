@@ -47,13 +47,18 @@ func NewCloneCommand() *cobra.Command {
 			"downloads the full graph history for the specified branch (or remote default branch), " +
 			"and materializes its state so you can immediately begin pulling and pushing ideas.\n\n" +
 			"The remote can be specified as a URL (e.g. http://127.0.0.1:8080/api/v1/workspaces/<id>) " +
-			"or with --endpoint and --workspace-id flags. If directory is omitted, it defaults to the workspace ID or name.",
+			"or with --endpoint and --workspace-id flags. If directory is omitted, it defaults to the workspace ID or name.\n\n" +
+			"Not the solution-context source of truth: when `.spool/context.toml` is present, this command " +
+			"is refused. Clone context with stock git against the bind file's remote URL.",
 		Example: "  spl clone http://127.0.0.1:8080/api/v1/workspaces/ws-backend\n" +
 			"  spl clone http://127.0.0.1:8080/workspaces/ws-backend my-backend\n" +
 			"  spl clone --endpoint http://127.0.0.1:8080 --tenant-id acme --workspace-id core-graph",
 		Args:         cobra.RangeArgs(0, 2),
 		SilenceUsage: true,
 		RunE: func(command *cobra.Command, args []string) error {
+			if err := refuseLegacyContextSoT("spl clone"); err != nil {
+				return err
+			}
 			ctx := command.Context()
 
 			var targetDir string

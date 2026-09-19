@@ -14,9 +14,16 @@ import (
 // credential is ever read from or written to repository control state.
 func NewRemoteCommand(repoProvider func() (*repository.Repository, error)) *cobra.Command {
 	command := &cobra.Command{
-		Use:          "remote",
-		Short:        "Configure the repository's Rack remote",
+		Use:   "remote",
+		Short: "Configure the repository's Rack remote (not the solution-context SoT)",
+		Long: "Rack remotes and `.spl` are not the durable solution-context source of truth. " +
+			"Bind each code repo with .spool/context.toml (or `spl context init --remote <url>`) " +
+			"and sync context with stock git clone, pull requests, and history. " +
+			"These commands are refused when a context bind is present.",
 		SilenceUsage: true,
+		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+			return refuseLegacyContextSoT(cmd.CommandPath())
+		},
 	}
 	command.AddCommand(
 		newRemoteSetCommand(repoProvider),
