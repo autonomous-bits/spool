@@ -101,7 +101,7 @@ func (s *Session) ValidateSchema() (resolve.SchemaValidationResult, error) {
 	}
 	snapshot, projection := s.QuerySnapshot(s.Bind.ProtectedBranch)
 	result := resolve.SchemaValidationResult{
-		Snapshot: snapshot,
+		Snapshot:   snapshot,
 		Projection: projection,
 		Schema: resolve.SchemaMetadata{
 			Root:       "schema.toml",

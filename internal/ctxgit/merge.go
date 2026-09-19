@@ -20,15 +20,15 @@ const mergeStateFile = "merge.json"
 
 // MergePreview is a file-graph three-way merge simulation against git refs.
 type MergePreview struct {
-	ID           string                    `json:"id"`
-	SourceBranch string                    `json:"sourceBranch"`
-	TargetBranch string                    `json:"targetBranch"`
-	SourceCommit string                    `json:"sourceCommit"`
-	TargetCommit string                    `json:"targetCommit"`
-	MergeBase    string                    `json:"mergeBase,omitempty"`
-	Clean        bool                      `json:"clean"`
-	Changes      []graphcontract.MergeChange `json:"changes"`
-	Conflicts    []graphcontract.MergeConflict `json:"conflicts"`
+	ID           string                          `json:"id"`
+	SourceBranch string                          `json:"sourceBranch"`
+	TargetBranch string                          `json:"targetBranch"`
+	SourceCommit string                          `json:"sourceCommit"`
+	TargetCommit string                          `json:"targetCommit"`
+	MergeBase    string                          `json:"mergeBase,omitempty"`
+	Clean        bool                            `json:"clean"`
+	Changes      []graphcontract.MergeChange     `json:"changes"`
+	Conflicts    []graphcontract.MergeConflict   `json:"conflicts"`
 	Violations   []graphcontract.SchemaViolation `json:"violations,omitempty"`
 }
 
@@ -40,13 +40,13 @@ type MergeTransactionStatus struct {
 }
 
 type persistedMerge struct {
-	TransactionID string                           `json:"transactionId"`
-	Preview       MergePreview                     `json:"preview"`
-	MergedNodes   map[string]repository.Node       `json:"mergedNodes"`
-	MergedEdges   map[string]repository.Edge       `json:"mergedEdges"`
-	SchemaTOML    []byte                           `json:"schemaToml"`
-	Resolved      bool                             `json:"resolved"`
-	Restaged      bool                             `json:"restaged"`
+	TransactionID string                     `json:"transactionId"`
+	Preview       MergePreview               `json:"preview"`
+	MergedNodes   map[string]repository.Node `json:"mergedNodes"`
+	MergedEdges   map[string]repository.Edge `json:"mergedEdges"`
+	SchemaTOML    []byte                     `json:"schemaToml"`
+	Resolved      bool                       `json:"resolved"`
+	Restaged      bool                       `json:"restaged"`
 }
 
 // PreviewMerge computes a three-way file-graph merge of two git branches.

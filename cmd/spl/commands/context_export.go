@@ -11,21 +11,27 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// NewContextExportCommand creates `spl context export` (alias `migrate-once`).
-func NewContextExportCommand(opts ctxgit.Options) *cobra.Command {
+// NewContextExportCommand creates `spl context export` or `migrate-once`.
+func NewContextExportCommand(opts ctxgit.Options, once bool) *cobra.Command {
 	var from, branch, author, message string
+	use := "export"
+	short := "Best-effort one-shot .spl export to the bound context git remote"
+	example := "  spl context export"
+	if once {
+		use = "migrate-once"
+		short = "One-shot export of leftover .spl graph into bound context git"
+		example = "  spl context migrate-once"
+	}
 	command := &cobra.Command{
-		Use:     "export",
-		Aliases: []string{"migrate-once"},
-		Short:   "Best-effort one-shot .spl export to the bound context git remote",
+		Use:   use,
+		Short: short,
 		Long: "Read leftover .spl internally and map the selected branch snapshot onto the bound " +
 			"solution context git remote as one mutation batch, one commit on a short-lived branch, " +
 			"and one pull request. This is migrate-once, not sync. Kept: nodes, edges, schema, assets. " +
 			"Dropped: packs, Rack remotes, reflogs, merge leases, projections. Lossy is OK. " +
 			"Re-run is overwrite-at-own-risk. Requires .spool/context.toml. " +
 			"Does not configure Rack remotes and does not write .spl.",
-		Example: "  spl context export\n" +
-			"  spl context migrate-once --branch main --message \"One-shot export\"",
+		Example:      example,
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(command *cobra.Command, _ []string) error {

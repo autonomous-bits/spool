@@ -15,6 +15,7 @@ func NewContextCommand(opts ctxgit.Options) *cobra.Command {
 		SilenceUsage: true,
 	}
 	command.AddCommand(NewContextInitCommand())
-	command.AddCommand(NewContextExportCommand(opts))
+	command.AddCommand(NewContextExportCommand(opts, false))
+	command.AddCommand(NewContextExportCommand(opts, true))
 	return command
 }

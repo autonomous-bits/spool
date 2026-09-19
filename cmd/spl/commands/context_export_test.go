@@ -12,7 +12,7 @@ import (
 
 func TestContextExportHelpNamesMigrateOnce(t *testing.T) {
 	var output bytes.Buffer
-	command := NewContextExportCommand(ctxgit.Options{WorkspaceDir: t.TempDir()})
+	command := NewContextExportCommand(ctxgit.Options{WorkspaceDir: t.TempDir()}, false)
 	command.SetOut(&output)
 	command.SetArgs([]string{"--help"})
 	if err := command.Execute(); err != nil {
@@ -40,7 +40,7 @@ func TestContextExportRefusesUnbound(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(wd) })
 
-	command := NewContextExportCommand(ctxgit.Options{WorkspaceDir: dir})
+	command := NewContextExportCommand(ctxgit.Options{WorkspaceDir: dir}, false)
 	command.SetArgs([]string{"--branch", "main"})
 	err = command.Execute()
 	if err == nil || !errors.Is(err, ctxgit.ErrUnbound) {
