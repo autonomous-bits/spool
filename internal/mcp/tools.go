@@ -85,6 +85,7 @@ func RegisterAllTools(s *mcp.Server, rt *runtime) {
 		toolMergeResolve(rt),
 		toolMergeAbort(rt),
 		toolMergeFinalize(rt),
+		toolMutate(rt),
 		toolSchemaMigrate(rt),
 		toolValidate(rt),
 		toolPrune(rt),

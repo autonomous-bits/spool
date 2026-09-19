@@ -122,12 +122,12 @@ Create a mutation-batch JSON file:
 ]
 ```
 
-Write the batch through a schema migration (short-lived branch + PR):
+Write the batch through `mutate` (short-lived branch + PR):
 
-- **MCP (Default)**: Call `spl_schema_migrate` with the current schema and `operations`.
+- **MCP (Default)**: Call `spl_mutate` with the `operations` array.
 - **CLI (Fallback)**:
   ```sh
-  spl schema migrate --schema schema.toml --batch arch-batch.json \
+  spl mutate --operations arch-batch.json \
     --author "Architect <arch@example.com>" --message "Record transactional outbox architecture decision"
   ```
 

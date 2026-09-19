@@ -36,8 +36,8 @@ VCS commands and do not reopen Rack or `.spl` as source of truth.
 | Component | Responsibility |
 | --- | --- |
 | `cmd/spl` | KEEP Cobra commands. The `context` namespace is init/export/migrate-once only. Graph queries use `query-context`. |
-| `internal/mcp` | KEEP MCP tools (19) over stdio. No Rack/workspace twins of removed commands. |
-| `internal/ctxgit` | Bind file, checkout, graph load/store, projection rebuild, short-lived branch + PR writes, bound queries, file-graph merge, graph prune, leftover `.spl` export. |
+| `internal/mcp` | KEEP MCP tools (20) over stdio. No Rack/workspace twins of removed commands. |
+| `internal/ctxgit` | Bind file, checkout, graph load/store, projection rebuild, short-lived branch + PR writes (including `mutate`), bound queries, file-graph merge, graph prune, leftover `.spl` export. |
 | `internal/resolve` | Query-budget and retrieval result shapes used by bound ctxgit reads. |
 | `internal/contextual` | Direction and evidence-expansion types used by `query-context` / `search-expand`. |
 | `internal/repository` | **Private library.** Historical CAS/Rack graph storage. No public CLI/MCP wrappers. Used internally by leftover `.spl` export. |
@@ -51,7 +51,7 @@ VCS commands and do not reopen Rack or `.spl` as source of truth.
 | --- | --- |
 | Happy path | `context init` (`--remote`), `context export` / `migrate-once`, `mcp`, `version` / `help` / `completion` |
 | Bound reads | `search`, `search-expand`, `filter`, `resolve`, `graph`, `query-context` |
-| Bound writes | `schema migrate`, `validate`, `asset add` / `read`, `merge *` (file-graph), `prune` |
+| Bound writes | `mutate`, `schema migrate`, `validate`, `asset add` / `read`, `merge *` (file-graph), `prune` |
 
 The former query verb `context` is **`query-context`** (MCP: `spl_query_context`). There is no alias.
 
@@ -95,8 +95,8 @@ workspaces.
 
 ### Write (short-lived branch + PR)
 
-`schema migrate`, `asset add`, file-graph `merge apply` / `finalize`, and `prune` persist a graph
-diff, `git add`, and:
+`mutate`, `schema migrate`, `asset add`, file-graph `merge apply` / `finalize`, and `prune` persist a
+graph diff, `git add`, and:
 
 - if the tree is clean, return a no-op on the protected branch (no empty PR);
 - otherwise commit on a short-lived branch, push that branch only, and open a host PR.

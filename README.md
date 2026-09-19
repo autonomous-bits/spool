@@ -79,6 +79,15 @@ spl validate
 
 Use stock git on the context remote for history and diff. Spool does not wrap `git log` or `git diff`.
 
+Write routine node and edge mutations (one JSON batch → short-lived branch + PR):
+
+```sh
+spl mutate --operations mutations.json --message "Record requirement"
+```
+
+`mutate` requires `.spool/context.toml` and refuses unbound workspaces. Identical or empty
+effective diffs do not open a PR. Use `schema migrate` when changing `schema.toml`.
+
 ## Context bind, export, and migrate-once
 
 ```sh
@@ -93,7 +102,13 @@ VCS commands. `migrate-once` skips the write when titles are already present.
 
 The `context` namespace is **only** init/export/migrate-once. Graph queries use `query-context`.
 
-## Schema, assets, merge, and prune
+## Mutate, schema, assets, merge, and prune
+
+Write routine node and edge mutations as one JSON batch. Bound-only; opens a short-lived branch + PR:
+
+```sh
+spl mutate --operations mutations.json --author alice --message "Record requirement"
+```
 
 Author a schema in TOML and apply conforming graph mutations:
 
@@ -156,7 +171,7 @@ when it deletes ephemeral nodes and cascading edges.
 
 Spool includes a native Model Context Protocol server built on the official Go SDK
 ([`github.com/modelcontextprotocol/go-sdk`](https://github.com/modelcontextprotocol/go-sdk)).
-`spl mcp` exposes the **KEEP** tool set (19 tools) over stdio. The tool list matches `spl --help`.
+`spl mcp` exposes the **KEEP** tool set (20 tools) over stdio. The tool list matches `spl --help`.
 
 ### Client configuration
 
@@ -186,6 +201,7 @@ The installed surface, including generated help, is documented in
 | `context export`, `context migrate-once` | Export leftover `.spl` into bound context git |
 | `query-context` | Evidence-focused bounded graph context (replaces query-`context`) |
 | `search`, `search-expand`, `filter`, `resolve`, `graph` | Bound checkout reads |
+| `mutate` | Routine node/edge writes (one batch → branch+PR) |
 | `schema migrate`, `validate` | Schema write (branch+PR) and validation |
 | `asset add`, `asset read` | Reference assets on the bound checkout |
 | `merge preview/apply/conflicts/resolve/finalize/abort` | File-graph merge |

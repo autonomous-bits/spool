@@ -5,7 +5,7 @@ package surface
 // KeepCLITopLevel is the exact set of top-level Cobra commands advertised by spl --help.
 var KeepCLITopLevel = []string{
 	"asset", "completion", "context", "filter", "graph", "help", "mcp",
-	"merge", "prune", "query-context", "resolve", "schema", "search",
+	"merge", "mutate", "prune", "query-context", "resolve", "schema", "search",
 	"search-expand", "validate", "version",
 }
 
@@ -30,6 +30,7 @@ var KeepMCPTools = []string{
 	"spl_merge_finalize",
 	"spl_merge_preview",
 	"spl_merge_resolve",
+	"spl_mutate",
 	"spl_prune",
 	"spl_query_context",
 	"spl_resolve",

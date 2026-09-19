@@ -22,6 +22,7 @@ spl merge --help
 | `context export`, `context migrate-once` | Export leftover `.spl` into bound context git |
 | `query-context` | Evidence-focused bounded graph context |
 | `search`, `filter`, `search-expand`, `resolve`, `graph` | Query the bound checkout |
+| `mutate` | Write node/edge mutations (one batch → branch+PR) |
 | `schema migrate`, `validate` | Write a schema (branch+PR) and validate |
 | `merge preview/apply/conflicts/resolve/finalize/abort` | File-graph merge |
 | `prune` | Remove `Ephemeral` nodes and cascading edges |
@@ -62,6 +63,24 @@ context export / migrate-once
 ```
 
 The `context` namespace is **not** the query verb. Use `query-context`.
+
+## Mutate
+
+```sh
+spl mutate --operations mutations.json --message "Record requirement"
+```
+
+```text
+mutate
+  --operations <path|->  JSON mutation-operation array (required; - reads stdin)
+  --author <text>
+  --message <text>
+```
+
+`mutate` is bound-only and refuses unbound workspaces. One ops batch becomes one git commit on a
+short-lived branch plus pull request. Pass `-` to `--operations` to read stdin. Identical or empty
+effective diffs do not open a PR. Use `schema migrate` when changing `schema.toml`. There are no
+aliases to `add` / `commit` / `status` / `stage` / `write`.
 
 ## Reading graphs
 
@@ -172,4 +191,4 @@ spl completion bash
 spl help query-context
 ```
 
-`mcp` exposes the KEEP tool set (19 tools), matching `spl --help`.
+`mcp` exposes the KEEP tool set (20 tools), matching `spl --help`.

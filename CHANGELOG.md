@@ -10,6 +10,15 @@ generated from commits since the preceding `v*` tag. Commits prefixed with `docs
 
 ### Added
 
+- Dedicated KEEP `spl mutate` / MCP `spl_mutate` for routine bound node and
+  edge writes. CLI: `spl mutate --operations <file|->` (stdin via `-`). MCP:
+  `{ "operations": [...], "author"?, "message"? }`. One mutation-operation batch
+  (same shape as schema migrate / private Stage) becomes one git commit on a
+  short-lived `spool/mcp/<stamp>-<nonce>` branch plus pull request via existing
+  `ctxgit` Stage/Commit. Bound-only (`FindBind` fail-closed). Identical or empty
+  effective diffs do not open a PR. Result aligns with `WriteResult` (`branch`,
+  `commit`, `pullRequest`, `written`, `deleted`). Schema changes still use
+  `schema migrate`. No aliases to `add` / `commit` / `status` / `stage` / `write`.
 - Documented `.spool/context.toml` bind format and the N-code-repos → one
   context git remote as the only durable SoT (`docs/context-bind.md`).
 - `spl context init --remote` seeds `CodeRepository` nodes from explicit binds
@@ -35,10 +44,11 @@ generated from commits since the preceding `v*` tag. Commits prefixed with `docs
 - `spl prune` / `spl_prune` is bound graph cleanup of `Ephemeral` nodes and
   cascading edges (short-lived branch + PR). It is not pack/CAS garbage collection.
   Unbound workspaces are refused.
-- Identical schema migrations are a no-op (no empty commit or PR).
-- MCP advertises the KEEP tool set only. `spl --help` matches that surface. A golden KEEP/REMOVE
-  list fails `make check` if a removed CLI name or MCP tool reappears (including `spl_context` and
-  Spool VCS wrappers `add`/`status`/`commit`/`branch`/`switch`).
+- Identical schema migrations and identical mutate diffs are a no-op (no empty commit or PR).
+- MCP advertises the KEEP tool set only (including `spl_mutate`). `spl --help` matches that
+  surface. A golden KEEP/REMOVE list fails `make check` if a removed CLI name or MCP tool
+  reappears (including `spl_context` and Spool VCS wrappers `add`/`status`/`commit`/`branch`/
+  `switch`).
 - **Sunset stop-list for solution context:** Spool-as-VCS, Rack sync, `.spl` as
   durable SoT, and pack wire-compat are stopped. Bind + stock git is the **only**
   durable SoT. Every agent write is a short-lived branch + PR (not push-clean to

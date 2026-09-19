@@ -20,18 +20,26 @@ func TestMCPWriteRequiresBind(t *testing.T) {
 	session := connectMCP(t, ctx, server)
 	defer func() { _ = session.Close() }()
 
-	res, err := session.CallTool(ctx, &officialmcp.CallToolParams{
-		Name:      "spl_prune",
-		Arguments: map[string]any{"dry_run": true},
-	})
-	if err != nil {
-		t.Fatalf("CallTool: %v", err)
-	}
-	if !res.IsError {
-		t.Fatal("unbound spl_prune must fail closed")
-	}
-	if !strings.Contains(toolText(res), "not bound") {
-		t.Fatalf("error = %s, want unbound message", toolText(res))
+	for _, tool := range []struct {
+		name string
+		args map[string]any
+	}{
+		{name: "spl_prune", args: map[string]any{"dry_run": true}},
+		{name: "spl_mutate", args: map[string]any{"operations": []map[string]any{{"action": "add", "entity": "node", "id": "n1", "title": "Nope"}}}},
+	} {
+		res, err := session.CallTool(ctx, &officialmcp.CallToolParams{
+			Name:      tool.name,
+			Arguments: tool.args,
+		})
+		if err != nil {
+			t.Fatalf("%s CallTool: %v", tool.name, err)
+		}
+		if !res.IsError {
+			t.Fatalf("unbound %s must fail closed", tool.name)
+		}
+		if !strings.Contains(toolText(res), "not bound") {
+			t.Fatalf("%s error = %s, want unbound message", tool.name, toolText(res))
+		}
 	}
 }
 
@@ -74,6 +82,48 @@ func TestMCPBoundQueryAndSchemaWriteOpensPR(t *testing.T) {
 	}
 	if !strings.Contains(text, `"url"`) || len(recorder.Requests) != 1 {
 		t.Fatalf("schema migrate missing PR: %s requests=%#v", text, recorder.Requests)
+	}
+}
+
+func TestMCPBoundMutateOpensPR(t *testing.T) {
+	ctx := context.Background()
+	codeRoot, _, cache, recorder := setupMCPBound(t)
+	server := NewSpoolServerWithOptions(ServerOptions{
+		WorkspaceDir: func() (string, error) { return codeRoot, nil },
+		CacheDir:     cache,
+		PROpener:     recorder,
+		Git:          isolatedMCPGit(),
+	})
+	session := connectMCP(t, ctx, server)
+	defer func() { _ = session.Close() }()
+
+	res, err := session.CallTool(ctx, &officialmcp.CallToolParams{
+		Name: "spl_mutate",
+		Arguments: map[string]any{
+			"message": "Record shared idea",
+			"operations": []map[string]any{
+				{"action": "add", "entity": "node", "id": "idea-1", "title": "Shared idea", "labels": []string{"Requirement"}},
+			},
+		},
+	})
+	if err != nil || res.IsError {
+		t.Fatalf("spl_mutate: err=%v res=%s", err, toolText(res))
+	}
+	text := toolText(res)
+	if !strings.Contains(text, `"branch":"spool/mcp/`) {
+		t.Fatalf("mutate missing short-lived branch: %s", text)
+	}
+	if !strings.Contains(text, `"url"`) || len(recorder.Requests) != 1 {
+		t.Fatalf("mutate missing PR: %s requests=%#v", text, recorder.Requests)
+	}
+	if !strings.Contains(text, `"operations":1`) {
+		t.Fatalf("mutate missing operations count: %s", text)
+	}
+	if !strings.Contains(text, `"written"`) {
+		t.Fatalf("mutate missing written summary: %s", text)
+	}
+	if !strings.Contains(text, `"pullRequest"`) {
+		t.Fatalf("mutate missing pullRequest: %s", text)
 	}
 }
 

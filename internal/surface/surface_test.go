@@ -35,6 +35,33 @@ func TestQueryContextRenameHasNoOldNameOnKeepSurface(t *testing.T) {
 	}
 }
 
+func TestMutateIsKeepAndVCSWrappersStayRemoved(t *testing.T) {
+	if !contains(KeepCLITopLevel, "mutate") {
+		t.Fatal("KEEP CLI must include mutate")
+	}
+	if !contains(KeepMCPTools, "spl_mutate") {
+		t.Fatal("KEEP MCP must include spl_mutate")
+	}
+	for _, name := range []string{"add", "commit", "status", "stage", "write"} {
+		if contains(KeepCLITopLevel, name) {
+			t.Errorf("VCS-shaped name %q must not be KEEP", name)
+		}
+	}
+	for _, name := range []string{"spl_add", "spl_commit", "spl_status", "spl_branch_list", "spl_branch_create", "spl_branch_delete", "spl_switch"} {
+		if contains(KeepMCPTools, name) {
+			t.Errorf("removed MCP twin %q must not be KEEP", name)
+		}
+		if !contains(RemovedMCPTools, name) {
+			t.Errorf("removed MCP twin %q must stay on the REMOVE golden list", name)
+		}
+	}
+	for _, name := range []string{"spl_stage", "spl_write"} {
+		if contains(KeepMCPTools, name) {
+			t.Errorf("VCS-shaped MCP name %q must not be KEEP", name)
+		}
+	}
+}
+
 func assertDisjoint(t *testing.T, kind string, keep, removed []string) {
 	t.Helper()
 	seen := map[string]struct{}{}
