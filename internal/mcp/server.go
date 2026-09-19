@@ -10,6 +10,12 @@ import (
 
 // NewSpoolServer creates and configures an MCP server with all Spool tools registered.
 func NewSpoolServer(stateDirProvider func() (string, error)) *mcp.Server {
+	return NewSpoolServerWithOptions(ServerOptions{StateDir: stateDirProvider})
+}
+
+// NewSpoolServerWithOptions creates an MCP server and rebuilds the local
+// context-git projection when the workspace is bound.
+func NewSpoolServerWithOptions(opts ServerOptions) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:        "spool",
 		Title:       "Spool",
@@ -24,7 +30,9 @@ func NewSpoolServer(stateDirProvider func() (string, error)) *mcp.Server {
 		},
 	}, nil)
 
-	RegisterAllTools(server, stateDirProvider)
+	rt := newRuntime(opts)
+	rt.start(context.Background())
+	RegisterAllTools(server, rt)
 	return server
 }
 

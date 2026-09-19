@@ -25,6 +25,36 @@ type callToolResult struct {
 	IsError bool `json:"isError,omitempty"`
 }
 
+func seedUnboundMCPGraph(t *testing.T, stateDir string) {
+	t.Helper()
+	repo, err := repository.OpenRepository(stateDir)
+	if err != nil {
+		t.Fatalf("OpenRepository: %v", err)
+	}
+	defer func() {
+		if err := repo.Close(); err != nil {
+			t.Fatalf("close seed repo: %v", err)
+		}
+	}()
+	if _, err := repo.StageMutationBatch(repository.StageMutationRequest{
+		Branch: "main",
+		Operations: []repository.MutationOperation{
+			{
+				Action: "add", Entity: "node", ID: "idea-mcp-test", Title: "Test MCP node",
+				Labels:     []string{"Requirement"},
+				Properties: map[string]repository.PropertyValue{"priority": repository.IntegerPropertyValue(1)},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("seed StageMutationBatch: %v", err)
+	}
+	if _, err := repo.CommitStagedMutationBatch(repository.CommitStagedMutationRequest{
+		Branch: "main", Author: "agent", Message: "Add test node via MCP",
+	}); err != nil {
+		t.Fatalf("seed commit: %v", err)
+	}
+}
+
 func TestMCPCommand_FullWorkflow(t *testing.T) {
 	stateDir := t.TempDir()
 	initRepo, err := repository.InitializeRepository(stateDir)
@@ -115,41 +145,37 @@ func TestMCPCommand_FullWorkflow(t *testing.T) {
 		t.Fatalf("expected 42 tools, got %d", len(toolsList))
 	}
 
-	// 4. status on main (initially empty)
+	// 4. status on main (initially empty; unbound workspaces still read .spl)
 	send(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"spl_status","arguments":{"branch":"main"}}}`)
 	id3, res3 := parseCallResult(t, recv())
 	if id3 != float64(3) || res3.IsError {
 		t.Fatalf("res3 error: %#v", res3)
 	}
 
-	// 5. add node via inline JSON batch (no disk file!)
+	// 5. unbound writes fail closed
 	send(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"spl_add","arguments":{"branch":"main","operations":[{"action":"add","entity":"node","id":"idea-mcp-test","title":"Test MCP node","labels":["Requirement"],"properties":{"priority":{"kind":"integer","integer":1}}}]}}}`)
 	id4, res4 := parseCallResult(t, recv())
-	if id4 != float64(4) || res4.IsError {
-		t.Fatalf("res4 error: %#v", res4)
+	if id4 != float64(4) || !res4.IsError {
+		t.Fatalf("res4 unbound add should fail: %#v", res4)
 	}
-	if !strings.Contains(res4.Content[0].Text, `"operations":1`) {
-		t.Fatalf("res4 expected operations:1: %s", res4.Content[0].Text)
+	if !strings.Contains(res4.Content[0].Text, "not bound") {
+		t.Fatalf("res4 expected unbound error: %s", res4.Content[0].Text)
 	}
 
-	// 6. status on main after add
+	seedUnboundMCPGraph(t, stateDir)
+
+	// 6. status after local .spl seed (no staged MCP batch)
 	send(`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"spl_status","arguments":{"branch":"main"}}}`)
 	id5, res5 := parseCallResult(t, recv())
 	if id5 != float64(5) || res5.IsError {
 		t.Fatalf("res5 error: %#v", res5)
 	}
-	if !strings.Contains(res5.Content[0].Text, `"operations":1`) {
-		t.Fatalf("res5 expected operations:1 in status: %s", res5.Content[0].Text)
-	}
 
-	// 7. commit
+	// 7. unbound commit also fails closed
 	send(`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"spl_commit","arguments":{"branch":"main","author":"agent","message":"Add test node via MCP"}}}`)
 	id6, res6 := parseCallResult(t, recv())
-	if id6 != float64(6) || res6.IsError {
-		t.Fatalf("res6 error: %#v", res6)
-	}
-	if !strings.Contains(res6.Content[0].Text, `"commit"`) {
-		t.Fatalf("res6 expected commit_id: %s", res6.Content[0].Text)
+	if id6 != float64(6) || !res6.IsError {
+		t.Fatalf("res6 unbound commit should fail: %#v", res6)
 	}
 
 	// 8. resolve committed node

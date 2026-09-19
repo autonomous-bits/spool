@@ -9,16 +9,14 @@ import (
 	"io"
 	"os"
 	"unicode/utf8"
-
-	"github.com/autonomous-bits/spool/internal/repository"
 )
 
 const maxAssetReadBytes = 32 * 1024 * 1024 // 32MB limit for MCP tool responses
 
-func toolAssetAdd(stateDirProvider func() (string, error)) Tool {
+func toolAssetAdd(rt *runtime) Tool {
 	return Tool{
 		Name:        "spl_asset_add",
-		Description: "Ingest a reference document into content-addressable storage and stage a corresponding Asset node on a branch.",
+		Description: "Ingest a reference document into the bound context git checkout and stage an Asset node for the next short-lived branch + PR. Unbound workspaces refuse writes.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -61,32 +59,29 @@ func toolAssetAdd(stateDirProvider func() (string, error)) Tool {
 			if fileInfo.IsDir() {
 				return nil, fmt.Errorf("path %q is a directory, expected a regular file", in.FilePath)
 			}
-			return withRepo(stateDirProvider, func(repo *repository.Repository) (any, error) {
-				return repo.StageAsset(ctx, repository.AssetAddRequest{
-					Branch:   in.Branch,
-					FilePath: in.FilePath,
-					Title:    in.Title,
-					ID:       in.ID,
-				})
-			})
+			session, err := rt.requireSession(ctx)
+			if err != nil {
+				return nil, err
+			}
+			return session.StageAsset(in.FilePath, in.ID, in.Title)
 		},
 	}
 }
 
-func toolAssetRead(stateDirProvider func() (string, error)) Tool {
+func toolAssetRead(rt *runtime) Tool {
 	return Tool{
 		Name:        "spl_asset_read",
-		Description: "Read asset blob contents by locator URI (spool://assets/{hash}), hash, or graph node ID.",
+		Description: "Read asset blob contents from the bound context checkout (hash, assets/ path, or Asset node ID).",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"target": map[string]any{
 					"type":        "string",
-					"description": "Asset locator URI (spool://assets/{hash}), raw BLAKE3 hash, or graph node ID",
+					"description": "Asset locator (assets/<hash>[/name]), raw BLAKE3 hash, or graph node ID",
 				},
 				"branch": map[string]any{
 					"type":        "string",
-					"description": "Branch to resolve node ID from (defaults to active branch)",
+					"description": "Branch to resolve node ID from (defaults to the protected context branch)",
 				},
 			},
 			"required": []string{"target"},
@@ -102,36 +97,38 @@ func toolAssetRead(stateDirProvider func() (string, error)) Tool {
 			if in.Target == "" {
 				return nil, errors.New("target is required")
 			}
-			return withRepo(stateDirProvider, func(repo *repository.Repository) (any, error) {
-				reader, size, meta, err := repo.ReadAsset(ctx, in.Branch, in.Target)
-				if err != nil {
-					return nil, err
-				}
-				defer func() { _ = reader.Close() }()
+			session, err := rt.requireSession(ctx)
+			if err != nil {
+				return nil, err
+			}
+			reader, size, meta, err := session.ReadAsset(ctx, in.Target)
+			if err != nil {
+				return nil, err
+			}
+			defer func() { _ = reader.Close() }()
 
-				limitedReader := io.LimitReader(reader, maxAssetReadBytes+1)
-				data, err := io.ReadAll(limitedReader)
-				if err != nil {
-					return nil, err
-				}
-				if len(data) > maxAssetReadBytes {
-					return nil, fmt.Errorf("asset size (%d bytes) exceeds maximum readable size (%d bytes) for MCP", size, maxAssetReadBytes)
-				}
+			limitedReader := io.LimitReader(reader, maxAssetReadBytes+1)
+			data, err := io.ReadAll(limitedReader)
+			if err != nil {
+				return nil, err
+			}
+			if len(data) > maxAssetReadBytes {
+				return nil, fmt.Errorf("asset size (%d bytes) exceeds maximum readable size (%d bytes) for MCP", size, maxAssetReadBytes)
+			}
 
-				encoding := "utf-8"
-				content := string(data)
-				if !utf8.Valid(data) {
-					encoding = "base64"
-					content = base64.StdEncoding.EncodeToString(data)
-				}
+			encoding := "utf-8"
+			content := string(data)
+			if !utf8.Valid(data) {
+				encoding = "base64"
+				content = base64.StdEncoding.EncodeToString(data)
+			}
 
-				return map[string]any{
-					"mimeType": meta.MIMEType,
-					"size":     size,
-					"encoding": encoding,
-					"content":  content,
-				}, nil
-			})
+			return map[string]any{
+				"mimeType": meta.MIMEType,
+				"size":     size,
+				"encoding": encoding,
+				"content":  content,
+			}, nil
 		},
 	}
 }
