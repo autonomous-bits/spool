@@ -63,8 +63,8 @@ func TestSpoolMCPServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("session.ListTools failed: %v", err)
 	}
-	if len(toolsList.Tools) != 42 {
-		t.Fatalf("expected 42 tools, got %d", len(toolsList.Tools))
+	if len(toolsList.Tools) != 43 {
+		t.Fatalf("expected 43 tools, got %d", len(toolsList.Tools))
 	}
 
 	expectedTools := map[string]bool{
@@ -79,6 +79,7 @@ func TestSpoolMCPServer(t *testing.T) {
 		"spl_clone":               true,
 		"spl_commit":              true,
 		"spl_context":             true,
+		"spl_context_export":      true,
 		"spl_diff":                true,
 		"spl_filter":              true,
 		"spl_fsck":                true,

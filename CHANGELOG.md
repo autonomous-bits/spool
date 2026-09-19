@@ -14,6 +14,11 @@ generated from commits since the preceding `v*` tag. Commits prefixed with `docs
   context git remote happy path (`docs/context-bind.md`).
 - `spl context init --remote` seeds `CodeRepository` nodes from explicit binds
   (repeat per code repo; sibling directories are not scanned).
+- `spl context export` / `spl context migrate-once` / MCP `spl_context_export`:
+  best-effort one-shot `.spl` → context git export (keep nodes/edges/schema/assets;
+  drop packs, Rack remotes, reflogs, merge leases, projections). Opens a
+  short-lived branch + PR. Re-run is overwrite-at-own-risk; not sync
+  (`docs/context-git-migration.md`).
 
 ### Changed
 

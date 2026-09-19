@@ -31,6 +31,11 @@ func DecodeSchemaTOMLReader(reader io.Reader) (SchemaSnapshot, error) {
 	return graphcontract.DecodeSchemaTOMLReader(reader)
 }
 
+// EncodeSchemaTOML serializes a schema snapshot into authoring TOML.
+func EncodeSchemaTOML(schema SchemaSnapshot) ([]byte, error) {
+	return graphcontract.EncodeSchemaTOML(schema)
+}
+
 func validateNodeIngestion(node Node) error {
 	for _, label := range node.Labels {
 		if err := validateSchemaIdentifier(label, MaxSchemaLabelLength, "label"); err != nil {

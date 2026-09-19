@@ -22,7 +22,7 @@ func TestContextCLIAndToolReturnEquivalentJSON(t *testing.T) {
 	}
 
 	var output bytes.Buffer
-	command := NewContextCommand(func() (*resolve.ResolveTool, error) { return tool, nil })
+	command := NewContextCommand(func() (*resolve.ResolveTool, error) { return tool, nil }, nil)
 	command.SetOut(&output)
 	command.SetArgs([]string{"--branch", "main", "--label", "Seed", "--direction", "both", "--edge-type", "RELATED", "--max-rows", "10", "--max-response-bytes", "100000", "--timeout", "1s"})
 	if err := command.Execute(); err != nil {
@@ -72,7 +72,7 @@ func TestContextualCLIRequiresExactlyOneSeedSelector(t *testing.T) {
 		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			command := NewContextCommand(func() (*resolve.ResolveTool, error) { return tool, nil })
+			command := NewContextCommand(func() (*resolve.ResolveTool, error) { return tool, nil }, nil)
 			command.SetArgs(testCase.args)
 			if err := command.Execute(); err == nil || !strings.Contains(err.Error(), testCase.want) {
 				t.Fatalf("context error = %v, want %q", err, testCase.want)

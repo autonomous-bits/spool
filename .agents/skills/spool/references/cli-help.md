@@ -48,6 +48,7 @@ solution-context store.
 | `resolve`, `graph` | Read a node or export a complete branch snapshot |
 | `search`, `filter`, `search-expand`, `context` | Query the branch-head projection |
 | `context init` | Bind this code repo to a solution context git remote and seed layout/`CodeRepository` |
+| `context export` (`migrate-once`) | One-shot `.spl` → context git export (lossy; not sync) |
 | `history`, `branches-containing`, `diff` | Inspect history, branch containment, and snapshot changes |
 | `merge preview/apply/conflicts/resolve/finalize/abort` | Run the merge transaction lifecycle |
 | `fsck`, `gc`, `prune` | Check integrity, maintain objects, and remove ephemeral graph data |
@@ -119,6 +120,29 @@ context init
   --protected-branch <name>  protected integration branch (default main)
   --repository-id <id>       code-repo namespace for node IDs
   --author <text>            git author for the layout commit
+```
+
+## Context export (migrate-once)
+
+```sh
+spl context export --branch main
+spl context migrate-once --branch main
+```
+
+`context export` (alias `migrate-once`) is a best-effort **one-shot** mapping of
+the selected local `.spl` branch into the bound context git remote. It is not
+sync and not dual-write. Kept: nodes, edges, schema, assets (LFS ≥512 KiB).
+Dropped: packs, Rack remotes, reflogs, merge leases, projections. Success JSON
+lists kept vs skipped. Re-run is overwrite-at-own-risk. Requires
+`.spool/context.toml`. Export opens one short-lived branch and PR (gate G2);
+it fails closed if dropped paths would land in the tree. See
+[docs/context-git-migration.md](../../docs/context-git-migration.md).
+
+```text
+context export
+  --branch <name>   local .spl branch (defaults to the active branch)
+  --author <text>   git author for the export commit
+  --message <text>  commit/PR title
 ```
 
 ## Branches and schemas
@@ -499,7 +523,7 @@ spl mcp
 spl mcp --state-dir /path/to/.spl
 ```
 
-`mcp` starts a Model Context Protocol server communicating over standard input/output (`stdio`) using the official SDK (`github.com/modelcontextprotocol/go-sdk`). It exposes 100% of Spool commands as 42 structured, typed MCP tools (`spl_*`), enabling AI pair-programming assistants and autonomous coding agents to inspect, branch, mutate, and merge graph data directly.
+`mcp` starts a Model Context Protocol server communicating over standard input/output (`stdio`) using the official SDK (`github.com/modelcontextprotocol/go-sdk`). It exposes 100% of Spool commands as 43 structured, typed MCP tools (`spl_*`), enabling AI pair-programming assistants and autonomous coding agents to inspect, branch, mutate, and merge graph data directly.
 
 For agents operating in MCP-equipped environments, calling the native MCP tools is the default and recommended interaction pattern, while the CLI serves as a fallback for terminal scripts and non-MCP contexts.
 

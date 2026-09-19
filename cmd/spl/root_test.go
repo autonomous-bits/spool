@@ -19,6 +19,19 @@ func TestRootCommandIncludesResolveSubcommand(t *testing.T) {
 	}
 }
 
+func TestRootCommandIncludesContextExportSubcommand(t *testing.T) {
+	command := newRootCommand(&bytes.Buffer{}, newTestSeedRepository(t))
+	for _, path := range [][]string{{"context", "export"}, {"context", "migrate-once"}} {
+		found, _, err := command.Find(path)
+		if err != nil {
+			t.Fatalf("find %v: %v", path, err)
+		}
+		if found.Name() != "export" {
+			t.Fatalf("command = %q, want export", found.Name())
+		}
+	}
+}
+
 func TestRootCommandIncludesWorkspaceProvisioningCommands(t *testing.T) {
 	command := newRootCommand(&bytes.Buffer{}, newTestSeedRepository(t))
 
@@ -56,6 +69,8 @@ func TestCommandHelpIncludesExamples(t *testing.T) {
 		{[]string{"search", "--help"}, "spl search --branch main --query incident"},
 		{[]string{"search-expand", "--help"}, "spl search-expand --branch main --query incident"},
 		{[]string{"context", "--help"}, "spl context --branch main --label Task"},
+		{[]string{"context", "export", "--help"}, "spl context export"},
+		{[]string{"context", "init", "--help"}, "spl context init --remote"},
 		{[]string{"fsck", "--help"}, "spl fsck"},
 		{[]string{"gc", "--help"}, "spl gc"},
 	}

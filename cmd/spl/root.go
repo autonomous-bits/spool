@@ -113,7 +113,7 @@ func newRootCommandWithLifecycle(
 	root.AddCommand(commands.NewFilterCommand(toolProvider))
 	root.AddCommand(commands.NewSearchCommand(toolProvider))
 	root.AddCommand(commands.NewSearchExpandCommand(toolProvider))
-	root.AddCommand(commands.NewContextCommand(toolProvider))
+	root.AddCommand(commands.NewContextCommand(toolProvider, repoProvider))
 	root.AddCommand(commands.NewGraphCommand(toolProvider))
 	root.AddCommand(commands.NewMergeCommand(repoProvider))
 	root.AddCommand(commands.NewFsckCommand(fsckProvider))

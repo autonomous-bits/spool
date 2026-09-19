@@ -413,6 +413,73 @@ func DecodeSchemaTOMLReader(reader io.Reader) (SchemaSnapshot, error) {
 	return normalized, nil
 }
 
+// EncodeSchemaTOML serializes a schema snapshot into the authoring TOML format
+// accepted by DecodeSchemaTOML.
+func EncodeSchemaTOML(schema SchemaSnapshot) ([]byte, error) {
+	normalized, err := schema.Normalize()
+	if err != nil {
+		return nil, err
+	}
+	document := tomlSchemaDocument{
+		Version:    normalized.Version,
+		Permissive: normalized.Permissive,
+	}
+	if len(normalized.GlobalInvariants) > 0 {
+		document.GlobalInvariants = make([]string, len(normalized.GlobalInvariants))
+		for i, invariant := range normalized.GlobalInvariants {
+			document.GlobalInvariants[i] = string(invariant)
+		}
+	}
+	if len(normalized.NodeRules) > 0 {
+		document.Nodes = make([]tomlNodeRule, len(normalized.NodeRules))
+		for i, rule := range normalized.NodeRules {
+			document.Nodes[i] = tomlNodeRule{
+				Label:            rule.Label,
+				NaturalKey:       append([]string(nil), rule.NaturalKey...),
+				NaturalKeyUnique: rule.NaturalKeyUnique,
+				Properties:       encodePropertyRules(rule.Properties),
+			}
+		}
+	}
+	if len(normalized.EdgeRules) > 0 {
+		document.Edges = make([]tomlEdgeRule, len(normalized.EdgeRules))
+		for i, rule := range normalized.EdgeRules {
+			document.Edges[i] = tomlEdgeRule{
+				Type:         rule.Type,
+				SourceLabels: append([]string(nil), rule.SourceLabels...),
+				TargetLabels: append([]string(nil), rule.TargetLabels...),
+				Cardinality: tomlCardinality{
+					SourceMin: rule.Cardinality.SourceMin,
+					SourceMax: rule.Cardinality.SourceMax,
+					TargetMin: rule.Cardinality.TargetMin,
+					TargetMax: rule.Cardinality.TargetMax,
+				},
+				Properties: encodePropertyRules(rule.Properties),
+			}
+		}
+	}
+	data, err := toml.Marshal(document)
+	if err != nil {
+		return nil, fmt.Errorf("%w: encode schema TOML: %w", ErrInvalidSchemaTOML, err)
+	}
+	return data, nil
+}
+
+func encodePropertyRules(rules []PropertyRule) []tomlPropertyRule {
+	if len(rules) == 0 {
+		return nil
+	}
+	encoded := make([]tomlPropertyRule, len(rules))
+	for i, rule := range rules {
+		types := make([]string, len(rule.Types))
+		for j, kind := range rule.Types {
+			types[j] = string(kind)
+		}
+		encoded[i] = tomlPropertyRule{Key: rule.Key, Required: rule.Required, Types: types, Indexed: rule.Indexed}
+	}
+	return encoded
+}
+
 type tomlSchemaDocument struct {
 	Version          uint16         `toml:"version"`
 	Permissive       bool           `toml:"permissive"`

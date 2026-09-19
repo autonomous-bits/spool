@@ -1,12 +1,13 @@
 package commands
 
 import (
+	"github.com/autonomous-bits/spool/internal/repository"
 	"github.com/autonomous-bits/spool/internal/resolve"
 	"github.com/spf13/cobra"
 )
 
 // NewContextCommand creates the spl context command.
-func NewContextCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra.Command {
+func NewContextCommand(toolProvider func() (*resolve.ResolveTool, error), repoProvider func() (*repository.Repository, error)) *cobra.Command {
 	command := newContextualCommand(
 		"context",
 		"Assemble evidence-focused graph context",
@@ -16,5 +17,6 @@ func NewContextCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra
 		true,
 	)
 	command.AddCommand(NewContextInitCommand())
+	command.AddCommand(NewContextExportCommand(repoProvider))
 	return command
 }
