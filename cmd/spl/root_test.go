@@ -6,36 +6,72 @@ import (
 	"testing"
 )
 
-func TestRootCommandIncludesResolveSubcommand(t *testing.T) {
-	command := newRootCommand(&bytes.Buffer{}, newTestSeedRepository(t))
+var keepTopLevel = []string{
+	"asset", "completion", "context", "filter", "graph", "help", "mcp",
+	"merge", "prune", "query-context", "resolve", "schema", "search",
+	"search-expand", "validate", "version",
+}
 
-	found, _, err := command.Find([]string{"resolve"})
-	if err != nil {
-		t.Fatalf("find resolve command: %v", err)
+var removedTopLevel = []string{
+	"init", "workspace", "remote", "push", "pull", "clone", "migrate",
+	"fsck", "gc", "cherry-pick", "add", "status", "commit", "branch",
+	"switch", "history", "diff", "branches-containing",
+}
+
+func TestRootHelpSurfaceKeepOnly(t *testing.T) {
+	var output bytes.Buffer
+	command := newRootCommand(&output)
+	command.SetArgs([]string{"--help"})
+	if err := command.Execute(); err != nil {
+		t.Fatalf("help: %v", err)
 	}
-
-	if found.Name() != "resolve" {
-		t.Fatalf("command = %q, want resolve", found.Name())
+	help := output.String()
+	for _, name := range keepTopLevel {
+		if !strings.Contains(help, name) {
+			t.Errorf("help missing KEEP command %q:\n%s", name, help)
+		}
+	}
+	for _, name := range removedTopLevel {
+		// Top-level Available Commands listing: each command starts a help line.
+		for _, line := range strings.Split(help, "\n") {
+			fields := strings.Fields(line)
+			if len(fields) > 0 && fields[0] == name {
+				t.Errorf("removed command %q still listed in spl --help: %s", name, line)
+			}
+		}
 	}
 }
 
-func TestRootCommandIncludesContextExportSubcommand(t *testing.T) {
-	command := newRootCommand(&bytes.Buffer{}, newTestSeedRepository(t))
-	for _, path := range [][]string{{"context", "export"}, {"context", "migrate-once"}} {
-		found, _, err := command.Find(path)
-		if err != nil {
-			t.Fatalf("find %v: %v", path, err)
-		}
-		if found.Name() != "export" {
-			t.Fatalf("command = %q, want export", found.Name())
+func TestRemovedCommandsAreNotRegistered(t *testing.T) {
+	command := newRootCommand(&bytes.Buffer{})
+	for _, name := range removedTopLevel {
+		if _, _, err := command.Find([]string{name}); err == nil {
+			t.Errorf("removed command %q is still registered", name)
 		}
 	}
 }
 
-func TestRootCommandIncludesWorkspaceProvisioningCommands(t *testing.T) {
-	command := newRootCommand(&bytes.Buffer{}, newTestSeedRepository(t))
-
-	for _, path := range [][]string{{"workspace", "init"}, {"workspace", "attach"}} {
+func TestKeepCommandsAreRegistered(t *testing.T) {
+	command := newRootCommand(&bytes.Buffer{})
+	for _, path := range [][]string{
+		{"context", "init"},
+		{"context", "export"},
+		{"context", "migrate-once"},
+		{"query-context"},
+		{"search"},
+		{"search-expand"},
+		{"filter"},
+		{"resolve"},
+		{"graph"},
+		{"schema", "migrate"},
+		{"validate"},
+		{"asset", "add"},
+		{"asset", "read"},
+		{"merge", "preview"},
+		{"prune"},
+		{"mcp"},
+		{"version"},
+	} {
 		found, _, err := command.Find(path)
 		if err != nil {
 			t.Fatalf("find %v: %v", path, err)
@@ -51,36 +87,21 @@ func TestCommandHelpIncludesExamples(t *testing.T) {
 		path    []string
 		example string
 	}{
-		{[]string{"init", "--help"}, "spl init"},
-		{[]string{"add", "--help"}, "spl add --branch main --batch mutations.json"},
-		{[]string{"status", "--help"}, "spl status --branch main"},
-		{[]string{"commit", "--help"}, "spl commit --branch main"},
-		{[]string{"branch", "create", "--help"}, "spl branch create feature --from-branch main"},
-		{[]string{"branch", "list", "--help"}, "spl branch list"},
-		{[]string{"branch", "delete", "--help"}, "spl branch delete feature"},
-		{[]string{"switch", "--help"}, "spl switch feature"},
-		{[]string{"resolve", "--help"}, "spl resolve --branch main --node"},
-		{[]string{"schema", "migrate", "--help"}, "spl schema migrate --branch main --schema"},
-		{[]string{"validate", "--help"}, "spl validate --branch main"},
-		{[]string{"diff", "--help"}, "spl diff --base-branch main --target-branch feature"},
-		{[]string{"history", "--help"}, "spl history --branch main --entity-id"},
-		{[]string{"branches-containing", "--help"}, "spl branches-containing --entity-id"},
-		{[]string{"filter", "--help"}, "spl filter --branch main --label Task"},
-		{[]string{"search", "--help"}, "spl search --branch main --query incident"},
-		{[]string{"search-expand", "--help"}, "spl search-expand --branch main --query incident"},
-		{[]string{"context", "--help"}, "spl context --branch main --label Task"},
-		{[]string{"context", "export", "--help"}, "spl context export"},
 		{[]string{"context", "init", "--help"}, "spl context init --remote"},
-		{[]string{"fsck", "--help"}, "spl fsck"},
-		{[]string{"gc", "--help"}, "spl gc"},
+		{[]string{"query-context", "--help"}, "spl query-context --label Task"},
+		{[]string{"resolve", "--help"}, "spl resolve --node"},
+		{[]string{"schema", "migrate", "--help"}, "spl schema migrate --schema"},
+		{[]string{"validate", "--help"}, "spl validate"},
+		{[]string{"filter", "--help"}, "spl filter --label Task"},
+		{[]string{"search", "--help"}, "spl search --query incident"},
+		{[]string{"search-expand", "--help"}, "spl search-expand --query incident"},
+		{[]string{"prune", "--help"}, "spl prune"},
 	}
-
 	for _, testCase := range testCases {
 		t.Run(strings.Join(testCase.path, " "), func(t *testing.T) {
 			var output bytes.Buffer
-			command := newRootCommand(&output, newTestSeedRepository(t))
+			command := newRootCommand(&output)
 			command.SetArgs(testCase.path)
-
 			if err := command.Execute(); err != nil {
 				t.Fatalf("execute help: %v", err)
 			}
@@ -91,148 +112,18 @@ func TestCommandHelpIncludesExamples(t *testing.T) {
 	}
 }
 
-func TestRootCommandIncludesSchemaAndValidateSubcommands(t *testing.T) {
-	command := newRootCommand(&bytes.Buffer{}, newTestSeedRepository(t))
-	for _, path := range [][]string{{"schema", "migrate"}, {"validate"}} {
-		found, _, err := command.Find(path)
-		if err != nil {
-			t.Fatalf("find %v: %v", path, err)
-		}
-		if found.Name() != path[len(path)-1] {
-			t.Fatalf("command = %q, want %q", found.Name(), path[len(path)-1])
-		}
+func TestContextNamespaceIsInitExportOnly(t *testing.T) {
+	var output bytes.Buffer
+	command := newRootCommand(&output)
+	command.SetArgs([]string{"context", "--help"})
+	if err := command.Execute(); err != nil {
+		t.Fatalf("context help: %v", err)
 	}
-}
-
-func TestRootCommandIncludesDiffSubcommand(t *testing.T) {
-	command := newRootCommand(&bytes.Buffer{}, newTestSeedRepository(t))
-	found, _, err := command.Find([]string{"diff"})
-	if err != nil {
-		t.Fatalf("find diff command: %v", err)
+	help := output.String()
+	if !strings.Contains(help, "init") || !strings.Contains(help, "export") || !strings.Contains(help, "migrate-once") {
+		t.Fatalf("context help missing KEEP subcommands:\n%s", help)
 	}
-
-	if found.Name() != "diff" {
-		t.Fatalf("command = %q, want diff", found.Name())
-	}
-}
-
-func TestRootCommandIncludesMergeSubcommands(t *testing.T) {
-	command := newRootCommand(&bytes.Buffer{}, newTestSeedRepository(t))
-	for _, path := range [][]string{{"merge", "preview"}, {"merge", "apply"}} {
-		found, _, err := command.Find(path)
-		if err != nil {
-			t.Fatalf("find %v: %v", path, err)
-		}
-		if found.Name() != path[len(path)-1] {
-			t.Fatalf("command = %q, want %q", found.Name(), path[len(path)-1])
-		}
-	}
-}
-
-func TestRootCommandIncludesHistorySubcommands(t *testing.T) {
-	command := newRootCommand(&bytes.Buffer{}, newTestSeedRepository(t))
-	for _, path := range [][]string{{"history"}, {"branches-containing"}} {
-		found, _, err := command.Find(path)
-		if err != nil {
-			t.Fatalf("find %v: %v", path, err)
-		}
-
-		if found.Name() != path[0] {
-			t.Fatalf("command = %q, want %q", found.Name(), path[0])
-		}
-	}
-}
-
-func TestRootCommandIncludesRetrievalSubcommands(t *testing.T) {
-	command := newRootCommand(&bytes.Buffer{}, newTestSeedRepository(t))
-	for _, name := range []string{"filter", "search", "search-expand", "context"} {
-		found, _, err := command.Find([]string{name})
-		if err != nil {
-			t.Fatalf("find %s command: %v", name, err)
-		}
-		if found.Name() != name {
-			t.Fatalf("command = %q, want %q", found.Name(), name)
-		}
-	}
-}
-
-func TestRootCommandIncludesFsckSubcommand(t *testing.T) {
-	command := newRootCommand(&bytes.Buffer{}, newTestSeedRepository(t))
-	found, _, err := command.Find([]string{"fsck"})
-	if err != nil {
-		t.Fatalf("find fsck command: %v", err)
-	}
-	if found.Name() != "fsck" {
-		t.Fatalf("command = %q, want fsck", found.Name())
-	}
-}
-
-func TestRootCommandIncludesGCSubcommand(t *testing.T) {
-	command := newRootCommand(&bytes.Buffer{}, newTestSeedRepository(t))
-	found, _, err := command.Find([]string{"gc"})
-	if err != nil {
-		t.Fatalf("find gc command: %v", err)
-	}
-	if found.Name() != "gc" {
-		t.Fatalf("command = %q, want gc", found.Name())
-	}
-}
-
-func TestRootCommandIncludesBranchCreateSubcommand(t *testing.T) {
-	command := newRootCommand(&bytes.Buffer{}, newTestSeedRepository(t))
-
-	found, _, err := command.Find([]string{"branch", "create"})
-	if err != nil {
-		t.Fatalf("find branch create command: %v", err)
-	}
-
-	if found.Name() != "create" {
-		t.Fatalf("command = %q, want create", found.Name())
-	}
-}
-
-func TestRootCommandIncludesStatusSubcommand(t *testing.T) {
-	command := newRootCommand(&bytes.Buffer{}, newTestSeedRepository(t))
-
-	found, _, err := command.Find([]string{"status"})
-	if err != nil {
-		t.Fatalf("find status command: %v", err)
-	}
-
-	if found.Name() != "status" {
-		t.Fatalf("command = %q, want status", found.Name())
-	}
-}
-
-func TestRootCommandIncludesCommitSubcommand(t *testing.T) {
-	command := newRootCommand(&bytes.Buffer{}, newTestSeedRepository(t))
-	found, _, err := command.Find([]string{"commit"})
-	if err != nil {
-		t.Fatalf("find commit command: %v", err)
-	}
-	if found.Name() != "commit" {
-		t.Fatalf("command = %q, want commit", found.Name())
-	}
-}
-
-func TestRootCommandIncludesMigrateSubcommand(t *testing.T) {
-	command := newRootCommand(&bytes.Buffer{}, newTestSeedRepository(t))
-	found, _, err := command.Find([]string{"migrate"})
-	if err != nil {
-		t.Fatalf("find migrate command: %v", err)
-	}
-	if found.Name() != "migrate" {
-		t.Fatalf("command = %q, want migrate", found.Name())
-	}
-}
-
-func TestRootCommandIncludesWorkspaceMigrateSubcommand(t *testing.T) {
-	command := newRootCommand(&bytes.Buffer{}, newTestSeedRepository(t))
-	found, _, err := command.Find([]string{"workspace", "migrate"})
-	if err != nil {
-		t.Fatalf("find workspace migrate command: %v", err)
-	}
-	if found.Name() != "migrate" {
-		t.Fatalf("command = %q, want migrate", found.Name())
+	if strings.Contains(help, "--query") {
+		t.Fatalf("context namespace must not be the query verb:\n%s", help)
 	}
 }

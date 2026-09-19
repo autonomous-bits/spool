@@ -1,21 +1,17 @@
 # Spool
 
-Spool is the MCP/CLI tool for shared **solution context**. N code repositories
-bind to **one** context git remote. **Git is the only durable source of truth.**
-Spool validates mutations, writes human-diffable JSON, opens a short-lived
-branch and pull request, and rebuilds a local query projection.
+Spool stores solution context as **human-diffable graph files in a git remote**. Git is the
+durable source of truth. A bound code repository writes `.spool/context.toml`; context-management
+commands rebuild a disposable local SQLite projection from that checkout and never commit it.
 
-Successful commands emit JSON to standard output; failures are structured JSON
-logs on standard error.
+The public `spl` CLI and MCP server are **bound context-git tools**. Mutations open a short-lived
+`spool/mcp/<stamp>-<nonce>` branch and a pull request into the protected branch. They never push
+the protected branch except during `spl context init` onboarding.
 
-There is no Spool-specific remote protocol and no Rack dependency in the default
-install: clone, pull requests, history, and credentials use **stock git**.
+Successful commands emit JSON to standard output. Failures are structured JSON logs on standard
+error.
 
 ## Install
-
-The default `spl` install does **not** depend on Rack or `spool-rack`. Do not
-install a Rack service, configure a Rack remote, or use a Spool-specific token
-for context sync.
 
 ### Prebuilt binaries
 
@@ -46,8 +42,6 @@ If you have Go **1.26.1** or later installed:
 go install github.com/autonomous-bits/spool/cmd/spl@latest
 ```
 
-That module path does not require Rack.
-
 ### Build from source
 
 To build from a local clone of the repository:
@@ -61,95 +55,111 @@ go build -o dist/spl ./cmd/spl
 
 ## Quick start
 
-Bind each code repo to the shared solution context remote. Spool does not
-auto-discover remotes from directory names, monorepo layout, leftover `.spl`
-state, or Rack config.
+Bind this code repository to a solution context remote:
+
+```sh
+spl context init --remote https://github.com/org/solution-context.git
+```
+
+`context init` writes `.spool/context.toml` (`solution_id`, `remote`, `protected_branch`) and seeds
+the remote layout when it is empty. Context-management commands refuse to run until that bind file
+exists.
+
+Query the bound checkout:
+
+```sh
+spl resolve --node idea-1
+spl search --query incident
+spl filter --label Task --property-text status=open
+spl query-context --label Task --direction both
+spl search-expand --query incident --direction out --edge-type RELATES_TO
+spl graph
+spl validate
+```
+
+Use stock git on the context remote for history and diff. Spool does not wrap `git log` or `git diff`.
+
+## Context bind, export, and migrate-once
+
+```sh
+spl context init --remote https://github.com/org/solution-context.git
+spl context export
+spl context migrate-once
+```
+
+`context export` and `context migrate-once` read leftover private `.spl` graph state internally and
+write human-diffable nodes/edges through a short-lived branch and pull request. They are not Spool
+VCS commands. `migrate-once` skips the write when titles are already present.
+
+The `context` namespace is **only** init/export/migrate-once. Graph queries use `query-context`.
+
+## Schema, assets, merge, and prune
+
+Author a schema in TOML and apply conforming graph mutations:
 
 ```toml
-# .spool/context.toml in every participating code repo
-solution_id = "my-solution"
-remote = "https://github.com/org/my-solution-context.git"
-protected_branch = "main"
-# repository_id = "github.com/org/svc-api"  # optional; namespaces node IDs
-```
+# people.toml
+version = 2
 
-Or write that file with onboarding:
+[[node]]
+label = "Person"
+[[node.property]]
+key = "name"
+required = true
+types = ["string"]
+```
 
 ```sh
-# In each code repo; same --remote and --solution-id, distinct --repository-id
-spl context init --remote https://github.com/org/my-solution-context.git \
-  --solution-id my-solution \
-  --repository-id github.com/org/svc-api
+spl schema migrate --schema people.toml --batch people-mutations.json
+spl validate
 ```
 
-`context init` creates `schema.toml`, `nodes/`, `edges/`, and `assets/` on an
-empty remote and seeds a `CodeRepository` node from **this** bind. Repeat in
-other code repos.
+`schema migrate` validates the candidate graph against the target schema and opens a short-lived
+branch + PR. An identical schema is a no-op (no empty PR).
 
-MCP writes fail closed until a bind exists. After that, **every** agent write
-creates a short-lived branch and opens a pull request to `protected_branch`.
-Do not push cleanly to the working or protected branch. Sync is stock
-`git clone` / GitHub PR / history with **stock git credentials** only.
-
-See [docs/context-bind.md](docs/context-bind.md) for the bind format and
-multi-repo story.
-
-## Write model
-
-| Rule | Behavior |
-| --- | --- |
-| Source of truth | The bound context git remote. Local SQLite/FTS projections rebuild on every MCP/process start and are never committed. |
-| Agent writes | One mutation batch → one git commit on a **short-lived branch** → **pull request** to `protected_branch`. |
-| Overlaps | Humans resolve on the PR. No silent overwrite. |
-| Auth | Stock git credentials only. Never a Spool-specific token. |
-| Assets | Git LFS at or above **512 KiB** (configurable). Text, JSON, and TOML stay plain git (warn above ~1 MiB). |
-
-## Migrating leftover `.spl` graphs
-
-Existing `.spl` graphs move with a **one-shot** export — the documented escape
-hatch, not a second store:
+Store a reference document as an Asset node (auto-commits via branch + PR):
 
 ```sh
-spl context export --branch main
-# alias:
-spl context migrate-once --branch main
+spl asset add --file docs/architecture.md --title "Architecture notes"
+spl asset read --node notes > architecture.md
 ```
 
-That path is lossy, overwrite-at-own-risk, and **not sync**. It opens a
-short-lived branch and PR. See [docs/context-git-migration.md](docs/context-git-migration.md).
+Preview and apply a three-way **file-graph** merge (not a Rack/.spl lease):
 
-## Unsupported for solution context
+```sh
+spl merge preview --source feature --target main
+spl merge apply --source feature --target main --transaction merge-42 --preview <preview-id> \
+  --author alice --message "Merge feature"
+```
 
-These are **deprecated / migration-only**. They are not a supported parallel
-source of truth and must not be dual-run with the context git remote:
+Conflicted applies persist merge state in the context-git cache. Inspect, resolve, then finalize
+or abort:
 
-- Spool-as-VCS (`spl init`, local `.spl` packs as durable context)
-- Rack sync (`spl remote`, `spl push`, `spl pull`, `spl clone`)
-- `.spl` as durable SoT
-- pack wire-compat with Rack
-- detached `.spl` workspaces as the N-repo join
+```sh
+spl merge conflicts --transaction merge-42
+spl merge resolve --transaction merge-42 --preview <preview-id> --selections selections.json
+spl merge finalize --transaction merge-42
+# or: spl merge abort --transaction merge-42
+```
 
-When `.spool/context.toml` is present, `spl init`, `spl workspace …`,
-`spl remote`, `spl push`, `spl pull`, and `spl clone` refuse. MCP tools for
-those paths always fail closed. Unbound leftover `.spl` state is only for
-`spl context export`.
+Remove temporary planning data labeled `Ephemeral` (graph cleanup, **not** pack/CAS GC):
+
+```sh
+spl prune --dry-run
+spl prune --author alice --message "Prune transient plan"
+```
+
+`prune` requires a bound checkout, refuses unbound workspaces, and writes a short-lived branch + PR
+when it deletes ephemeral nodes and cascading edges.
 
 ## MCP server (`spl mcp`)
 
-Spool includes a native Model Context Protocol (MCP) server built on the official Go SDK ([`github.com/modelcontextprotocol/go-sdk`](https://github.com/modelcontextprotocol/go-sdk)). It exposes Spool commands as structured MCP tools (`spl_*`) over standard I/O.
+Spool includes a native Model Context Protocol server built on the official Go SDK
+([`github.com/modelcontextprotocol/go-sdk`](https://github.com/modelcontextprotocol/go-sdk)).
+`spl mcp` exposes the **KEEP** tool set (19 tools) over stdio. The tool list matches `spl --help`.
 
-### Default vs Fallback Behavior for AI Agents
+### Client configuration
 
-- **Default (MCP Tools)**: For AI agents, the MCP server is the **primary, recommended interface**. Bound writes land as a short-lived branch + PR.
-- **Fallback (CLI)**: Use `spl` directly in scripts or CI without MCP.
-
-### Configuration Examples
-
-Run `spl mcp` from a code repo that contains `.spool/context.toml` (or after
-`spl context init --remote`). Do not point `--state-dir` at `.spl` for solution
-context.
-
-#### Claude Desktop / Claude Code (`claude_desktop_config.json`)
 ```json
 {
   "mcpServers": {
@@ -160,86 +170,41 @@ context.
   }
 }
 ```
-
-#### VS Code / Cursor (`mcp.json`)
-```json
-{
-  "mcpServers": {
-    "spool": {
-      "command": "spl",
-      "args": ["mcp"]
-    }
-  }
-}
-```
-
-### Manual Execution
 
 ```sh
-# Start the MCP server over standard I/O from a bound code repo
 spl mcp
 ```
 
 ## CLI command reference
 
-The complete installed surface, including generated help and every flag, is documented in
+The installed surface, including generated help, is documented in
 [`.agents/skills/spool/references/cli-help.md`](.agents/skills/spool/references/cli-help.md).
-The command and flag inventory is:
 
-| Command | Flags and positional arguments |
+| Command | Purpose |
 | --- | --- |
-| `context init` | `--remote` (required), `--solution-id`, `--protected-branch`, `--repository-id`, `--author` |
-| `context export` (`migrate-once`) | `--branch`, `--author`, `--message` |
-| `add` | `--branch` (required), `--batch` (required) |
-| `status` | `--branch` |
-| `commit` | `--branch` (required), `--author`, `--message` |
-| `branch create <name>` | exactly one of `--from-branch`, `--from-commit` |
-| `branch list` | none |
-| `branch delete <name>` | none; branch must be inactive and non-default |
-| `switch <branch>` | positional branch |
-| `schema migrate` | `--branch`, `--schema`, `--batch` (all required) |
-| `validate` | `--branch` (required), `--commit` (reachable) |
-| `resolve` | `--branch` (required), `--commit`, `--node`, `--max-rows`, `--max-response-bytes`, `--timeout`, `--max-depth`, `--max-visited` |
-| `graph` | `--branch` (required) |
-| `search` | `--branch`, `--query` (required), `--commit`, `--continuation`, `--max-rows`, `--max-response-bytes`, `--timeout` |
-| `filter` | `--branch` (required), `--commit`, repeatable `--label`/property predicates, `--continuation`, `--max-rows`, `--max-response-bytes`, `--timeout` |
-| `search-expand`, `context` | `--branch` (required), `--commit`, query or typed filters, `--direction`, repeatable `--edge-type`, `--seed-limit`, `--max-depth`, `--max-visited`, `--max-rows`, `--max-response-bytes`, `--timeout` |
-| `history` | `--branch`, `--entity-id` (required), `--commit`, `--all-parents`, `--continuation`, `--max-rows`, `--max-response-bytes`, `--timeout` |
-| `branches-containing` | exactly one selector (`--entity-id`, `--snapshot-id`, `--natural-key`), `--continuation`, `--max-rows`, `--max-response-bytes`, `--timeout` |
-| `diff` | `--base-branch`, `--target-branch` (required), optional commits, repeatable `--node-id`/`--edge-id`, `--node-title-contains`, `--one-hop`, `--continuation`, `--max-rows`, `--max-response-bytes`, `--timeout` |
-| `merge preview` | `--source`, `--target` (required) |
-| `merge apply` | `--source`, `--target`, `--transaction`, `--preview` (required), `--author`, `--message` |
-| `merge conflicts` | `--target`, `--transaction` (required) |
-| `merge resolve` | `--target`, `--transaction`, `--preview`, `--selections` (required), `--overrides` |
-| `merge finalize`, `merge abort` | `--target`, `--transaction` (required) |
-| `fsck` | none; read-only integrity report |
-| `gc` | `--dry-run`, `--repack`, `--grace-period` (default `336h`) |
-| `prune` | `--branch` (required), `--dry-run`, `--force`, `--author`, `--message` |
-| `cherry-pick` | `--commit` (required), `--target-branch` (required), `--dry-run`, `--author`, `--message` |
-| `asset add` | `--branch` and `--file` (required), `--title`, `--id` |
-| `asset read` | positional locator/node ID or `--locator`/`--node`, `--branch` |
-| `mcp` | none; runs the official Model Context Protocol server over standard I/O |
-| `version` | none |
-| `completion` | shell subcommand: `bash`, `zsh`, `fish`, or `powershell` |
-| `help [command path]` | optional command path |
-| `init` | **deprecated / migration-only** — not solution-context onboarding |
-| `workspace init <name>` | **deprecated / migration-only** |
-| `workspace attach [path]` | **deprecated / migration-only** |
-| `workspace migrate`, `migrate` | `--from` (required), `--to` (required); leftover `.spl` format upgrades only |
-| `remote set/show/remove/branch` | **unsupported** for solution context (Rack sync sunset) |
-| `clone`, `workspace clone` | **unsupported** for solution context; `git clone` the bind remote |
-| `push`, `pull` | **unsupported** for solution context; agent writes are branch + PR |
+| `context init` | Bind this code repo to a context git remote (`--remote` required) |
+| `context export`, `context migrate-once` | Export leftover `.spl` into bound context git |
+| `query-context` | Evidence-focused bounded graph context (replaces query-`context`) |
+| `search`, `search-expand`, `filter`, `resolve`, `graph` | Bound checkout reads |
+| `schema migrate`, `validate` | Schema write (branch+PR) and validation |
+| `asset add`, `asset read` | Reference assets on the bound checkout |
+| `merge preview/apply/conflicts/resolve/finalize/abort` | File-graph merge |
+| `prune` | Ephemeral node/edge cleanup (branch+PR; not pack GC) |
+| `mcp` | MCP stdio server (KEEP tools only) |
+| `version`, `help`, `completion` | Provenance, help, and shell completion |
 
-The common query-budget flags are `--max-rows`, `--max-response-bytes`, and `--timeout`;
-traversal commands additionally use `--max-depth` and `--max-visited` as listed in the full
-reference. Every command also accepts `-h, --help` and the global `--state-dir`.
+### Removed
 
-Run `spl <command> --help` for flags, response-budget controls, and examples.
+These commands and their MCP twins are **deleted** (no aliases):
+
+`init`, `workspace *`, `remote *`, `push`, `pull`, `clone`, old `migrate`, `fsck`, `gc`, pack prune,
+`cherry-pick`, `add`, `status`, `commit`, `branch`, `switch`, `history`, `diff`,
+`branches-containing`.
+
+Use stock git for history and diff on the context remote.
 
 ## Learn more
 
-- [`docs/context-bind.md`](docs/context-bind.md) documents the bind file and N-repos → one context remote.
-- [`docs/context-git-migration.md`](docs/context-git-migration.md) documents one-shot `.spl` export (`spl context export`).
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) explains how to build, test, and contribute to Spool.
 - [`docs/architecture.md`](docs/architecture.md) describes the high-level system architecture.
 - [`CHANGELOG.md`](CHANGELOG.md) explains how release notes are generated.

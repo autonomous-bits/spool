@@ -63,3 +63,51 @@ func (g GitRunner) HasRev(ctx context.Context, dir, rev string) bool {
 	_, err := g.Run(ctx, dir, "rev-parse", "--verify", rev)
 	return err == nil
 }
+
+// ExtractTree materializes rev's tree into dest using stock git archive.
+func (g GitRunner) ExtractTree(ctx context.Context, repoDir, rev, dest string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		return err
+	}
+	archive := exec.CommandContext(ctx, g.bin(), "archive", "--format=tar", rev)
+	archive.Dir = repoDir
+	archive.Env = g.environ()
+	extract := exec.CommandContext(ctx, "tar", "-xf", "-", "-C", dest)
+	extract.Env = g.environ()
+	stdout, err := archive.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	var archiveErr, extractErr bytes.Buffer
+	archive.Stderr = &archiveErr
+	extract.Stdin = stdout
+	extract.Stderr = &extractErr
+	if err := archive.Start(); err != nil {
+		return fmt.Errorf("git archive %s: %w", rev, err)
+	}
+	if err := extract.Start(); err != nil {
+		_ = archive.Process.Kill()
+		_ = archive.Wait()
+		return fmt.Errorf("tar extract %s: %w", rev, err)
+	}
+	waitErr := archive.Wait()
+	extractWait := extract.Wait()
+	if waitErr != nil {
+		detail := strings.TrimSpace(archiveErr.String())
+		if detail == "" {
+			detail = waitErr.Error()
+		}
+		return fmt.Errorf("git archive %s: %s", rev, detail)
+	}
+	if extractWait != nil {
+		detail := strings.TrimSpace(extractErr.String())
+		if detail == "" {
+			detail = extractWait.Error()
+		}
+		return fmt.Errorf("tar extract %s: %s", rev, detail)
+	}
+	return nil
+}

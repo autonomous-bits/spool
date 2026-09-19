@@ -3,123 +3,170 @@ package commands
 import (
 	"bytes"
 	"encoding/json"
-	"path/filepath"
+	"os"
+	"strings"
 	"testing"
 
-	"github.com/autonomous-bits/spool/internal/repository"
+	"github.com/autonomous-bits/spool/internal/ctxgit"
 )
 
-func TestPruneCLIRequiresBranchFlag(t *testing.T) {
-	repo := newTestSeedRepository(t)
+func TestPruneCLIUnboundRefused(t *testing.T) {
 	var output bytes.Buffer
-	command := NewPruneCommand(func() (*repository.Repository, error) {
-		return repo, nil
-	})
+	command := NewPruneCommand(ctxgit.Options{WorkspaceDir: t.TempDir()})
 	command.SetOut(&output)
-	command.SetArgs([]string{})
+	command.SetArgs([]string{"--dry-run"})
 	err := command.Execute()
-	if err == nil {
-		t.Fatal("expected error when --branch flag is missing")
+	if err == nil || !strings.Contains(err.Error(), "not bound") {
+		t.Fatalf("error = %v, want unbound", err)
 	}
 }
 
 func TestPruneCLIDryRunEmitsJSON(t *testing.T) {
-	stateDir := filepath.Join(t.TempDir(), "repo")
-	repo, err := repository.InitializeRepository(stateDir)
-	if err != nil {
-		t.Fatalf("InitializeRepository: %v", err)
-	}
-	t.Cleanup(func() { _ = repo.Close() })
-
-	_, err = repo.StageMutationBatch(repository.StageMutationRequest{
-		Branch: "main",
-		Operations: []repository.MutationOperation{
-			{Action: "add", Entity: "node", ID: "durable-1", Title: "Durable 1", Labels: []string{"Architecture", "Component"}},
-			{Action: "add", Entity: "node", ID: "ephemeral-1", Title: "Ephemeral 1", Labels: []string{"Architecture", "Ephemeral"}},
-			{Action: "add", Entity: "edge", ID: "edge-1", Source: "durable-1", Target: "ephemeral-1", Type: "DEPENDS_ON"},
-		},
-	})
-	if err != nil {
-		t.Fatalf("StageMutationBatch: %v", err)
-	}
-	if _, err := repo.CommitStagedMutations("main"); err != nil {
-		t.Fatalf("CommitStagedMutations: %v", err)
-	}
-
+	opts := boundCommandOptions(t)
 	var output bytes.Buffer
-	command := NewPruneCommand(func() (*repository.Repository, error) {
-		return repo, nil
-	})
+	command := NewPruneCommand(opts)
 	command.SetOut(&output)
-	command.SetArgs([]string{"--branch", "main", "--dry-run", "--force"})
+	command.SetArgs([]string{"--dry-run"})
 	if err := command.Execute(); err != nil {
 		t.Fatalf("execute prune --dry-run: %v", err)
 	}
-
-	var result repository.PruneResult
+	var result ctxgit.PruneResult
 	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
 		t.Fatalf("decode prune JSON: %v", err)
 	}
 	if !result.DryRun {
 		t.Fatal("expected result.DryRun = true")
 	}
-	if result.PrunedNodesCount != 1 || len(result.PrunedNodeIDs) != 1 || result.PrunedNodeIDs[0] != "ephemeral-1" {
-		t.Fatalf("unexpected pruned nodes: %+v", result)
-	}
-	if result.PrunedEdgesCount != 1 {
-		t.Fatalf("expected 1 pruned edge, got %d", result.PrunedEdgesCount)
+}
+
+func TestQueryContextCLIRequiresSeedSelector(t *testing.T) {
+	opts := boundCommandOptions(t)
+	for _, testCase := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "missing selector", args: nil, want: "provide --query or at least one typed filter"},
+		{name: "mixed selectors", args: []string{"--query", "evidence", "--label", "Seed"}, want: "--query cannot be combined with typed filter flags"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			command := NewQueryContextCommand(opts)
+			command.SetArgs(testCase.args)
+			if err := command.Execute(); err == nil || !strings.Contains(err.Error(), testCase.want) {
+				t.Fatalf("query-context error = %v, want %q", err, testCase.want)
+			}
+		})
 	}
 }
 
-func TestPruneCLIExecutionEmitsJSONAndAdvancesBranch(t *testing.T) {
-	stateDir := filepath.Join(t.TempDir(), "repo")
-	repo, err := repository.InitializeRepository(stateDir)
+func TestQueryCommandsBoundJSON(t *testing.T) {
+	opts := boundCommandOptions(t)
+	session, err := ctxgit.Start(t.Context(), opts)
 	if err != nil {
-		t.Fatalf("InitializeRepository: %v", err)
+		t.Fatalf("Start: %v", err)
 	}
-	t.Cleanup(func() { _ = repo.Close() })
+	_ = session
 
-	_, err = repo.CreateBranch("feature", repository.BranchSource{Branch: "main"})
-	if err != nil {
-		t.Fatalf("CreateBranch: %v", err)
+	var graphOut bytes.Buffer
+	graph := NewGraphCommand(opts)
+	graph.SetOut(&graphOut)
+	if err := graph.Execute(); err != nil {
+		t.Fatalf("graph: %v", err)
 	}
-
-	_, err = repo.StageMutationBatch(repository.StageMutationRequest{
-		Branch: "feature",
-		Operations: []repository.MutationOperation{
-			{Action: "add", Entity: "node", ID: "durable-1", Title: "Durable 1", Labels: []string{"Architecture", "Component"}},
-			{Action: "add", Entity: "node", ID: "ephemeral-1", Title: "Ephemeral 1", Labels: []string{"Architecture", "Ephemeral"}},
-			{Action: "add", Entity: "edge", ID: "edge-1", Source: "durable-1", Target: "ephemeral-1", Type: "DEPENDS_ON"},
-		},
-	})
-	if err != nil {
-		t.Fatalf("StageMutationBatch: %v", err)
-	}
-	if _, err := repo.CommitStagedMutations("feature"); err != nil {
-		t.Fatalf("CommitStagedMutations: %v", err)
+	if !bytes.Contains(graphOut.Bytes(), []byte(`"nodes"`)) {
+		t.Fatalf("graph JSON = %s", graphOut.String())
 	}
 
+	var resolveOut bytes.Buffer
+	resolveCmd := NewResolveCommand(opts)
+	resolveCmd.SetOut(&resolveOut)
+	resolveCmd.SetArgs([]string{"--node", "coderepo"})
+	if err := resolveCmd.Execute(); err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if !bytes.Contains(resolveOut.Bytes(), []byte("cli-repo")) {
+		t.Fatalf("resolve JSON = %s", resolveOut.String())
+	}
+
+	var searchOut bytes.Buffer
+	search := NewSearchCommand(opts)
+	search.SetOut(&searchOut)
+	search.SetArgs([]string{"--query", "cli-repo"})
+	if err := search.Execute(); err != nil {
+		t.Fatalf("search: %v", err)
+	}
+
+	var filterOut bytes.Buffer
+	filter := NewFilterCommand(opts)
+	filter.SetOut(&filterOut)
+	filter.SetArgs([]string{"--label", "CodeRepository"})
+	if err := filter.Execute(); err != nil {
+		t.Fatalf("filter: %v", err)
+	}
+
+	var qcOut bytes.Buffer
+	qc := NewQueryContextCommand(opts)
+	qc.SetOut(&qcOut)
+	qc.SetArgs([]string{"--label", "CodeRepository", "--direction", "both"})
+	if err := qc.Execute(); err != nil {
+		t.Fatalf("query-context: %v", err)
+	}
+
+	var validateOut bytes.Buffer
+	validate := NewValidateCommand(opts)
+	validate.SetOut(&validateOut)
+	if err := validate.Execute(); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+}
+
+func TestSchemaMigrateCLIWritesPR(t *testing.T) {
+	opts := boundCommandOptions(t)
+	schemaPath := t.TempDir() + "/schema.toml"
+	if err := os.WriteFile(schemaPath, []byte("version = 1\npermissive = true\n\n# keep-surface schema write\n"), 0o600); err != nil {
+		t.Fatalf("write schema: %v", err)
+	}
 	var output bytes.Buffer
-	command := NewPruneCommand(func() (*repository.Repository, error) {
-		return repo, nil
-	})
+	command := NewSchemaCommand(opts)
 	command.SetOut(&output)
-	command.SetArgs([]string{"--branch", "feature", "--author", "alice", "--message", "Clean scaffold"})
+	command.SetArgs([]string{"migrate", "--schema", schemaPath, "--message", "Keep schema"})
 	if err := command.Execute(); err != nil {
-		t.Fatalf("execute prune: %v", err)
+		t.Fatalf("schema migrate: %v", err)
 	}
+	if !bytes.Contains(output.Bytes(), []byte(`"branch":"spool/mcp/`)) {
+		t.Fatalf("schema migrate JSON = %s", output.String())
+	}
+}
 
-	var result repository.PruneResult
-	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
-		t.Fatalf("decode prune JSON: %v", err)
+func TestAssetAddAndReadCLI(t *testing.T) {
+	opts := boundCommandOptions(t)
+	content := []byte("# notes\n")
+	tempFile := t.TempDir() + "/notes.md"
+	if err := os.WriteFile(tempFile, content, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
 	}
-	if result.DryRun {
-		t.Fatal("expected result.DryRun = false")
+	var addOut bytes.Buffer
+	add := NewAssetCommand(opts)
+	add.SetOut(&addOut)
+	add.SetArgs([]string{"add", "--file", tempFile, "--title", "Notes", "--id", "notes"})
+	if err := add.Execute(); err != nil {
+		t.Fatalf("asset add: %v\n%s", err, addOut.String())
 	}
-	if result.PrunedNodesCount != 1 || result.PrunedEdgesCount != 1 {
-		t.Fatalf("expected 1 node and 1 edge pruned, got %+v", result)
+	if !bytes.Contains(addOut.Bytes(), []byte(`"hash"`)) {
+		t.Fatalf("asset add JSON = %s", addOut.String())
 	}
-	if result.Commit == "" {
-		t.Fatal("expected non-empty commit hash")
+}
+
+func TestMergeCLIPreview(t *testing.T) {
+	opts := boundCommandOptions(t)
+	var output bytes.Buffer
+	command := NewMergeCommand(opts)
+	command.SetOut(&output)
+	command.SetArgs([]string{"preview", "--source", "main", "--target", "main"})
+	if err := command.Execute(); err != nil {
+		t.Fatalf("merge preview: %v", err)
+	}
+	if !bytes.Contains(output.Bytes(), []byte(`"clean"`)) {
+		t.Fatalf("preview JSON = %s", output.String())
 	}
 }

@@ -3,24 +3,36 @@ package commands
 import (
 	"errors"
 	"io"
+	"os"
 	"strings"
 
+	"github.com/autonomous-bits/spool/internal/ctxgit"
 	"github.com/autonomous-bits/spool/internal/mcp"
 	officialmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
 )
 
 // NewMCPCommand creates the mcp command for running an MCP server over stdio.
-func NewMCPCommand(stateDirProvider func() (string, error)) *cobra.Command {
+func NewMCPCommand(opts ctxgit.Options) *cobra.Command {
 	command := &cobra.Command{
 		Use:          "mcp",
 		Short:        "Start an MCP (Model Context Protocol) server over standard I/O",
-		Long:         "Start an official MCP server over stdin/stdout. Graph writes require an explicit .spool/context.toml bind to a solution context git remote. Every write is a short-lived branch + PR. Leftover `.spl` and Rack remotes are deprecated and unsupported for solution context (migration-only via `spl context export`).",
-		Example:      "  spl mcp\n  spl context init --remote https://github.com/org/solution-context.git",
+		Long:         "Start an official MCP server over stdin/stdout exposing the bound context-git KEEP tool set.",
+		Example:      "  spl mcp",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(command *cobra.Command, _ []string) error {
-			server := mcp.NewSpoolServer(stateDirProvider)
+			server := mcp.NewSpoolServerWithOptions(mcp.ServerOptions{
+				WorkspaceDir: func() (string, error) {
+					if opts.WorkspaceDir != "" {
+						return opts.WorkspaceDir, nil
+					}
+					return os.Getwd()
+				},
+				CacheDir: opts.CacheDir,
+				PROpener: opts.PROpener,
+				Git:      opts.Git,
+			})
 			in := command.InOrStdin()
 			out := command.OutOrStdout()
 			var r io.ReadCloser

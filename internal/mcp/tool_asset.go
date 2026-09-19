@@ -16,14 +16,10 @@ const maxAssetReadBytes = 32 * 1024 * 1024 // 32MB limit for MCP tool responses
 func toolAssetAdd(rt *runtime) Tool {
 	return Tool{
 		Name:        "spl_asset_add",
-		Description: "Ingest a reference document into the bound context git checkout and stage an Asset node for the next short-lived branch + PR. Unbound workspaces refuse writes.",
+		Description: "Ingest a reference document into the bound context git checkout and open a short-lived branch + PR. Unbound workspaces refuse writes.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"branch": map[string]any{
-					"type":        "string",
-					"description": "Branch on which to stage the asset node",
-				},
 				"file": map[string]any{
 					"type":        "string",
 					"description": "Path to the reference document to ingest",
@@ -36,21 +32,30 @@ func toolAssetAdd(rt *runtime) Tool {
 					"type":        "string",
 					"description": "Optional explicit node ID for the Asset graph node",
 				},
+				"author": map[string]any{
+					"type":        "string",
+					"description": "Optional git author",
+				},
+				"message": map[string]any{
+					"type":        "string",
+					"description": "Optional commit/PR message",
+				},
 			},
-			"required": []string{"branch", "file"},
+			"required": []string{"file"},
 		},
 		Handler: func(ctx context.Context, args json.RawMessage) (any, error) {
 			var in struct {
-				Branch   string `json:"branch"`
 				FilePath string `json:"file"`
 				Title    string `json:"title,omitempty"`
 				ID       string `json:"id,omitempty"`
+				Author   string `json:"author,omitempty"`
+				Message  string `json:"message,omitempty"`
 			}
 			if err := json.Unmarshal(args, &in); err != nil {
 				return nil, err
 			}
-			if in.Branch == "" || in.FilePath == "" {
-				return nil, errors.New("branch and file are required")
+			if in.FilePath == "" {
+				return nil, errors.New("file is required")
 			}
 			fileInfo, err := os.Stat(in.FilePath)
 			if err != nil {
@@ -63,7 +68,21 @@ func toolAssetAdd(rt *runtime) Tool {
 			if err != nil {
 				return nil, err
 			}
-			return session.StageAsset(in.FilePath, in.ID, in.Title)
+			added, write, err := session.AddAsset(ctx, in.FilePath, in.ID, in.Title, in.Author, in.Message)
+			if err != nil {
+				return nil, err
+			}
+			return map[string]any{
+				"node":        added.Node,
+				"assetUri":    added.AssetURI,
+				"hash":        added.Hash,
+				"size":        added.Size,
+				"mimeType":    added.MIMEType,
+				"branch":      write.Branch,
+				"commit":      write.Commit,
+				"pullRequest": write.PR,
+				"status":      added.Status,
+			}, nil
 		},
 	}
 }
@@ -77,11 +96,7 @@ func toolAssetRead(rt *runtime) Tool {
 			"properties": map[string]any{
 				"target": map[string]any{
 					"type":        "string",
-					"description": "Asset locator (assets/<hash>[/name]), raw BLAKE3 hash, or graph node ID",
-				},
-				"branch": map[string]any{
-					"type":        "string",
-					"description": "Branch to resolve node ID from (defaults to the protected context branch)",
+					"description": "Asset locator (assets/<hash>[/name]), raw hash, or graph node ID",
 				},
 			},
 			"required": []string{"target"},
@@ -89,7 +104,6 @@ func toolAssetRead(rt *runtime) Tool {
 		Handler: func(ctx context.Context, args json.RawMessage) (any, error) {
 			var in struct {
 				Target string `json:"target"`
-				Branch string `json:"branch,omitempty"`
 			}
 			if err := json.Unmarshal(args, &in); err != nil {
 				return nil, err

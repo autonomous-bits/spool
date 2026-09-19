@@ -1,22 +1,20 @@
 package commands
 
 import (
-	"github.com/autonomous-bits/spool/internal/repository"
-	"github.com/autonomous-bits/spool/internal/resolve"
+	"github.com/autonomous-bits/spool/internal/ctxgit"
 	"github.com/spf13/cobra"
 )
 
-// NewContextCommand creates the spl context command.
-func NewContextCommand(toolProvider func() (*resolve.ResolveTool, error), repoProvider func() (*repository.Repository, error)) *cobra.Command {
-	command := newContextualCommand(
-		"context",
-		"Assemble evidence-focused graph context",
-		"Return JSON evidence and bounded graph context from a lexical query or typed filters.",
-		"spl context --branch main --label Task --property-text status=open --direction both",
-		toolProvider,
-		true,
-	)
+// NewContextCommand creates the spl context parent for init/export/migrate-once.
+func NewContextCommand(opts ctxgit.Options) *cobra.Command {
+	command := &cobra.Command{
+		Use:          "context",
+		Short:        "Bind and export solution context git",
+		Long:         "Manage the explicit context-git bind. Querying the graph uses `spl query-context`.",
+		Args:         cobra.NoArgs,
+		SilenceUsage: true,
+	}
 	command.AddCommand(NewContextInitCommand())
-	command.AddCommand(NewContextExportCommand(repoProvider))
+	command.AddCommand(NewContextExportCommand(opts))
 	return command
 }

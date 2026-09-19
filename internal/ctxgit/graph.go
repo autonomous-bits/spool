@@ -250,6 +250,13 @@ func cloneGraph(g *Graph) *Graph {
 	return next
 }
 
+func persistSchema(root string, schemaTOML []byte) error {
+	if len(schemaTOML) == 0 {
+		return nil
+	}
+	return writeSchemaFile(root, schemaTOML)
+}
+
 func persistGraphDiff(root string, before, after *Graph) (written, deleted []string, err error) {
 	for id := range before.Nodes {
 		if _, ok := after.Nodes[id]; ok {

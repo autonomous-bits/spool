@@ -103,7 +103,7 @@ func LoadGraph(root string) (*Graph, error) {
 	} else if !os.IsNotExist(err) {
 		return nil, fmt.Errorf("read %s: %w", schemaFileName, err)
 	}
-	if err := loadEntities(filepath.Join(root, nodesDirName), func(rel string, data []byte) error {
+	if err := loadEntities(root, nodesDirName, func(rel string, data []byte) error {
 		var node repository.Node
 		if err := json.Unmarshal(data, &node); err != nil {
 			return fmt.Errorf("decode %s: %w", rel, err)
@@ -121,7 +121,7 @@ func LoadGraph(root string) (*Graph, error) {
 	}); err != nil {
 		return nil, err
 	}
-	if err := loadEntities(filepath.Join(root, edgesDirName), func(rel string, data []byte) error {
+	if err := loadEntities(root, edgesDirName, func(rel string, data []byte) error {
 		var edge repository.Edge
 		if err := json.Unmarshal(data, &edge); err != nil {
 			return fmt.Errorf("decode %s: %w", rel, err)
@@ -142,7 +142,8 @@ func LoadGraph(root string) (*Graph, error) {
 	return graph, nil
 }
 
-func loadEntities(dir string, fn func(rel string, data []byte) error) error {
+func loadEntities(root, dirName string, fn func(rel string, data []byte) error) error {
+	dir := filepath.Join(root, dirName)
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		return nil
 	} else if err != nil {
@@ -162,8 +163,11 @@ func loadEntities(dir string, fn func(rel string, data []byte) error) error {
 		if err != nil {
 			return err
 		}
-		rel := filepath.ToSlash(path)
-		return fn(rel, data)
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		return fn(filepath.ToSlash(rel), data)
 	})
 }
 

@@ -72,24 +72,19 @@ flowchart TD
 Before writing technical specs or code, query the Spool graph across all roles for relevant constraints and context using Spool MCP tools by default:
 
 - **MCP (Default)**:
-  - `spl_search(branch: "main", query: "<feature-keyword>")`
-  - `spl_context(branch: "main", query: "<component-or-feature>", direction: "both", max_depth: 2)`
-  - `spl_filter(branch: "main", labels: ["SecurityPolicy"])`
-  - `spl_filter(branch: "main", labels: ["TestingStandard"])`
-  - `spl_filter(branch: "main", labels: ["AntiPattern"])`
+  - `spl_search(query: "<feature-keyword>")`
+  - `spl_query_context(query: "<component-or-feature>", direction: "both")`
+  - `spl_filter(labels: ["SecurityPolicy"])`
+  - `spl_filter(labels: ["TestingStandard"])`
+  - `spl_filter(labels: ["AntiPattern"])`
 
 - **CLI (Fallback)**:
   ```sh
-  # 1. Search for relevant product requirements and constraints
-  spl search --branch main --query "<feature-keyword>"
-
-  # 2. Inspect architectural context (decisions, components, contracts)
-  spl context --branch main --query "<component-or-feature>" --direction both --max-depth 2
-
-  # 3. Check engineering standards, security policies, and anti-patterns
-  spl filter --branch main --label SecurityPolicy
-  spl filter --branch main --label TestingStandard
-  spl filter --branch main --label AntiPattern
+  spl search --query "<feature-keyword>"
+  spl query-context --query "<component-or-feature>" --direction both
+  spl filter --label SecurityPolicy
+  spl filter --label TestingStandard
+  spl filter --label AntiPattern
   ```
 
 ### Step 2: Formulate Technical Spec & Execution Plan
@@ -112,25 +107,23 @@ Before merging the implementation branch into a baseline, review the removal of 
 implementation nodes and their incident edges:
 
 - **MCP (Default)**:
-  - Preview: `spl_prune(branch: "<implementation-branch>", dry_run: true)`
-  - Commit: `spl_prune(branch: "<implementation-branch>", author: "<author>", message: "Prune transient implementation knowledge")`
+  - Preview: `spl_prune(dry_run: true)`
+  - Commit: `spl_prune(author: "<author>", message: "Prune transient implementation knowledge")`
 
 - **CLI (Fallback)**:
   ```sh
-  spl prune --branch <implementation-branch> --dry-run
-  spl prune --branch <implementation-branch> --author "<author>" \
-    --message "Prune transient implementation knowledge"
+  spl prune --dry-run
+  spl prune --author "<author>" --message "Prune transient implementation knowledge"
   ```
 
 The JSON preview reports every removed `Ephemeral` node, cascading edge, and durable node left
-without connections. Commit or clear staged graph changes before pruning; do not use `--force` on
-the protected default branch unless that cleanup is intentional.
+without connections. Unbound workspaces are refused. This is graph cleanup, not pack/CAS GC.
 
 ---
 
 ## 4. Batch Authoring Example
 
-Create an `spl add` batch JSON file demonstrating cross-role synthesis and `Ephemeral` labeling:
+Create a mutation-batch JSON file demonstrating cross-role synthesis and `Ephemeral` labeling:
 
 ```json
 [
@@ -191,19 +184,13 @@ Create an `spl add` batch JSON file demonstrating cross-role synthesis and `Ephe
 ]
 ```
 
-Stage and commit the batch:
+Write the batch through a schema migration (short-lived branch + PR):
 
-- **MCP (Default)**: Call `spl_add` directly with the mutations array (in-memory staging), inspect status with `spl_status`, and commit with `spl_commit`:
-  ```json
-  // spl_add: {"branch": "main", "mutations": [ ... ]}
-  // spl_status: {"branch": "main"}
-  // spl_commit: {"branch": "main", "author": "Engineer <eng@example.com>", "message": "Record ephemeral technical spec for outbox relay worker"}
-  ```
+- **MCP (Default)**: Call `spl_schema_migrate` with the current schema and `operations`.
 - **CLI (Fallback)**:
   ```sh
-  spl add --branch main --batch implementation-batch.json
-  spl status --branch main
-  spl commit --branch main --author "Engineer <eng@example.com>" --message "Record ephemeral technical spec for outbox relay worker"
+  spl schema migrate --schema schema.toml --batch implementation-batch.json \
+    --author "Engineer <eng@example.com>" --message "Record ephemeral technical spec for outbox relay worker"
   ```
 
 ---
@@ -213,22 +200,15 @@ Stage and commit the batch:
 Discover and traverse technical implementation knowledge using Spool MCP tools by default:
 
 - **MCP (Default)**:
-  - `spl_filter(branch: "main", labels: ["TechnicalSpec"])`
-  - `spl_filter(branch: "main", labels: ["Ephemeral"])`
-  - `spl_context(branch: "main", query: "outbox relay worker", direction: "both", max_depth: 2)`
-  - `spl_resolve(branch: "main", node: "spec-tx-outbox-relay-worker")`
+  - `spl_filter(labels: ["TechnicalSpec"])`
+  - `spl_filter(labels: ["Ephemeral"])`
+  - `spl_query_context(query: "outbox relay worker", direction: "both")`
+  - `spl_resolve(node: "spec-tx-outbox-relay-worker")`
 
 - **CLI (Fallback)**:
   ```sh
-  # Discover active technical specs and plans
-  spl filter --branch main --label TechnicalSpec
-
-  # Find all ephemeral implementation nodes
-  spl filter --branch main --label Ephemeral
-
-  # Inspect full context of an implementation spec (upstream requirements, ADRs, standards)
-  spl context --branch main --query "outbox relay worker" --direction both --max-depth 2
-
-  # Resolve a specific technical specification node
-  spl resolve --branch main --node spec-tx-outbox-relay-worker
+  spl filter --label TechnicalSpec
+  spl filter --label Ephemeral
+  spl query-context --query "outbox relay worker" --direction both
+  spl resolve --node spec-tx-outbox-relay-worker
   ```

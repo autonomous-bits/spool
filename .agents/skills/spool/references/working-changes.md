@@ -1,32 +1,43 @@
 # Working changes
 
-Solution context does **not** start with `spl init`. Bind the code repo and
-write via MCP as a short-lived branch + PR:
+Bind this code repository to a solution context remote once:
 
 ```sh
-spl context init --remote https://github.com/org/solution-context.git \
-  --solution-id my-solution
+spl context init --remote https://github.com/org/solution-context.git
 ```
 
-See [docs/context-bind.md](../../../../docs/context-bind.md). `spl init` and
-detached `workspace init` / `workspace attach` are **deprecated and
-unsupported** for solution context. Leftover `.spl` is migration-only
-(`spl context export`).
+That writes `.spool/context.toml`. Context-management commands refuse to run without it.
 
-## Bound writes
-
-Prefer MCP `spl_add` / `spl_commit`. One mutation batch becomes one git commit
-on a short-lived branch and a pull request to `protected_branch`. Do not push
-cleanly to the working or protected branch.
-
-CLI fallback (bound workspace):
+Export leftover private `.spl` graph files into the bound context remote (one-shot or repeatable):
 
 ```sh
-spl add --branch main --batch mutations.json
-spl status --branch main
-spl commit --branch main --author alice --message "Describe the graph change"
+spl context export
+spl context migrate-once
 ```
 
-`add` validates and stages the entire batch; it does not commit. Bound
-`commit` opens the PR. Use explicit `--branch` values, and inspect the JSON
-result before using returned IDs in later commands.
+These commands read leftover `.spl` internally. They are not Spool VCS commands and do not reopen
+Rack or `.spl` as source of truth.
+
+## Graph writes
+
+There is no public `spl add` / `spl commit`. Bound writes go through KEEP commands that open a
+short-lived `spool/mcp/<stamp>-<nonce>` branch and a pull request:
+
+```sh
+spl schema migrate --schema schema.toml --batch mutations.json
+spl asset add --file docs/architecture.md --title "Architecture notes"
+spl prune --author alice --message "Prune transient plan"
+```
+
+Identical schema content is a no-op (no empty PR).
+
+## History and diff
+
+Use stock git on the context remote:
+
+```sh
+git log
+git diff
+```
+
+Spool does not wrap `history` or `diff`.
