@@ -31,7 +31,7 @@ require (
 	github.com/zalando/go-keyring v0.2.8 // indirect
 	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/term v0.45.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	lukechampine.com/blake3 v1.4.1 // indirect
