@@ -109,7 +109,9 @@ the detailed package guidance.
 ## Documentation
 
 Update user-facing command help and [`README.md`](README.md) when a CLI workflow changes. Use
-[`docs/README.md`](docs/README.md) as the index for maintained project documentation.
+[`docs/README.md`](docs/README.md) as the index for maintained project documentation. Solution
+context is bind + stock git (always branch+PR). Do not document Rack, dual-run, or `.spl` as a
+parallel source of truth; leftover `.spl` is migration-only via `spl context export`.
 
 The HTML and JSON files under [`docs/goals`](docs/goals) are generated delivery artifacts. Do not
 hand-edit them without the corresponding generation source or process.

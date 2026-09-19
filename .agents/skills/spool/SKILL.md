@@ -1,11 +1,15 @@
 ---
 name: spool
-description: Use Spool graph version control via native MCP tools (`spl_*`) by default, falling back to the local CLI (`spl`) if MCP is unavailable. Initialize repositories, stage and commit graph changes, manage branches and merges, query graph snapshots, validate schemas, and maintain repository integrity.
+description: Use Spool graph context via native MCP tools (`spl_*`) by default, falling back to the local CLI (`spl`) if MCP is unavailable. Bind code repos to one context git remote; every write is a short-lived branch + PR. Query snapshots, validate schemas, and export leftover `.spl` once.
 ---
 
 # Spool
 
-Spool is a local, content-addressed graph version-control system.
+Spool is the MCP/CLI tool for shared **solution context**. N code repositories
+bind to **one** context git remote. **Git is the only durable source of truth.**
+Every agent write is a short-lived branch and pull request. Leftover `.spl` and
+Rack remotes are deprecated and unsupported for solution context (migration-only
+via `spl context export`).
 
 ## Interaction Protocol: MCP Default with CLI Fallback
 
@@ -53,7 +57,8 @@ Spool includes a native Model Context Protocol (MCP) server built with the offic
 
 To bind to a specific solution context, put `.spool/context.toml` in the code repo
 (or run `spl context init --remote`) and start `spl mcp` from that repo. Do not use
-`--state-dir` pointing at `.spl` as the durable context store.
+`--state-dir` pointing at `.spl` as a durable context store. That path is
+unsupported for solution context except one-shot `spl context export`.
 
 #### 2. VS Code / Cursor (`mcp.json` or workspace settings)
 ```json
@@ -83,10 +88,10 @@ Add an MCP server entry pointing to `spl mcp` in your global or workspace config
 | Category | Primary MCP Tool | CLI Fallback | Key Parameters & Notes |
 | :--- | :--- | :--- | :--- |
 | **Staging** | `spl_status` | `spl status --branch <b\>` | Inspect staged mutations for branch. |
-| **Staging** | `spl_add` | `spl add --branch <b\> --batch <f\>` | **MCP Advantage**: accepts `mutations` JSON array directly in-memory; no disk file needed. Bound workspaces commit via context git PR. |
-| **Commits** | `spl_commit` | `spl commit --branch <b\> --author <a\> --message <m\>` | Bound: one batch = one git commit on a short-lived branch + PR. Unbound writes fail closed. |
+| **Staging** | `spl_add` | `spl add --branch <b\> --batch <f\>` | **MCP Advantage**: accepts `operations` JSON array directly in-memory; no disk file needed. Bound workspaces commit via context git PR. Unbound writes fail closed. |
+| **Commits** | `spl_commit` | `spl commit --branch <b\> --author <a\> --message <m\>` | Bound: one batch = one git commit on a short-lived branch + PR to the protected branch. Never push-clean to the working branch. Unbound writes fail closed. |
 | **Bind** | — | `spl context init --remote <url\>` | Writes `.spool/context.toml`, layout/schema, and a `CodeRepository` node from this bind. |
-| **Export** | `spl_context_export` | `spl context export` / `spl context migrate-once` | One-shot `.spl` → context git (lossy, not sync). Requires bind. One batch → one commit → PR. |
+| **Export** | `spl_context_export` | `spl context export` / `spl context migrate-once` | Documented escape hatch: one-shot leftover `.spl` → context git (lossy, not sync, not dual-run). Requires bind. One batch → one commit → PR. |
 | **Branches** | `spl_branch_list` | `spl branch list` | Lists all local branches and marks active HEAD. |
 | **Branches** | `spl_branch_create` | `spl branch create <n\> --from-branch <b\>` | Creates a branch from existing branch or commit. |
 | **Branches** | `spl_branch_delete` | `spl branch delete <n\>` | Deletes an inactive branch. |
@@ -106,7 +111,7 @@ Add an MCP server entry pointing to `spl mcp` in your global or workspace config
 | **Merge** | `spl_merge_resolve` | `spl merge resolve ... --selections <sel\>` | Records conflict choices (`source`/`target`) and overrides. |
 | **Merge** | `spl_merge_finalize` | `spl merge finalize --target <t\> --transaction <tx\>` | Finalizes resolved merge into a merge commit. |
 | **Merge** | `spl_merge_abort` | `spl merge abort --target <t\> --transaction <tx\>` | Aborts active merge transaction. |
-| **Lifecycle** | `spl_init` | `spl init` | Initializes local `.spl` state (refused when a context bind is present; use `spl context init --remote`). |
+| **Lifecycle** | `spl_init` | `spl init` | **Deprecated / unsupported** for solution context. Use `spl context init --remote`. Leftover `.spl` is migration-only. |
 | **Lifecycle** | `spl_fsck` | `spl fsck` | Validates repository graph and storage integrity. |
 | **Lifecycle** | `spl_gc` | `spl gc` | Garbage collects unreferenced objects. |
 | **Lifecycle** | `spl_prune` | `spl prune --branch <b\>` | Excises `Ephemeral` labeled nodes and incident edges. |
@@ -115,33 +120,30 @@ Add an MCP server entry pointing to `spl mcp` in your global or workspace config
 | **Schema** | `spl_validate` | `spl validate --branch <b\>` | Validates graph against schema invariants. |
 | **Assets** | `spl_asset_add` | `spl asset add --branch <b\> --file <p\>` | Content-addresses and stores reference asset blob. |
 | **Assets** | `spl_asset_read` | `spl asset read --branch <b\> --node <id\>` | Reads asset bytes (Base64-encoded via MCP, raw on CLI). |
-| **Workspace** | `spl_workspace_init` | `spl workspace init <name\>` | Local detached workspace (not context SoT; MCP refuses). |
-| **Workspace** | `spl_workspace_attach` | `spl workspace attach --workspace <w\> ...` | Local `.spl` manifest (not context SoT; MCP refuses). |
-| **Workspace** | `spl_migrate` | `spl migrate --from <v\> --to <v\>` | Migrates repository state format. |
-| **Remote** | `spl_remote_set` | `spl remote set --endpoint <url\> ...` | Rack remote (not context SoT; MCP refuses). |
-| **Remote** | `spl_remote_show` | `spl remote show` | Rack probe (not context SoT; MCP refuses). |
-| **Remote** | `spl_remote_remove` | `spl remote remove` | Clears Rack remote (MCP refuses). |
-| **Remote** | `spl_remote_branch` | `spl remote branch <action\> ...` | Rack branches (MCP refuses). |
-| **Remote** | `spl_push` | `spl push --branch <b\>` | Rack push (MCP refuses; context sync is stock git PR). |
-| **Remote** | `spl_pull` | `spl pull --branch <b\>` | Rack pull (MCP refuses; context sync is stock git). |
-| **Remote** | `spl_clone` | `spl clone <url\> [dir]` | Rack clone (MCP refuses; `git clone` the bind remote). |
+| **Workspace** | `spl_workspace_init` | `spl workspace init <name\>` | **Deprecated / unsupported** for solution context (MCP refuses). |
+| **Workspace** | `spl_workspace_attach` | `spl workspace attach --workspace <w\> ...` | **Deprecated / unsupported** for solution context (MCP refuses). |
+| **Workspace** | `spl_migrate` | `spl migrate --from <v\> --to <v\>` | Leftover `.spl` format upgrade only. |
+| **Remote** | `spl_remote_set` | `spl remote set --endpoint <url\> ...` | **Unsupported** (Rack sync sunset; MCP refuses). |
+| **Remote** | `spl_remote_show` | `spl remote show` | **Unsupported** (MCP refuses). |
+| **Remote** | `spl_remote_remove` | `spl remote remove` | **Unsupported** (MCP refuses). |
+| **Remote** | `spl_remote_branch` | `spl remote branch <action\> ...` | **Unsupported** (MCP refuses). |
+| **Remote** | `spl_push` | `spl push --branch <b\>` | **Unsupported** (MCP refuses; context writes are stock git PR). |
+| **Remote** | `spl_pull` | `spl pull --branch <b\>` | **Unsupported** (MCP refuses; context sync is stock git). |
+| **Remote** | `spl_clone` | `spl clone <url\> [dir]` | **Unsupported** (MCP refuses; `git clone` the bind remote). |
 | **Metadata** | `spl_version` | `spl version` | Inspects binary version, commit, build date. |
 
 ---
 
 ## Branch Strategy & User Elicitation
 
-Before staging or committing changes:
-1. **Check active branch**:
-   - **MCP**: Call `spl_branch_list`.
-   - **CLI**: Run `spl branch list`.
-2. **Elicit user intent**: Unless the user has explicitly requested a target branch, prompt the user to clarify whether changes should be:
-   - Committed directly to the active branch (e.g. `main`), or
-   - Isolated on a new dedicated branch to allow review, diffing, and isolated merging.
-3. **Execute branch setup**:
-   - If a new branch was requested:
-     - **MCP**: Call `spl_branch_create(name, from_branch)`, then `spl_switch(name)`.
-     - **CLI**: Run `spl branch create <name> --from-branch <current>` followed by `spl switch <name>`.
+Solution-context writes **always** land as a short-lived branch + pull request
+to the bind file's `protected_branch`. Do not push cleanly to the working or
+protected branch. Do not use Rack `spl push`.
+
+Before staging or committing leftover local `.spl` migration work:
+1. **Check bind**: the workspace must have `.spool/context.toml` (or run `spl context init --remote`).
+2. Prefer MCP `spl_add` / `spl_commit` so the runtime opens the PR.
+3. For one-shot leftover graphs, use `spl_context_export` / `spl context export` — not dual-run.
 
 Before merging a branch containing transient planning data, preview its cleanup:
 - **MCP**: Call `spl_prune(branch, dry_run: true)`. If clean, call `spl_prune(branch, author, message)`.
@@ -176,6 +178,7 @@ Before merging a branch containing transient planning data, preview its cleanup:
 | `merge` cycle (`preview`, `apply`, `conflicts`, `resolve`, `finalize`, `abort`) | [Merges](references/merges.md) |
 | `fsck`, `gc`, `prune` | [Maintenance](references/maintenance.md) |
 | `asset add`, `asset read` | [CLI help](references/cli-help.md) |
-| `workspace init`, `workspace attach`, `migrate` | [Multi-repo workspaces](references/workspaces.md) |
-| `remote`, `push`, `pull`, `clone`, `mcp` | [CLI help](references/cli-help.md) |
+| `workspace init`, `workspace attach`, `migrate` | [Multi-repo workspaces](references/workspaces.md) (deprecated / unsupported for solution context) |
+| `remote`, `push`, `pull`, `clone` | **Unsupported** (Rack sync sunset); see [CLI help](references/cli-help.md) |
+| `mcp` | [CLI help](references/cli-help.md) |
 | `version`, `completion`, `help` | [CLI help](references/cli-help.md) |

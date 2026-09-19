@@ -11,7 +11,7 @@ generated from commits since the preceding `v*` tag. Commits prefixed with `docs
 ### Added
 
 - Documented `.spool/context.toml` bind format and the N-code-repos → one
-  context git remote happy path (`docs/context-bind.md`).
+  context git remote as the only durable SoT (`docs/context-bind.md`).
 - `spl context init --remote` seeds `CodeRepository` nodes from explicit binds
   (repeat per code repo; sibling directories are not scanned).
 - `spl context export` / `spl context migrate-once` / MCP `spl_context_export`:
@@ -27,7 +27,16 @@ generated from commits since the preceding `v*` tag. Commits prefixed with `docs
   monorepo layout, `go.work`, leftover `.spl` state, git `origin`, or Rack config.
 - MCP Rack remote / clone / workspace tools and, when a bind is present, CLI
   `init` / `workspace` / `remote` / `push` / `pull` / `clone` fail closed with
-  guidance to bind + stock git. `.spl` and Rack are not the durable context SoT.
+  guidance to bind + stock git.
+- **Sunset stop-list for solution context:** Spool-as-VCS, Rack sync, `.spl` as
+  durable SoT, and pack wire-compat are stopped. Bind + stock git is the **only**
+  durable SoT. Every agent write is a short-lived branch + PR (not push-clean to
+  the working or protected branch). Auth is stock git credentials only. Default
+  install has no Rack / `spool-rack` module dependency. Unbound leftover `.spl`
+  is unsupported for solution context except the documented migrate-once escape
+  hatch (`spl context export`). No dual-run and no Rack wire-compat.
+- Context asset policy: Git LFS default threshold **512 KiB**; text/JSON/TOML
+  stay plain git (warn above ~1 MiB).
 
 ## [1.10.0] - 2026-09-12
 

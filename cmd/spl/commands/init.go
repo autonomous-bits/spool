@@ -12,7 +12,7 @@ func NewInitCommand(initialize func() (*repository.Repository, error)) *cobra.Co
 	return &cobra.Command{
 		Use:          "init",
 		Short:        "Initialize a Spool repository",
-		Long:         "Initialize the resolved Spool state directory and create the default main branch. Not the solution-context onboarding path: when `.spool/context.toml` is present this command is refused; use `spl context init --remote` instead.",
+		Long:         "Initialize leftover local `.spl` state. Deprecated and unsupported for solution context: when `.spool/context.toml` is present this command is refused; use `spl context init --remote` instead. Leftover `.spl` is migration-only (`spl context export`).",
 		Example:      "  spl init",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,

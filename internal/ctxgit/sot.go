@@ -5,14 +5,15 @@ import (
 	"fmt"
 )
 
-// LegacyContextSoTError reports that a Rack or `.spl` path is not the durable
-// solution-context source of truth. Callers should bind with BindRelPath and
-// sync via stock git clone, pull requests, and history.
+// LegacyContextSoTError reports that a Rack or `.spl` path is deprecated and
+// unsupported for solution context. Callers should bind with BindRelPath and
+// sync via stock git clone, pull requests, and history. Leftover `.spl` is
+// migration-only (`spl context export`), not a parallel SoT.
 func LegacyContextSoTError(action string) error {
 	if action == "" {
 		action = "this command"
 	}
-	return fmt.Errorf("%s is not the durable solution-context source of truth: bind each code repo with %s (or `spl context init --remote <url>`) and sync with stock git clone/PR/history; `.spl` and Rack remotes are out of the happy path", action, BindRelPath)
+	return fmt.Errorf("%s is deprecated and unsupported for solution context: bind each code repo with %s (or `spl context init --remote <url>`) and sync with stock git clone/PR/history; bind + stock git is the only durable SoT; leftover `.spl`/Rack is migration-only (`spl context export`), not a parallel happy path", action, BindRelPath)
 }
 
 // BoundFrom reports whether start resolves an explicit context bind.
@@ -28,8 +29,8 @@ func BoundFrom(start string) (Bind, bool, error) {
 }
 
 // RefuseLegacySoT returns LegacyContextSoTError when start is bound to a
-// solution context remote. Unbound directories are left unchanged so local
-// graph-VCS tests and tooling keep working until a bind exists.
+// solution context remote. Unbound leftover `.spl` is left unchanged so
+// migrate-once export can still read it; it is not a supported parallel SoT.
 func RefuseLegacySoT(start, action string) error {
 	_, bound, err := BoundFrom(start)
 	if err != nil {

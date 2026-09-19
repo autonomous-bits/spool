@@ -14,7 +14,7 @@ import (
 
 const invalidPackFixtureFormatVersion = 1
 
-// invalidPackFixture is the versioned, Rack-consumable conformance format
+// invalidPackFixture is the versioned, language-agnostic conformance format
 // for pack streams that must be rejected as corrupt or truncated before
 // any object inside them is trusted.
 type invalidPackFixture struct {

@@ -1,7 +1,7 @@
 {
   "format_version": 1,
   "package": "github.com/autonomous-bits/spool/graphcontract",
-  "description": "Versioned, Rack-consumable graphcontract conformance fixture sets. Each set is self-contained under testdata/<name>/v<format_version>/ and is exercised by a Go test in this package; a second repository (Rack) may load the same JSON fixtures directly to prove parity without depending on Spool's Go test internals.",
+  "description": "Versioned, language-agnostic graphcontract conformance fixture sets. Each set is self-contained under testdata/<name>/v<format_version>/ and is exercised by a Go test in this package. These fixtures are Spool's own contract surface; they do not promise Rack pack wire-compat or dual-run.",
   "fixture_sets": [
     {
       "name": "schema",

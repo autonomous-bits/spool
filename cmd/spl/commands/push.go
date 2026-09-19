@@ -29,8 +29,8 @@ func NewPushCommand(repoProvider func() (*repository.Repository, error)) *cobra.
 			"merge finds conflicts, push leaves both --branch and the reconciliation branch untouched and " +
 			"reports the conflicts instead of retrying; resolve them with `spl merge preview/apply/conflicts/" +
 			"resolve/finalize` against --branch and the reconciliation branch, then retry.\n\n" +
-			"Not the solution-context source of truth: when `.spool/context.toml` is present, this command " +
-			"is refused. Bind code repos and sync context with stock git clone/PR/history.",
+			"Deprecated and unsupported for solution context: when `.spool/context.toml` is present, this command " +
+			"is refused. Bind code repos and sync context with stock git clone/PR/history. Leftover `.spl` is migration-only (`spl context export`).",
 		Example:      "  spl push --branch main --base-commit <last-known-wire-commit-id>\n  spl push --branch main\n  spl push --branch main --reconcile",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,

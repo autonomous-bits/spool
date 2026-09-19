@@ -1,6 +1,6 @@
 # One-shot `.spl` export to context git
 
-This is a **best-effort, lossy, migrate-once** path from a local `.spl` (or Rack-backed) graph into the solution context git remote. It is **not sync**, not dual-run, and not Rack wire-compat.
+This is the documented **escape hatch** from leftover `.spl`: a **best-effort, lossy, migrate-once** mapping into the solution context git remote. Leftover `.spl`/Rack is **unsupported** as a parallel SoT. This path is **not sync**, not dual-run, and not Rack wire-compat.
 
 Entrypoints (never named “sync”):
 

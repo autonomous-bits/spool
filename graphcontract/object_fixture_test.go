@@ -13,7 +13,7 @@ import (
 
 const objectFixtureFormatVersion = 1
 
-// objectFixture is the versioned, Rack-consumable conformance format for
+// objectFixture is the versioned, language-agnostic conformance format for
 // canonical Node and Edge encoding. A fixture with a non-empty "error"
 // field must be rejected; otherwise its value must marshal to exactly
 // CanonicalCBORHex and hash to exactly ObjectID.

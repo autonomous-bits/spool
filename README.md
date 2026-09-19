@@ -1,15 +1,21 @@
 # Spool
 
-Spool is a graph version-control tool for shared **solution context**. N code
-repositories bind to **one** context git remote; git is the durable source of
-truth. Spool MCP/CLI validates mutations, writes human-diffable JSON, opens a
-short-lived branch and pull request, and rebuilds a local query projection.
+Spool is the MCP/CLI tool for shared **solution context**. N code repositories
+bind to **one** context git remote. **Git is the only durable source of truth.**
+Spool validates mutations, writes human-diffable JSON, opens a short-lived
+branch and pull request, and rebuilds a local query projection.
 
 Successful commands emit JSON to standard output; failures are structured JSON
-logs on standard error. There is no Spool-specific remote protocol: clone, PR,
-and history use stock git and GitHub.
+logs on standard error.
+
+There is no Spool-specific remote protocol and no Rack dependency in the default
+install: clone, pull requests, history, and credentials use **stock git**.
 
 ## Install
+
+The default `spl` install does **not** depend on Rack or `spool-rack`. Do not
+install a Rack service, configure a Rack remote, or use a Spool-specific token
+for context sync.
 
 ### Prebuilt binaries
 
@@ -40,6 +46,8 @@ If you have Go **1.26.1** or later installed:
 go install github.com/autonomous-bits/spool/cmd/spl@latest
 ```
 
+That module path does not require Rack.
+
 ### Build from source
 
 To build from a local clone of the repository:
@@ -54,8 +62,8 @@ go build -o dist/spl ./cmd/spl
 ## Quick start
 
 Bind each code repo to the shared solution context remote. Spool does not
-auto-discover remotes from directory names, monorepo layout, or leftover `.spl`
-or Rack config.
+auto-discover remotes from directory names, monorepo layout, leftover `.spl`
+state, or Rack config.
 
 ```toml
 # .spool/context.toml in every participating code repo
@@ -76,348 +84,70 @@ spl context init --remote https://github.com/org/my-solution-context.git \
 
 `context init` creates `schema.toml`, `nodes/`, `edges/`, and `assets/` on an
 empty remote and seeds a `CodeRepository` node from **this** bind. Repeat in
-other code repos. MCP writes fail closed until a bind exists; after that they
-commit on a short-lived branch and open a PR to `protected_branch`. Sync is
-stock `git clone` / GitHub PR / history.
+other code repos.
+
+MCP writes fail closed until a bind exists. After that, **every** agent write
+creates a short-lived branch and opens a pull request to `protected_branch`.
+Do not push cleanly to the working or protected branch. Sync is stock
+`git clone` / GitHub PR / history with **stock git credentials** only.
 
 See [docs/context-bind.md](docs/context-bind.md) for the bind format and
-multi-repo story. Existing `.spl` graphs move with
-[`spl context export`](docs/context-git-migration.md) (alias `migrate-once`) —
-one-shot, lossy, overwrite-at-own-risk; not sync.
+multi-repo story.
 
-### Local graph repository (not the shared context SoT)
+## Write model
 
-`.spl` packs, detached workspaces, and Rack remotes are out of the happy path
-for solution context. They still exist for local graph-VCS and migration. When
-`.spool/context.toml` is present, `spl init`, `spl workspace …`, `spl remote`,
-`spl push`, `spl pull`, and `spl clone` refuse with an error pointing at the
-bind file and stock git.
+| Rule | Behavior |
+| --- | --- |
+| Source of truth | The bound context git remote. Local SQLite/FTS projections rebuild on every MCP/process start and are never committed. |
+| Agent writes | One mutation batch → one git commit on a **short-lived branch** → **pull request** to `protected_branch`. |
+| Overlaps | Humans resolve on the PR. No silent overwrite. |
+| Auth | Stock git credentials only. Never a Spool-specific token. |
+| Assets | Git LFS at or above **512 KiB** (configurable). Text, JSON, and TOML stay plain git (warn above ~1 MiB). |
 
-To create a local, non-shared graph repository instead, run `spl init` from an
-**unbound** directory. It creates `.spl` in the nearest directory at or above
-the current directory that already contains `.spl` or `go.work`, or in the
-current directory if neither is found.
+## Migrating leftover `.spl` graphs
 
-All commands accept the global `--state-dir <path>` override for that local
-state. State selection precedence is `--state-dir`, `SPOOL_DIR`, a discovered
-checkout manifest, then local `.spl`/`go.work` discovery. An empty `--state-dir`
-is invalid. A malformed manifest or unregistered workspace ID is an error;
-checkouts without a manifest continue to use local repository discovery.
-
-## Storage and integrity
-
-Spool stores immutable nodes, edges, graph snapshots, schemas, and fixed-fanout sorted tree
-indexes as canonical CBOR loose objects under the selected state directory's `objects/loose`.
-For local repositories, the state directory is `.spl`; for attached workspaces, it is detached
-storage outside the checkout.
-Object IDs are BLAKE3 hashes of the typed canonical bytes. Mutable control
-state is separate: `config.toml`, `HEAD`, branch refs, staging files,
-reflogs, and merge transactions.
-
-`spl gc` retains reachable, reflog-referenced, and durable merge-resolution root objects, packs
-retained objects into verified zstd pack/index generations, and removes unreachable loose objects
-only after a 14-day grace period. Pack publication is atomic, so packing does
-not change object IDs or make a committed object unavailable.
-
-Commit and merge transitions write immutable objects before atomically replacing
-the affected ref. If a process stops during a transition, an unreachable object
-or stale staging file may remain, but a ref never intentionally points to a
-partially written object. Do not edit files in the selected Spool state directory manually.
-
-Use `fsck` after an interrupted process, storage failure, or suspected
-corruption:
+Existing `.spl` graphs move with a **one-shot** export — the documented escape
+hatch, not a second store:
 
 ```sh
-spl fsck
-spl gc
+spl context export --branch main
+# alias:
+spl context migrate-once --branch main
 ```
 
-It writes a JSON integrity report on standard output even when corruption is
-found, exits non-zero for corruption, and does not repair or delete data.
-
-Stage a JSON mutation batch and commit it:
-
-```sh
-spl add --branch main --batch mutations.json
-spl status --branch main
-spl commit --branch main --author alice --message "Add graph data"
-```
-
-Author a schema in TOML and stage its migration with the graph changes needed
-to satisfy it:
-
-```toml
-# people.toml
-version = 2
-
-[[node]]
-label = "Person"
-[[node.property]]
-key = "name"
-required = true
-types = ["string"]
-```
-
-```sh
-spl schema migrate --branch main --schema people.toml --batch people-mutations.json
-spl commit --branch main --author alice --message "Migrate people schema"
-spl validate --branch main
-```
-
-`schema migrate` reads the TOML schema and the complete JSON mutation batch,
-validates their resulting graph together, and atomically replaces the branch's
-staged set. The schema and graph changes take effect together only when that
-staged set is committed. `validate` emits a JSON report for one immutable
-branch snapshot; use `--commit <commit-id>` to validate a reachable historical
-commit instead of the branch head.
-
-Create and use a branch:
-
-```sh
-spl branch create feature --from-branch main
-spl switch feature
-spl branch list
-```
-
-Remove temporary planning data before merging a feature branch:
-
-```sh
-# Inspect the affected nodes, incident edges, and durable nodes left disconnected.
-spl prune --branch feature --dry-run
-
-# Remove nodes labeled Ephemeral and commit the resulting graph snapshot when any are found.
-spl prune --branch feature --author alice --message "Prune transient plan"
-```
-
-`prune` emits a JSON summary containing the removed node and cascading-edge counts, node IDs, and
-any durable nodes left without connected edges. It refuses to run when the branch has staged
-changes; commit or clear them first. The default branch is protected from pruning unless
-`--force` is explicitly supplied.
-
-Selectively transplant an individual commit's graph delta onto a target branch:
-
-```sh
-# Preview the transplanted changes, conflicts, and schema violations without modifying state.
-spl cherry-pick --commit <commit-id> --target-branch main --dry-run
-
-# Apply the exact single-commit delta onto main with provenance metadata.
-spl cherry-pick --commit <commit-id> --target-branch main --author alice --message "Transplant fix"
-```
-
-`cherry-pick` computes the single-commit delta against its first parent, performs 3-way property merging
-against the target branch head, and strictly verifies referential integrity and schema conformance
-before committing.
-
-Query, retrieve, and compare graph snapshots:
-
-```sh
-spl resolve --branch main --node 11111111-1111-4111-8111-111111111111
-spl diff --base-branch main --target-branch feature
-spl history --branch main --entity-id 11111111-1111-4111-8111-111111111111
-spl branches-containing --entity-id 11111111-1111-4111-8111-111111111111
-
-# Lexical retrieval and schema-indexed metadata filters use the current
-# branch-head SQLite projection.
-spl search --branch main --query incident
-spl filter --branch main --label Task --property-text status=open
-
-# Build a bounded evidence context from lexical results or typed filters.
-spl context --branch main --query incident --direction both --edge-type RELATES_TO
-spl search-expand --branch main --label Task --property-min priority=3 --direction out
-```
-
-`search`, `filter`, `search-expand`, and `context` return the selected snapshot and projection
-provenance with budget and completion metadata. Filtered properties must be scalar properties
-enabled with `indexed = true` in the selected schema. Retrieval is currently limited to the
-branch-head projection; a `--commit` selector is accepted only when it names that branch head,
-and historical or divergent commits are rejected. `search` and `filter` (plus `history`,
-`branches-containing`, and `diff`) support `--continuation`; `search-expand` and `context` do not.
-Use `--max-rows`, `--max-response-bytes`, and `--timeout` for read budgets; `resolve`,
-`search-expand`, and `context` additionally accept `--max-visited` and `--max-depth`.
-`search-expand` and `context` require exactly one lexical `--query` or one or more typed filter
-flags, and accept `--seed-limit`, repeatable `--edge-type`, and `--direction out|in|both`.
-
-Store contextual reference documents as content-addressed Asset nodes:
-
-```sh
-spl asset add --branch main --file docs/architecture.md --title "Architecture notes"
-spl commit --branch main --author alice --message "Add architecture notes"
-spl asset read --node asset-<hash-prefix> --branch main > architecture.md
-```
-
-`asset add` stores the file under `.spl/assets/loose`, computes its BLAKE3-256 hash and MIME
-type, and stages an `Asset` node with a `spool://assets/<hash>` locator. `asset read` accepts an
-Asset node ID, a locator, or a raw hash and streams the original bytes without buffering the full
-file. When a configured Rack remote has the blob but the local cache does not, `asset read`
-retrieves and caches it on demand. `spl push` negotiates missing asset blobs and uploads them
-alongside the graph history.
-
-Export a branch's complete immutable graph snapshot as JSON for visualization or offline
-inspection:
-
-```sh
-spl graph --branch main
-```
-
-Run `spl <command> --help` for all commands, flags, response-budget controls, and examples.
-
-Preview a merge before moving a branch, then apply the exact clean preview:
-
-```sh
-spl merge preview --source feature --target main
-spl merge apply --source feature --target main --transaction merge-42 --preview <preview-id> \
-  --author alice --message "Merge feature"
-```
-
-The preview combines independent node/edge fields and property keys, and reports structural,
-schema, and schema-derived semantic conflicts with stable conflict IDs and affected paths.
-Applying a conflicted exact preview creates a durable, target-branch lease rather than moving the
-branch. Inspect it with `spl merge conflicts --target main --transaction merge-42`, resolve every
-conflict from a JSON selection array, then finalize or abort:
-
-```sh
-spl merge resolve --target main --transaction merge-42 --preview <preview-id> \
-  --selections selections.json [--overrides mutations.json]
-spl merge finalize --target main --transaction merge-42
-# or: spl merge abort --target main --transaction merge-42
-```
-
-Each selection is `{"conflictId":"...","choice":"source"}` or
-`{"conflictId":"...","choice":"target"}`. Overrides use the same
-mutation-array format as `spl add` and can repair a schema-derived semantic conflict. Resolution
-and finalization reject stale previews, require transaction ownership, and keep the target lease
-until finalization or abort.
-
-## Detached workspaces
-
-`workspace init` / `workspace attach` provision local `.spl` detached state.
-They are **not** how N code repos bind to shared solution context — use
-[`.spool/context.toml`](docs/context-bind.md) for that. These commands are
-refused when a context bind is present.
-
-`workspace init` provisions a central detached workspace. `workspace attach`
-explicitly writes a repository manifest for it. Repository resolution uses only
-that committed manifest's immutable `workspace_id`; it does not use host-path
-attachments, `SPOOL_WORKSPACE`, or active-workspace preferences.
-
-## Remote configuration and synchronization
-
-**Solution context** syncs with stock git against the bind file's `remote`
-(clone, fetch, short-lived branch, GitHub pull request, history). There is no
-Spool-specific remote protocol.
-
-Rack `remote` / `push` / `pull` / `clone` commands below configure a Spool Rack
-service for **local graph-VCS** only. They are not the durable solution-context
-source of truth and are refused when `.spool/context.toml` is present.
-
-### Remote configuration
-
-`remote set` persists a non-secret Rack remote configuration to `.spl/config.toml`:
-
-```sh
-# Configure with tenant and workspace identity
-spl remote set --endpoint https://rack.example.com --tenant-id acme --workspace-id prod --auth-mode bearer
-
-# Or using legacy repository identity
-spl remote set --endpoint https://rack.example.com --repo-id acme-prod --auth-mode bearer
-```
-
-`remote show` reports the configured remote and probes its `/healthz` endpoint to verify `graphcontract` version compatibility:
-
-```sh
-spl remote show
-```
-
-`remote remove` clears the configured remote from `.spl/config.toml`:
-
-```sh
-spl remote remove
-```
-
-No credential is ever read from or written to repository configuration — credentials are resolved at use from the OS keychain/secret store (service `spool-rack`, account = workspace/repo-id), then `SPOOL_RACK_TOKEN` / `SPOOL_RACK_API_KEY`, then an interactive prompt.
-
-### Cloning a remote workspace
-
-To clone an existing remote workspace hosted on Spool Rack into a new local directory:
-
-```sh
-# Clone by workspace URL
-spl clone http://127.0.0.1:8080/api/v1/workspaces/ws-backend [directory]
-
-# Or clone by parameters
-spl clone --endpoint http://127.0.0.1:8080 --tenant-id acme --workspace-id ws-backend [directory]
-
-# Also available under the workspace command group
-spl workspace clone http://127.0.0.1:8080/api/v1/workspaces/ws-backend [directory]
-```
-
-`clone` initializes the local workspace directory, configures the Rack remote, fetches the complete graph history for the default branch (or specified `--branch`), and makes it the active branch so you can immediately begin pulling, committing, and pushing ideas.
-
-### Remote branches
-
-Inspect and manage branch lifecycle on the configured Rack remote:
-
-```sh
-# Create a remote branch from an existing remote branch or commit
-spl remote branch create feature --from-branch main
-spl remote branch create review --from-commit <commit-id>
-
-# List remote branches or query the remote default branch
-spl remote branch list
-spl remote branch default
-
-# Delete a non-default remote branch
-spl remote branch delete feature
-```
-
-### Push and pull
-
-Exchange verified commits with the configured Rack remote over native pack protocols:
-
-```sh
-# Push local commits reachable from --branch to Rack
-spl push --branch main
-
-# Push only commits newer than a known remote base commit
-spl push --branch main --base-commit <last-known-wire-commit-id>
-
-# Automatically reconcile non-fast-forward rejections via 3-way graph merge and retry
-spl push --branch main --reconcile
-
-# Pull new commits from Rack and fast-forward local history
-spl pull --branch main
-```
-
-`push` and `pull` enforce linear, fast-forward history. If a push is rejected because the remote branch moved, `--reconcile` pulls the remote history into a temporary reconciliation branch, rebases local changes onto it using the 3-way graph merge engine, and retries the push if clean. If conflicts exist, they are reported so they can be inspected and resolved using `spl merge`.
-
-## Workspace format migration
-
-When upgrading Spool across format version increments (such as upgrading from format version 1 to format version 2 in v1.5.0), existing workspace state must be migrated before it can be read or modified:
-
-```sh
-# Upgrade repository state directory format
-spl migrate --from 1 --to 2
-
-# Also available under the workspace command group
-spl workspace migrate --from 1 --to 2
-```
-
-`migrate` acquires an exclusive lock on repository control state, creates a durable backup copy of the state directory (e.g. `.v1.backup-<timestamp>`), canonicalizes commit objects to current graph contracts, remaps references and reflogs, updates configuration format version and tracking metadata, and validates the upgraded repository with `fsck`.
+That path is lossy, overwrite-at-own-risk, and **not sync**. It opens a
+short-lived branch and PR. See [docs/context-git-migration.md](docs/context-git-migration.md).
+
+## Unsupported for solution context
+
+These are **deprecated / migration-only**. They are not a supported parallel
+source of truth and must not be dual-run with the context git remote:
+
+- Spool-as-VCS (`spl init`, local `.spl` packs as durable context)
+- Rack sync (`spl remote`, `spl push`, `spl pull`, `spl clone`)
+- `.spl` as durable SoT
+- pack wire-compat with Rack
+- detached `.spl` workspaces as the N-repo join
+
+When `.spool/context.toml` is present, `spl init`, `spl workspace …`,
+`spl remote`, `spl push`, `spl pull`, and `spl clone` refuse. MCP tools for
+those paths always fail closed. Unbound leftover `.spl` state is only for
+`spl context export`.
 
 ## MCP server (`spl mcp`)
 
-Spool includes a native Model Context Protocol (MCP) server built on the official Go SDK ([`github.com/modelcontextprotocol/go-sdk`](https://github.com/modelcontextprotocol/go-sdk)). It exposes 100% of Spool commands as **43 structured, typed MCP tools (`spl_*`)** over standard I/O for AI agent pair-programming and tool integration.
+Spool includes a native Model Context Protocol (MCP) server built on the official Go SDK ([`github.com/modelcontextprotocol/go-sdk`](https://github.com/modelcontextprotocol/go-sdk)). It exposes Spool commands as structured MCP tools (`spl_*`) over standard I/O.
 
 ### Default vs Fallback Behavior for AI Agents
 
-- **Default (MCP Tools)**: For AI agents and pair-programming assistants, the MCP server is the **primary, recommended interface**. It provides structured input schemas, zero-disk in-memory mutation staging (`spl_add` accepts mutations as a JSON array without writing batch files to disk), server-side concurrency serialization, typed conflict resolution, and rich warning preservation.
-- **Fallback (CLI)**: Use the `spl` command-line application directly when running in environments without MCP integration, in terminal scripts, or in CI/CD pipelines.
+- **Default (MCP Tools)**: For AI agents, the MCP server is the **primary, recommended interface**. Bound writes land as a short-lived branch + PR.
+- **Fallback (CLI)**: Use `spl` directly in scripts or CI without MCP.
 
 ### Configuration Examples
 
-To connect an AI assistant or MCP client to Spool, add the server to your client configuration.
-Run `spl mcp` from a code repo that contains `.spool/context.toml` (or after `spl context init --remote`).
-Do not point `--state-dir` at `.spl` for solution context — that path is not the durable store.
+Run `spl mcp` from a code repo that contains `.spool/context.toml` (or after
+`spl context init --remote`). Do not point `--state-dir` at `.spl` for solution
+context.
 
 #### Claude Desktop / Claude Code (`claude_desktop_config.json`)
 ```json
@@ -430,9 +160,6 @@ Do not point `--state-dir` at `.spl` for solution context — that path is not t
   }
 }
 ```
-
-Run the server from a bound code repo. `--state-dir` is only for local `.spl`
-graph-VCS, not shared solution context.
 
 #### VS Code / Cursor (`mcp.json`)
 ```json
@@ -461,7 +188,8 @@ The command and flag inventory is:
 
 | Command | Flags and positional arguments |
 | --- | --- |
-| `init` | none |
+| `context init` | `--remote` (required), `--solution-id`, `--protected-branch`, `--repository-id`, `--author` |
+| `context export` (`migrate-once`) | `--branch`, `--author`, `--message` |
 | `add` | `--branch` (required), `--batch` (required) |
 | `status` | `--branch` |
 | `commit` | `--branch` (required), `--author`, `--message` |
@@ -476,8 +204,6 @@ The command and flag inventory is:
 | `search` | `--branch`, `--query` (required), `--commit`, `--continuation`, `--max-rows`, `--max-response-bytes`, `--timeout` |
 | `filter` | `--branch` (required), `--commit`, repeatable `--label`/property predicates, `--continuation`, `--max-rows`, `--max-response-bytes`, `--timeout` |
 | `search-expand`, `context` | `--branch` (required), `--commit`, query or typed filters, `--direction`, repeatable `--edge-type`, `--seed-limit`, `--max-depth`, `--max-visited`, `--max-rows`, `--max-response-bytes`, `--timeout` |
-| `context init` | `--remote` (required), `--solution-id`, `--protected-branch`, `--repository-id`, `--author` |
-| `context export` (`migrate-once`) | `--branch`, `--author`, `--message` |
 | `history` | `--branch`, `--entity-id` (required), `--commit`, `--all-parents`, `--continuation`, `--max-rows`, `--max-response-bytes`, `--timeout` |
 | `branches-containing` | exactly one selector (`--entity-id`, `--snapshot-id`, `--natural-key`), `--continuation`, `--max-rows`, `--max-response-bytes`, `--timeout` |
 | `diff` | `--base-branch`, `--target-branch` (required), optional commits, repeatable `--node-id`/`--edge-id`, `--node-title-contains`, `--one-hop`, `--continuation`, `--max-rows`, `--max-response-bytes`, `--timeout` |
@@ -492,31 +218,28 @@ The command and flag inventory is:
 | `cherry-pick` | `--commit` (required), `--target-branch` (required), `--dry-run`, `--author`, `--message` |
 | `asset add` | `--branch` and `--file` (required), `--title`, `--id` |
 | `asset read` | positional locator/node ID or `--locator`/`--node`, `--branch` |
-| `workspace init <name>` | positional name |
-| `workspace attach [path]` | `--workspace` and `--repository-id` (required); path defaults to current directory |
-| `workspace migrate`, `migrate` | `--from` (required), `--to` (required) |
-| `remote set` | `--endpoint` (required), `--auth-mode` (required), `--workspace-id`/`--workspace` or `--tenant-id`/`--tenant` or legacy `--repo-id` |
-| `remote show` | none; probes the configured remote's `/healthz` and never prints credentials |
-| `remote remove` | none |
-| `remote branch create <name>` | exactly one of `--from-branch`, `--from-commit` |
-| `remote branch list` | none |
-| `remote branch default` | none |
-| `remote branch delete <name>` | positional branch name (cannot delete default remote branch) |
-| `clone`, `workspace clone` | positional `[url]` or flags (`--endpoint`, `--workspace-id`/`--workspace`, `--tenant-id`/`--tenant`), optional `[directory]`, `--branch`/`-b`, `--auth-mode` |
-| `push` | `--branch` (required), `--base-commit`, `--reconcile` |
-| `pull` | `--branch` (required) |
 | `mcp` | none; runs the official Model Context Protocol server over standard I/O |
 | `version` | none |
 | `completion` | shell subcommand: `bash`, `zsh`, `fish`, or `powershell` |
 | `help [command path]` | optional command path |
+| `init` | **deprecated / migration-only** — not solution-context onboarding |
+| `workspace init <name>` | **deprecated / migration-only** |
+| `workspace attach [path]` | **deprecated / migration-only** |
+| `workspace migrate`, `migrate` | `--from` (required), `--to` (required); leftover `.spl` format upgrades only |
+| `remote set/show/remove/branch` | **unsupported** for solution context (Rack sync sunset) |
+| `clone`, `workspace clone` | **unsupported** for solution context; `git clone` the bind remote |
+| `push`, `pull` | **unsupported** for solution context; agent writes are branch + PR |
 
 The common query-budget flags are `--max-rows`, `--max-response-bytes`, and `--timeout`;
 traversal commands additionally use `--max-depth` and `--max-visited` as listed in the full
 reference. Every command also accepts `-h, --help` and the global `--state-dir`.
 
+Run `spl <command> --help` for flags, response-budget controls, and examples.
+
 ## Learn more
 
 - [`docs/context-bind.md`](docs/context-bind.md) documents the bind file and N-repos → one context remote.
+- [`docs/context-git-migration.md`](docs/context-git-migration.md) documents one-shot `.spl` export (`spl context export`).
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) explains how to build, test, and contribute to Spool.
 - [`docs/architecture.md`](docs/architecture.md) describes the high-level system architecture.
 - [`CHANGELOG.md`](CHANGELOG.md) explains how release notes are generated.
