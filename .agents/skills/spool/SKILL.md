@@ -1,45 +1,37 @@
 ---
 name: spool
-description: Use Spool graph context via native MCP tools (`spl_*`) by default, falling back to the local CLI (`spl`) if MCP is unavailable. Bind code repos to one context git remote; every write is a short-lived branch + PR. Query snapshots, validate schemas, and export leftover `.spl` once.
+description: Use Spool graph version control via native MCP tools (`spl_*`) by default, falling back to the local CLI (`spl`) if MCP is unavailable. Bind a code repo to context git, query the bound checkout, migrate schemas, manage assets and file-graph merges, and prune ephemeral nodes.
 ---
 
 # Spool
 
-Spool is the MCP/CLI tool for shared **solution context**. N code repositories
-bind to **one** context git remote. **Git is the only durable source of truth.**
-Every agent write is a short-lived branch and pull request. Leftover `.spl` and
-Rack remotes are deprecated and unsupported for solution context (migration-only
-via `spl context export`).
+Spool stores solution context as human-diffable graph files in a git remote. Git is the source of truth. Bind a code repository with `.spool/context.toml`, then query and mutate through KEEP CLI/MCP tools only. Mutations open a short-lived branch and pull request.
 
 ## Interaction Protocol: MCP Default with CLI Fallback
 
-AI coding assistants and agents should interact with Spool using the following rule of precedence:
-
 1. **DEFAULT — Native MCP Tools (`spl_*`)**:
-   - If the Spool MCP server is running and its tools (`spl_*`) are available in your toolset, **always prefer using the MCP tools as the primary interface**.
-   - **Why**: MCP tools use structured, typed JSON schemas, eliminate disk I/O for staging (`spl_add` takes mutations directly as an in-memory JSON array without creating temporary files), handle concurrent repository locking safely on the server side, provide structured conflict inspection, and preserve rich error envelopes with warnings.
+   - If the Spool MCP server is running, prefer its KEEP tools.
+   - Tools are bound-only. Unbound workspaces fail closed.
 
 2. **FALLBACK — Local CLI (`spl <command>`)**:
-   - Fall back to executing CLI commands (`spl <command>`) via shell tools **only if**:
-     - The Spool MCP server or tools are not configured or available in your execution environment.
-     - An MCP tool call fails due to a transport, connection, or protocol failure.
-     - You are running automated shell scripts or CI/CD pipelines directly in bash/zsh.
-   - When using the CLI, all successful commands emit JSON to stdout, and errors are written to stderr.
+   - Use the CLI when MCP is unavailable, in shell scripts, or in CI.
+   - Successful commands emit JSON to stdout; errors go to stderr.
+
+Do not call removed tools (`spl_add`, `spl_commit`, `spl_init`, `spl_context`, `spl_push`, `spl_history`, `spl_diff`, …). There are no aliases.
 
 ---
 
 ## Configuring the Spool MCP Server
 
-Spool includes a native Model Context Protocol (MCP) server built with the official Go SDK (`github.com/modelcontextprotocol/go-sdk`). It runs over standard I/O via `spl mcp`.
+Spool includes a native MCP server via `spl mcp`.
 
 ### Prerequisites
 - Build or install the `spl` binary:
   ```sh
   go build -o dist/spl ./cmd/spl
-  # Or install to your GOPATH/bin:
   go install ./cmd/spl
   ```
-- Ensure `spl` is located in your system `$PATH` (or use the absolute path to the binary).
+- Ensure `spl` is on `$PATH`.
 
 ### Client Configuration Examples
 
@@ -55,11 +47,6 @@ Spool includes a native Model Context Protocol (MCP) server built with the offic
 }
 ```
 
-To bind to a specific solution context, put `.spool/context.toml` in the code repo
-(or run `spl context init --remote`) and start `spl mcp` from that repo. Do not use
-`--state-dir` pointing at `.spl` as a durable context store. That path is
-unsupported for solution context except one-shot `spl context export`.
-
 #### 2. VS Code / Cursor (`mcp.json` or workspace settings)
 ```json
 {
@@ -73,7 +60,6 @@ unsupported for solution context except one-shot `spl context export`.
 ```
 
 #### 3. Google Antigravity / Gemini CLI
-Add an MCP server entry pointing to `spl mcp` in your global or workspace configuration:
 ```json
 {
   "command": "spl",
@@ -83,86 +69,65 @@ Add an MCP server entry pointing to `spl mcp` in your global or workspace config
 
 ---
 
-## MCP Tool to CLI Mapping
+## MCP Tool to CLI Mapping (KEEP only)
 
-| Category | Primary MCP Tool | CLI Fallback | Key Parameters & Notes |
+| Category | Primary MCP Tool | CLI Fallback | Notes |
 | :--- | :--- | :--- | :--- |
-| **Staging** | `spl_status` | `spl status --branch <b\>` | Inspect staged mutations for branch. |
-| **Staging** | `spl_add` | `spl add --branch <b\> --batch <f\>` | **MCP Advantage**: accepts `operations` JSON array directly in-memory; no disk file needed. Bound workspaces commit via context git PR. Unbound writes fail closed. |
-| **Commits** | `spl_commit` | `spl commit --branch <b\> --author <a\> --message <m\>` | Bound: one batch = one git commit on a short-lived branch + PR to the protected branch. Never push-clean to the working branch. Unbound writes fail closed. |
-| **Bind** | — | `spl context init --remote <url\>` | Writes `.spool/context.toml`, layout/schema, and a `CodeRepository` node from this bind. |
-| **Export** | `spl_context_export` | `spl context export` / `spl context migrate-once` | Documented escape hatch: one-shot leftover `.spl` → context git (lossy, not sync, not dual-run). Requires bind. One batch → one commit → PR. |
-| **Branches** | `spl_branch_list` | `spl branch list` | Lists all local branches and marks active HEAD. |
-| **Branches** | `spl_branch_create` | `spl branch create <n\> --from-branch <b\>` | Creates a branch from existing branch or commit. |
-| **Branches** | `spl_branch_delete` | `spl branch delete <n\>` | Deletes an inactive branch. |
-| **Branches** | `spl_switch` | `spl switch <branch\>` | Switches the active HEAD pointer. |
-| **Containment**| `spl_branches_containing` | `spl branches-containing --entity-id/--natural-key` | Finds branches containing an entity, snapshot, or natural key. Supports `budget`. |
-| **Reads** | `spl_resolve` | `spl resolve --branch <b\> --node <id\>` | Fetches node by stable ID. Supports `commit` and `budget`. |
-| **Reads** | `spl_search` | `spl search --branch <b\> --query <q\>` | Full-text search (FTS5). Supports `commit`, `continuation`, and `budget`. |
-| **Reads** | `spl_filter` | `spl filter --branch <b\> --label <l\>` | Filters by labels and typed `predicates`. Supports `commit` and `budget`. |
-| **Reads** | `spl_context` | `spl context --branch <b\> --query <q\>` | Bounded context expansion. Supports query/labels/predicates, direction, edge types, `budget`. |
-| **Reads** | `spl_search_expand` | `spl search-expand --branch <b\> ...` | Seed retrieval + graph traversal. Supports query/labels/predicates, direction, edge types, `budget`. |
-| **Diff** | `spl_diff` | `spl diff --base-branch <bb\> --target-branch <tb\>` | Graph diff. Supports `node_ids`, `edge_ids`, `node_title_contains`, `one_hop`, `continuation`, `budget`. |
-| **History** | `spl_history` | `spl history --branch <b\> --node <id\>` | Entity commit log. Supports `commit`, `all_parents`, `continuation`, `budget`. |
-| **Graph** | `spl_graph` | `spl graph --branch <b\>` | Full graph dump of branch snapshot. Supports `commit`. |
-| **Merge** | `spl_merge_preview` | `spl merge preview --source <s\> --target <t\>` | Computes 3-way graph preview and preview ID. |
-| **Merge** | `spl_merge_apply` | `spl merge apply --source <s\> --target <t\> ...` | Applies preview. Exposes structured conflicts on conflict error. |
-| **Merge** | `spl_merge_conflicts` | `spl merge conflicts --target <t\> --transaction <tx\>` | Inspects persisted conflict state. |
-| **Merge** | `spl_merge_resolve` | `spl merge resolve ... --selections <sel\>` | Records conflict choices (`source`/`target`) and overrides. |
-| **Merge** | `spl_merge_finalize` | `spl merge finalize --target <t\> --transaction <tx\>` | Finalizes resolved merge into a merge commit. |
-| **Merge** | `spl_merge_abort` | `spl merge abort --target <t\> --transaction <tx\>` | Aborts active merge transaction. |
-| **Lifecycle** | `spl_init` | `spl init` | **Deprecated / unsupported** for solution context. Use `spl context init --remote`. Leftover `.spl` is migration-only. |
-| **Lifecycle** | `spl_fsck` | `spl fsck` | Validates repository graph and storage integrity. |
-| **Lifecycle** | `spl_gc` | `spl gc` | Garbage collects unreferenced objects. |
-| **Lifecycle** | `spl_prune` | `spl prune --branch <b\>` | Excises `Ephemeral` labeled nodes and incident edges. |
-| **Lifecycle** | `spl_cherry_pick` | `spl cherry-pick --commit <c\> --target-branch <b\>` | Selectively transplants a commit. |
-| **Schema** | `spl_schema_migrate` | `spl schema migrate --branch <b\> --schema <f\>` | Stages schema migration (accepts file path or inline TOML). |
-| **Schema** | `spl_validate` | `spl validate --branch <b\>` | Validates graph against schema invariants. |
-| **Assets** | `spl_asset_add` | `spl asset add --branch <b\> --file <p\>` | Content-addresses and stores reference asset blob. |
-| **Assets** | `spl_asset_read` | `spl asset read --branch <b\> --node <id\>` | Reads asset bytes (Base64-encoded via MCP, raw on CLI). |
-| **Workspace** | `spl_workspace_init` | `spl workspace init <name\>` | **Deprecated / unsupported** for solution context (MCP refuses). |
-| **Workspace** | `spl_workspace_attach` | `spl workspace attach --workspace <w\> ...` | **Deprecated / unsupported** for solution context (MCP refuses). |
-| **Workspace** | `spl_migrate` | `spl migrate --from <v\> --to <v\>` | Leftover `.spl` format upgrade only. |
-| **Remote** | `spl_remote_set` | `spl remote set --endpoint <url\> ...` | **Unsupported** (Rack sync sunset; MCP refuses). |
-| **Remote** | `spl_remote_show` | `spl remote show` | **Unsupported** (MCP refuses). |
-| **Remote** | `spl_remote_remove` | `spl remote remove` | **Unsupported** (MCP refuses). |
-| **Remote** | `spl_remote_branch` | `spl remote branch <action\> ...` | **Unsupported** (MCP refuses). |
-| **Remote** | `spl_push` | `spl push --branch <b\>` | **Unsupported** (MCP refuses; context writes are stock git PR). |
-| **Remote** | `spl_pull` | `spl pull --branch <b\>` | **Unsupported** (MCP refuses; context sync is stock git). |
-| **Remote** | `spl_clone` | `spl clone <url\> [dir]` | **Unsupported** (MCP refuses; `git clone` the bind remote). |
-| **Metadata** | `spl_version` | `spl version` | Inspects binary version, commit, build date. |
+| **Bind** | *(CLI only)* | `spl context init --remote <url>` | Writes `.spool/context.toml`. |
+| **Export** | `spl_context_export` | `spl context export` / `migrate-once` | Private leftover `.spl` reader; not a VCS command. |
+| **Reads** | `spl_resolve` | `spl resolve --node <id>` | Bound checkout. |
+| **Reads** | `spl_search` | `spl search --query <q>` | Lexical FTS on the projection. |
+| **Reads** | `spl_filter` | `spl filter --label <l>` | Labels and typed predicates. |
+| **Reads** | `spl_query_context` | `spl query-context --query <q>` | Replaces former `spl_context` / `spl context` query. |
+| **Reads** | `spl_search_expand` | `spl search-expand --query <q>` | Seed retrieval + graph traversal. |
+| **Graph** | `spl_graph` | `spl graph` | Full bound snapshot. |
+| **Merge** | `spl_merge_preview` | `spl merge preview --source <s> --target <t>` | File-graph three-way preview. |
+| **Merge** | `spl_merge_apply` | `spl merge apply ...` | Clean apply → short-lived branch + PR. |
+| **Merge** | `spl_merge_conflicts` | `spl merge conflicts --transaction <tx>` | Cache-backed conflict state. |
+| **Merge** | `spl_merge_resolve` | `spl merge resolve ... --selections <sel>` | Source/target choices + overrides. |
+| **Merge** | `spl_merge_finalize` | `spl merge finalize --transaction <tx>` | Resolved merge via branch + PR. |
+| **Merge** | `spl_merge_abort` | `spl merge abort --transaction <tx>` | Discard conflicted merge. |
+| **Schema** | `spl_schema_migrate` | `spl schema migrate --schema <f>` | Schema + optional mutation batch → PR. |
+| **Schema** | `spl_validate` | `spl validate` | Bound schema.toml check. |
+| **Assets** | `spl_asset_add` | `spl asset add --file <p>` | Ingest + commit via branch + PR. |
+| **Assets** | `spl_asset_read` | `spl asset read --node <id>` | Stream bytes (Base64 via MCP). |
+| **Prune** | `spl_prune` | `spl prune` | Ephemeral nodes/edges; not pack/CAS GC. |
+| **Metadata** | `spl_version` | `spl version` | Binary provenance. |
+
+### Removed (do not call)
+
+CLI: `init`, `workspace *`, `remote *`, `push`, `pull`, `clone`, old `migrate`, `fsck`, `gc`, pack prune, `cherry-pick`, `add`, `status`, `commit`, `branch`, `switch`, `history`, `diff`, `branches-containing`.
+
+MCP twins of those, including `spl_add`, `spl_status`, `spl_commit`, `spl_init`, `spl_context`, `spl_push`, `spl_pull`, `spl_clone`, `spl_fsck`, `spl_gc`, `spl_workspace_*`, `spl_remote_*`, `spl_branch_*`, `spl_switch`, `spl_diff`, `spl_history`.
+
+History and diff: use **stock git** on the context remote (`git log`, `git diff`).
 
 ---
 
-## Branch Strategy & User Elicitation
+## Bound workspace and writes
 
-Solution-context writes **always** land as a short-lived branch + pull request
-to the bind file's `protected_branch`. Do not push cleanly to the working or
-protected branch. Do not use Rack `spl push`.
+Context-management KEEP tools require `.spool/context.toml`. If unbound, fail closed and tell the user to run `spl context init --remote`.
 
-Before staging or committing leftover local `.spl` migration work:
-1. **Check bind**: the workspace must have `.spool/context.toml` (or run `spl context init --remote`).
-2. Prefer MCP `spl_add` / `spl_commit` so the runtime opens the PR.
-3. For one-shot leftover graphs, use `spl_context_export` / `spl context export` — not dual-run.
+Writes never push the protected branch. They open `spool/mcp/<stamp>-<nonce>` and a host PR. Identical schema writes are a no-op (no empty PR).
 
-Before merging a branch containing transient planning data, preview its cleanup:
-- **MCP**: Call `spl_prune(branch, dry_run: true)`. If clean, call `spl_prune(branch, author, message)`.
-- **CLI**: Run `spl prune --branch <branch> --dry-run`, followed by `spl prune --branch <branch> --author ... --message ...`.
+Before pruning ephemeral planning data:
+
+- **MCP**: `spl_prune(dry_run: true)`, then `spl_prune(author, message)`.
+- **CLI**: `spl prune --dry-run`, then `spl prune --author ... --message ...`.
 
 ---
 
 ## Common Invocation Rules & Pitfalls
 
-1. **Native Queries Only**: Always use native Spool query tools (`spl_filter`, `spl_search`, `spl_resolve`, `spl_context`, `spl_diff`, `spl_graph`) or their CLI counterparts. Never pipe JSON outputs to Python, jq, awk, or ad-hoc shell parsing scripts.
-2. **`resolve` / `spl_resolve`**: Requires `node` (node entity ID).
-3. **`diff` / `spl_diff`**: Uses `base_branch` and `target_branch` (do not use `--from` or `--to`).
-4. **`merge_apply` / `spl_merge_apply`**: Requires `preview_id` (obtained from `spl_merge_preview`), `transaction_id`, `source`, `target`, `author`, and `message`.
-5. **`context` & `search_expand`**:
+1. **Native Queries Only**: Use `spl_filter`, `spl_search`, `spl_resolve`, `spl_query_context`, `spl_graph` (or CLI). Never pipe JSON through Python/jq for graph queries.
+2. **`resolve` / `spl_resolve`**: Requires `node`.
+3. **`query-context` and `search-expand`**:
    - Do **NOT** pass `--id` or `id`.
-   - Use `query` OR `label`/`labels`/`predicates` (mutually exclusive with `query`).
+   - Use `query` **OR** `label`/`labels`/`predicates` (mutually exclusive with `query`).
    - Use `direction`: `"out"` (default), `"in"`, or `"both"`.
-   - Use `max_depth` (not `depth`), `seed_limit`, and `edge_types`.
-   - To inspect a single specific node by ID, use `spl_resolve` (`spl resolve`).
+   - Use `seed_limit` and `edge_types`.
+   - The `context` CLI namespace is **not** the query verb.
+4. History/diff: stock git, not Spool commands.
 
 ---
 
@@ -170,15 +135,12 @@ Before merging a branch containing transient planning data, preview its cleanup:
 
 | Commands | Reference |
 | :--- | :--- |
-| `init`, `add`, `status`, `commit` | [Working changes](references/working-changes.md) |
-| Authoring `add` batches and atomic ideas | [Batch authoring](references/batch-authoring.md) |
-| `branch`, `switch`, `history`, `branches-containing`, `diff`, `cherry-pick` | [Branches and history](references/branches-and-history.md) |
+| `context init`, `context export` / `migrate-once` | [Working changes](references/working-changes.md) |
+| Authoring mutation batches for `schema migrate` | [Batch authoring](references/batch-authoring.md) |
+| History and diff (stock git); file-graph `merge` | [Branches and history](references/branches-and-history.md) |
 | `schema migrate`, `validate` | [Schemas](references/schemas.md) |
-| `resolve`, `search`, `filter`, `search-expand`, `context` | [Reading graphs](references/reading-graphs.md) |
-| `merge` cycle (`preview`, `apply`, `conflicts`, `resolve`, `finalize`, `abort`) | [Merges](references/merges.md) |
-| `fsck`, `gc`, `prune` | [Maintenance](references/maintenance.md) |
-| `asset add`, `asset read` | [CLI help](references/cli-help.md) |
-| `workspace init`, `workspace attach`, `migrate` | [Multi-repo workspaces](references/workspaces.md) (deprecated / unsupported for solution context) |
-| `remote`, `push`, `pull`, `clone` | **Unsupported** (Rack sync sunset); see [CLI help](references/cli-help.md) |
-| `mcp` | [CLI help](references/cli-help.md) |
-| `version`, `completion`, `help` | [CLI help](references/cli-help.md) |
+| `resolve`, `search`, `filter`, `search-expand`, `query-context` | [Reading graphs](references/reading-graphs.md) |
+| `merge` cycle | [Merges](references/merges.md) |
+| `prune` | [Maintenance](references/maintenance.md) |
+| `asset add`, `asset read`, `mcp`, `version` | [CLI help](references/cli-help.md) |
+| Bind vs leftover `.spl` | [Multi-repo workspaces](references/workspaces.md) |

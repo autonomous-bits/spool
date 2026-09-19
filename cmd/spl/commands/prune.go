@@ -2,60 +2,40 @@ package commands
 
 import (
 	"encoding/json"
-	"errors"
 
-	"github.com/autonomous-bits/spool/internal/repository"
+	"github.com/autonomous-bits/spool/internal/ctxgit"
 	"github.com/spf13/cobra"
 )
 
-// NewPruneCommand creates the prune command for excising ephemeral entities and cascading edges.
-func NewPruneCommand(repoProvider func() (*repository.Repository, error)) *cobra.Command {
-	var (
-		branch  string
-		dryRun  bool
-		force   bool
-		author  string
-		message string
-	)
+// NewPruneCommand prunes Ephemeral nodes on the bound context checkout.
+func NewPruneCommand(opts ctxgit.Options) *cobra.Command {
+	var dryRun bool
+	var author, message string
 	command := &cobra.Command{
 		Use:          "prune",
-		Short:        "Prune ephemeral entities and cascading relationships",
-		Long:         "Prune temporary planning entities (nodes marked with the Ephemeral modifier label) and their cascading incident relationships from a branch prior to baseline merge. The result is emitted as machine-readable JSON.",
-		Example:      "  spl prune --branch feature/login\n  spl prune --branch feature/login --dry-run\n  spl prune --branch main --force",
+		Short:        "Prune ephemeral entities from the bound context graph",
+		Long:         "Prune temporary planning entities (nodes marked Ephemeral) and cascading incident edges from the bound context checkout. Writes a short-lived branch and pull request. Unbound workspaces are refused. This is not pack/CAS garbage collection.",
+		Example:      "  spl prune --dry-run\n  spl prune --author alice --message \"Prune transient plan\"",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(command *cobra.Command, _ []string) error {
-			if err := command.Context().Err(); err != nil {
-				return err
-			}
-			repo, err := repoProvider()
+			session, err := startBoundSession(command, opts)
 			if err != nil {
 				return err
 			}
-			result, pruneErr := repo.Prune(repository.PruneRequest{
-				Branch:  branch,
+			result, err := session.Prune(command.Context(), ctxgit.PruneRequest{
 				DryRun:  dryRun,
-				Force:   force,
 				Author:  author,
 				Message: message,
 			})
-			if pruneErr != nil {
-				var warning *repository.PruneCommittedWithWarningError
-				if !errors.As(pruneErr, &warning) {
-					return pruneErr
-				}
-			}
-			if err := json.NewEncoder(command.OutOrStdout()).Encode(result); err != nil {
+			if err != nil {
 				return err
 			}
-			return pruneErr
+			return json.NewEncoder(command.OutOrStdout()).Encode(result)
 		},
 	}
-	command.Flags().StringVar(&branch, "branch", "", "branch whose ephemeral entities to prune")
-	command.Flags().BoolVar(&dryRun, "dry-run", false, "simulate pruning and report affected entities without writing changes")
-	command.Flags().BoolVar(&force, "force", false, "allow pruning on protected default branch")
-	command.Flags().StringVar(&author, "author", "", "override commit author")
-	command.Flags().StringVar(&message, "message", "", "override commit message")
-	_ = command.MarkFlagRequired("branch")
+	command.Flags().BoolVar(&dryRun, "dry-run", false, "simulate pruning without writing a branch or PR")
+	command.Flags().StringVar(&author, "author", "", "git author")
+	command.Flags().StringVar(&message, "message", "", "commit/PR message")
 	return command
 }

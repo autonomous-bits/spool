@@ -1,21 +1,14 @@
 # Schemas
 
-Author the desired schema in TOML, provide a complete conforming mutation batch, then atomically
-stage both:
+Author the desired schema in TOML, optionally provide a conforming mutation batch, and write both
+through a short-lived branch and pull request:
 
 ```sh
-spl schema migrate --branch main --schema people.toml --batch people-mutations.json
-spl commit --branch main --author alice --message "Migrate people schema"
+spl schema migrate --schema people.toml --batch people-mutations.json
+spl validate
 ```
 
-`schema migrate` replaces that branch's staged set only after validating the candidate graph against
-the target schema. The schema takes effect only when the staged set is committed.
+`schema migrate` validates the candidate graph against the target schema before opening a PR.
+Identical schema content is a no-op (no empty PR). There is no separate `spl commit`.
 
-Validate the selected immutable snapshot against its stored schema:
-
-```sh
-spl validate --branch main
-spl validate --branch main --commit <commit-id>
-```
-
-The `--commit` value must be reachable from the named branch.
+`validate` checks the bound checkout against `schema.toml`.

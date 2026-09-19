@@ -1,43 +1,33 @@
 package commands
 
 import (
-	"github.com/autonomous-bits/spool/internal/resolve"
+	"github.com/autonomous-bits/spool/internal/ctxgit"
 	"github.com/spf13/cobra"
 )
 
-// NewSearchCommand creates the spl search command.
-func NewSearchCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra.Command {
-	var branch, commit, query, token string
-	var budgetFlags queryBudgetFlags
+// NewSearchCommand creates the bound-only search command.
+func NewSearchCommand(opts ctxgit.Options) *cobra.Command {
+	var query string
 	command := &cobra.Command{
 		Use:          "search",
-		Short:        "Search nodes lexically",
-		Long:         "Return JSON lexical matches from the branch-head projection.",
-		Example:      "  spl search --branch main --query incident",
+		Short:        "Search nodes lexically in the bound context checkout",
+		Long:         "Return JSON lexical matches from the rebuilt context-git projection. Unbound workspaces are refused.",
+		Example:      "  spl search --query incident",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(command *cobra.Command, _ []string) error {
-			tool, err := toolProvider()
+			session, err := startBoundSession(command, opts)
 			if err != nil {
 				return err
 			}
-			result, err := tool.SPLSearch(command.Context(), resolve.SearchRequest{
-				Selector:          snapshotSelectorFlag(command, "commit", branch, commit),
-				Query:             query,
-				ContinuationToken: token,
-				Budget:            budgetFlags.request(command),
-			})
+			result, err := session.SearchResult(command.Context(), query, 20)
 			if err != nil {
 				return err
 			}
 			return writeJSON(command, result, "search")
 		},
 	}
-	command.Flags().StringVar(&branch, "branch", "", "branch-head projection to query")
-	command.Flags().StringVar(&commit, "commit", "", "commit selector; only the current branch head is supported")
 	command.Flags().StringVar(&query, "query", "", "lexical query")
-	budgetFlags.addPagedQueryFlags(command, &token)
-	_ = command.MarkFlagRequired("branch")
 	_ = command.MarkFlagRequired("query")
 	return command
 }

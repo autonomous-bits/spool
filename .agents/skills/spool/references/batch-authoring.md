@@ -1,7 +1,8 @@
 # Batch authoring
 
-An `spl add` batch is a JSON array. Create the file, stage it, inspect the result, and commit only
-when the staged delta is correct:
+A mutation batch is a JSON array. Pass it to `spl schema migrate --batch` (or MCP
+`spl_schema_migrate` `operations`) so the candidate graph is validated against the target schema
+and written through a short-lived branch + PR. There is no public `spl add` / `spl commit`.
 
 ```json
 [
@@ -19,9 +20,7 @@ when the staged delta is correct:
 ```
 
 ```sh
-spl add --branch main --batch mutations.json
-spl status --branch main
-spl commit --branch main --author alice --message "Record rate limit"
+spl schema migrate --schema schema.toml --batch mutations.json --message "Record rate limit"
 ```
 
 Each node represents one atomic idea: one fact, decision, requirement, question, or task. Its title
@@ -58,5 +57,5 @@ Use stable, descriptive IDs. Add edges when a relationship matters:
 ```
 
 Properties are typed values: `null`, `bool`, `integer`, `float`, `string`, `list`, or `map`.
-`list` and `map` values recursively contain typed values. Use `spl add --help` for the current
-operation contract before authoring unfamiliar fields.
+`list` and `map` values recursively contain typed values. Use `spl schema migrate --help` for the
+current operation contract before authoring unfamiliar fields.

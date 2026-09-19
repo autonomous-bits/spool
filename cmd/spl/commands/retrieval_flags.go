@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/autonomous-bits/spool/internal/repository"
-	"github.com/autonomous-bits/spool/internal/resolve"
 	"github.com/spf13/cobra"
 )
 
@@ -114,60 +113,6 @@ func parseFilterNumber(key, raw string) (float64, error) {
 		return 0, fmt.Errorf("numeric property filter %q has invalid value %q", key, raw)
 	}
 	return value, nil
-}
-
-func newContextualCommand(use, short, long, example string, toolProvider func() (*resolve.ResolveTool, error), evidenceFirst bool) *cobra.Command {
-	var branch, commit, query, direction string
-	var edgeTypes []string
-	var seedLimit int
-	var filters retrievalFilterFlags
-	var budgetFlags queryBudgetFlags
-	command := &cobra.Command{
-		Use: use, Short: short, Long: long, Example: "  " + example,
-		Args: cobra.NoArgs, SilenceUsage: true,
-		RunE: func(command *cobra.Command, _ []string) error {
-			predicates, err := filters.predicates()
-			if err != nil {
-				return err
-			}
-			if err := validateContextualSeedSelector(query, filters.labels, predicates); err != nil {
-				return err
-			}
-			tool, err := toolProvider()
-			if err != nil {
-				return err
-			}
-			request := resolve.SearchExpandRequest{
-				Selector:  snapshotSelectorFlag(command, "commit", branch, commit),
-				Seeds:     resolve.SeedSelector{Query: query, Labels: filters.labels, Predicates: predicates},
-				SeedLimit: seedLimit, Direction: resolve.Direction(direction), EdgeTypes: edgeTypes,
-				Budget: budgetFlags.request(command),
-			}
-			if evidenceFirst {
-				result, err := tool.SPLContext(command.Context(), request)
-				if err != nil {
-					return err
-				}
-				return writeJSON(command, result, "context")
-			}
-			result, err := tool.SPLSearchExpand(command.Context(), request)
-			if err != nil {
-				return err
-			}
-			return writeJSON(command, result, "search-expand")
-		},
-	}
-	command.Flags().StringVar(&branch, "branch", "", "branch-head projection to query")
-	command.Flags().StringVar(&commit, "commit", "", "commit selector; only the current branch head is supported")
-	command.Flags().StringVar(&query, "query", "", "lexical query (exclusive with filter flags)")
-	command.Flags().StringVar(&direction, "direction", string(resolve.DirectionOut), "edge direction: out, in, or both")
-	command.Flags().StringArrayVar(&edgeTypes, "edge-type", nil, "edge type to traverse (repeatable)")
-	command.Flags().IntVar(&seedLimit, "seed-limit", 0, "maximum evidence seeds before expansion")
-	filters.add(command)
-	budgetFlags.addReadBudgetFlags(command)
-	budgetFlags.addTraversalBudgetFlags(command)
-	_ = command.MarkFlagRequired("branch")
-	return command
 }
 
 func validateContextualSeedSelector(query string, labels []string, predicates []repository.MetadataPredicate) error {

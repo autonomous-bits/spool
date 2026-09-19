@@ -63,7 +63,7 @@ State the rule, policy, or convention clearly with its scope and invariant:
 
 ## 4. Batch Authoring Example
 
-Create an `spl add` batch JSON file:
+Create a mutation-batch JSON file:
 
 ```json
 [
@@ -107,19 +107,13 @@ Create an `spl add` batch JSON file:
 ]
 ```
 
-Stage and commit the batch:
+Write the batch through a schema migration (short-lived branch + PR):
 
-- **MCP (Default)**: Call `spl_add` directly with the mutations array (in-memory staging), inspect status with `spl_status`, and commit with `spl_commit`:
-  ```json
-  // spl_add: {"branch": "main", "mutations": [ ... ]}
-  // spl_status: {"branch": "main"}
-  // spl_commit: {"branch": "main", "author": "Staff Engineer <standards@example.com>", "message": "Record RFC 7807 error standard and anti-pattern"}
-  ```
+- **MCP (Default)**: Call `spl_schema_migrate` with the current schema and `operations`.
 - **CLI (Fallback)**:
   ```sh
-  spl add --branch main --batch standards-batch.json
-  spl status --branch main
-  spl commit --branch main --author "Staff Engineer <standards@example.com>" --message "Record RFC 7807 error standard and anti-pattern"
+  spl schema migrate --schema schema.toml --batch standards-batch.json \
+    --author "Staff Engineer <standards@example.com>" --message "Record RFC 7807 error standard and anti-pattern"
   ```
 
 ---
@@ -129,26 +123,17 @@ Stage and commit the batch:
 Discover and traverse engineering standards using Spool MCP tools by default, falling back to CLI commands:
 
 - **MCP (Default)**:
-  - `spl_search(branch: "main", query: "error RFC 7807")`
-  - `spl_filter(branch: "main", labels: ["SecurityPolicy"])`
-  - `spl_filter(branch: "main", labels: ["AntiPattern"])`
-  - `spl_resolve(branch: "main", node: "comp-order-service")`
-  - `spl_context(branch: "main", query: "RFC 7807", direction: "both", max_depth: 2)`
+  - `spl_search(query: "error RFC 7807")`
+  - `spl_filter(labels: ["SecurityPolicy"])`
+  - `spl_filter(labels: ["AntiPattern"])`
+  - `spl_resolve(node: "comp-order-service")`
+  - `spl_query_context(query: "RFC 7807", direction: "both")`
 
 - **CLI (Fallback)**:
   ```sh
-  # Search for standards relating to security or error handling
-  spl search --branch main --query "error RFC 7807"
-
-  # Filter all active security policies
-  spl filter --branch main --label SecurityPolicy
-
-  # Find all forbidden anti-patterns in the organization
-  spl filter --branch main --label AntiPattern
-
-  # Resolve a specific engineering standard or component by its exact ID
-  spl resolve --branch main --node comp-order-service
-
-  # Inspect standards and components around a specific topic
-  spl context --branch main --query "RFC 7807" --direction both --max-depth 2
+  spl search --query "error RFC 7807"
+  spl filter --label SecurityPolicy
+  spl filter --label AntiPattern
+  spl resolve --node comp-order-service
+  spl query-context --query "RFC 7807" --direction both
   ```

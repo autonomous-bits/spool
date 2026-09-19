@@ -8,25 +8,19 @@ import (
 	"github.com/autonomous-bits/spool/internal/repository"
 )
 
-func toolMergePreview(stateDirProvider func() (string, error)) Tool {
+func toolMergePreview(rt *runtime) Tool {
 	return Tool{
 		Name:        "spl_merge_preview",
-		Description: "Compute a deterministic three-way merge preview between source and target branches.",
+		Description: "Compute a deterministic three-way file-graph merge preview between two context-git branches.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"source": map[string]any{
-					"type":        "string",
-					"description": "Source branch to merge",
-				},
-				"target": map[string]any{
-					"type":        "string",
-					"description": "Target branch to update",
-				},
+				"source": map[string]any{"type": "string", "description": "Source git branch"},
+				"target": map[string]any{"type": "string", "description": "Target git branch"},
 			},
 			"required": []string{"source", "target"},
 		},
-		Handler: func(_ context.Context, args json.RawMessage) (any, error) {
+		Handler: func(ctx context.Context, args json.RawMessage) (any, error) {
 			var in struct {
 				Source string `json:"source"`
 				Target string `json:"target"`
@@ -37,48 +31,32 @@ func toolMergePreview(stateDirProvider func() (string, error)) Tool {
 			if in.Source == "" || in.Target == "" {
 				return nil, errors.New("source and target are required")
 			}
-			return withRepo(stateDirProvider, func(repo *repository.Repository) (any, error) {
-				return repo.PreviewMerge(in.Source, in.Target)
-			})
+			session, err := rt.requireSession(ctx)
+			if err != nil {
+				return nil, err
+			}
+			return session.PreviewMerge(ctx, in.Source, in.Target)
 		},
 	}
 }
 
-func toolMergeApply(stateDirProvider func() (string, error)) Tool {
+func toolMergeApply(rt *runtime) Tool {
 	return Tool{
 		Name:        "spl_merge_apply",
-		Description: "Apply a clean, reviewed merge preview to commit the merge.",
+		Description: "Apply a clean file-graph merge preview via a short-lived branch and PR.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"source": map[string]any{
-					"type":        "string",
-					"description": "Source branch to merge",
-				},
-				"target": map[string]any{
-					"type":        "string",
-					"description": "Target branch to update",
-				},
-				"transaction_id": map[string]any{
-					"type":        "string",
-					"description": "Transaction ID from merge preview",
-				},
-				"preview_id": map[string]any{
-					"type":        "string",
-					"description": "Preview commit ID from merge preview",
-				},
-				"author": map[string]any{
-					"type":        "string",
-					"description": "Optional author name",
-				},
-				"message": map[string]any{
-					"type":        "string",
-					"description": "Optional merge commit message",
-				},
+				"source":         map[string]any{"type": "string"},
+				"target":         map[string]any{"type": "string"},
+				"transaction_id": map[string]any{"type": "string"},
+				"preview_id":     map[string]any{"type": "string"},
+				"author":         map[string]any{"type": "string"},
+				"message":        map[string]any{"type": "string"},
 			},
 			"required": []string{"source", "target", "transaction_id", "preview_id"},
 		},
-		Handler: func(_ context.Context, args json.RawMessage) (any, error) {
+		Handler: func(ctx context.Context, args json.RawMessage) (any, error) {
 			var in struct {
 				Source        string `json:"source"`
 				Target        string `json:"target"`
@@ -90,109 +68,75 @@ func toolMergeApply(stateDirProvider func() (string, error)) Tool {
 			if err := json.Unmarshal(args, &in); err != nil {
 				return nil, err
 			}
-			if in.Source == "" || in.Target == "" || in.TransactionID == "" || in.PreviewID == "" {
-				return nil, errors.New("source, target, transaction_id, and preview_id are required")
+			session, err := rt.requireSession(ctx)
+			if err != nil {
+				return nil, err
 			}
-			return withRepo(stateDirProvider, func(repo *repository.Repository) (any, error) {
-				commit, err := repo.ApplyMergePreview(in.Source, in.Target, in.TransactionID, repository.ObjectID(in.PreviewID), in.Author, in.Message)
-				if err != nil {
-					if errors.Is(err, repository.ErrMergeConflicted) {
-						if result, inspectErr := repo.InspectMergeTransaction(in.Target, in.TransactionID); inspectErr == nil {
-							return result, err
-						}
-					}
-					return nil, err
+			write, status, err := session.ApplyMerge(ctx, in.Source, in.Target, in.TransactionID, in.PreviewID, in.Author, in.Message)
+			if err != nil {
+				if errors.Is(err, repository.ErrMergeConflicted) {
+					return status, err
 				}
-				return map[string]any{"commit": commit}, nil
-			})
+				return nil, err
+			}
+			return write, nil
 		},
 	}
 }
 
-func toolMergeConflicts(stateDirProvider func() (string, error)) Tool {
+func toolMergeConflicts(rt *runtime) Tool {
 	return Tool{
 		Name:        "spl_merge_conflicts",
-		Description: "Inspect conflicts recorded for an active merge transaction.",
+		Description: "Inspect conflicts recorded for a file-graph merge transaction.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"target": map[string]any{
-					"type":        "string",
-					"description": "Target branch of the merge",
-				},
-				"transaction_id": map[string]any{
-					"type":        "string",
-					"description": "Transaction ID",
-				},
+				"transaction_id": map[string]any{"type": "string"},
 			},
-			"required": []string{"target", "transaction_id"},
+			"required": []string{"transaction_id"},
 		},
-		Handler: func(_ context.Context, args json.RawMessage) (any, error) {
+		Handler: func(ctx context.Context, args json.RawMessage) (any, error) {
 			var in struct {
-				Target        string `json:"target"`
 				TransactionID string `json:"transaction_id"`
 			}
 			if err := json.Unmarshal(args, &in); err != nil {
 				return nil, err
 			}
-			return withRepo(stateDirProvider, func(repo *repository.Repository) (any, error) {
-				return repo.InspectMergeTransaction(in.Target, in.TransactionID)
-			})
+			session, err := rt.requireSession(ctx)
+			if err != nil {
+				return nil, err
+			}
+			return session.InspectMerge(in.TransactionID)
 		},
 	}
 }
 
-func toolMergeResolve(stateDirProvider func() (string, error)) Tool {
+func toolMergeResolve(rt *runtime) Tool {
 	return Tool{
 		Name:        "spl_merge_resolve",
-		Description: "Resolve every conflict in a persisted merge transaction using resolution selections and optional mutation overrides.",
+		Description: "Resolve every conflict in a persisted file-graph merge using selections and optional overrides.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"target": map[string]any{
-					"type":        "string",
-					"description": "Target branch with the conflicted merge",
-				},
-				"transaction_id": map[string]any{
-					"type":        "string",
-					"description": "Owning merge transaction identifier",
-				},
-				"preview_id": map[string]any{
-					"type":        "string",
-					"description": "Persisted preview identifier",
-				},
+				"transaction_id": map[string]any{"type": "string"},
+				"preview_id":     map[string]any{"type": "string"},
 				"selections": map[string]any{
-					"type":        "array",
-					"description": "Array of merge resolution selections specifying conflictId and choice ('source' or 'target')",
+					"type": "array",
 					"items": map[string]any{
 						"type": "object",
 						"properties": map[string]any{
-							"conflictId": map[string]any{
-								"type":        "string",
-								"description": "Conflict identifier from spl_merge_conflicts",
-							},
-							"choice": map[string]any{
-								"type":        "string",
-								"enum":        []string{"source", "target"},
-								"description": "Resolution choice: 'source' or 'target'",
-							},
+							"conflictId": map[string]any{"type": "string"},
+							"choice":     map[string]any{"type": "string", "enum": []string{"source", "target"}},
 						},
 						"required": []string{"conflictId", "choice"},
 					},
 				},
-				"overrides": map[string]any{
-					"type":        "array",
-					"description": "Optional array of mutation operations providing custom resolutions",
-					"items": map[string]any{
-						"type": "object",
-					},
-				},
+				"overrides": map[string]any{"type": "array", "items": map[string]any{"type": "object"}},
 			},
-			"required": []string{"target", "transaction_id", "preview_id", "selections"},
+			"required": []string{"transaction_id", "preview_id", "selections"},
 		},
-		Handler: func(_ context.Context, args json.RawMessage) (any, error) {
+		Handler: func(ctx context.Context, args json.RawMessage) (any, error) {
 			var in struct {
-				Target        string                                `json:"target"`
 				TransactionID string                                `json:"transaction_id"`
 				PreviewID     string                                `json:"preview_id"`
 				Selections    []repository.MergeResolutionSelection `json:"selections"`
@@ -201,94 +145,75 @@ func toolMergeResolve(stateDirProvider func() (string, error)) Tool {
 			if err := json.Unmarshal(args, &in); err != nil {
 				return nil, err
 			}
-			if in.Target == "" || in.TransactionID == "" || in.PreviewID == "" {
-				return nil, errors.New("target, transaction_id, and preview_id are required")
+			session, err := rt.requireSession(ctx)
+			if err != nil {
+				return nil, err
 			}
-			return withRepo(stateDirProvider, func(repo *repository.Repository) (any, error) {
-				if err := repo.ResolveConflictedMerge(repository.ResolveConflictedMergeRequest{
-					TargetBranch:  in.Target,
-					TransactionID: in.TransactionID,
-					PreviewID:     repository.ObjectID(in.PreviewID),
-					Selections:    in.Selections,
-					Overrides:     in.Overrides,
-				}); err != nil {
-					return nil, err
-				}
-				return map[string]any{"resolved": true}, nil
-			})
+			if err := session.ResolveMerge(ctx, in.TransactionID, in.PreviewID, in.Selections, in.Overrides); err != nil {
+				return nil, err
+			}
+			return map[string]any{"resolved": true}, nil
 		},
 	}
 }
 
-func toolMergeAbort(stateDirProvider func() (string, error)) Tool {
+func toolMergeAbort(rt *runtime) Tool {
 	return Tool{
 		Name:        "spl_merge_abort",
-		Description: "Abort an active merge transaction and discard its working state.",
+		Description: "Abort a persisted file-graph merge transaction.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"target": map[string]any{
-					"type":        "string",
-					"description": "Target branch of the merge",
-				},
-				"transaction_id": map[string]any{
-					"type":        "string",
-					"description": "Transaction ID to abort",
-				},
+				"transaction_id": map[string]any{"type": "string"},
 			},
-			"required": []string{"target", "transaction_id"},
+			"required": []string{"transaction_id"},
 		},
-		Handler: func(_ context.Context, args json.RawMessage) (any, error) {
+		Handler: func(ctx context.Context, args json.RawMessage) (any, error) {
 			var in struct {
-				Target        string `json:"target"`
 				TransactionID string `json:"transaction_id"`
 			}
 			if err := json.Unmarshal(args, &in); err != nil {
 				return nil, err
 			}
-			return withRepo(stateDirProvider, func(repo *repository.Repository) (any, error) {
-				if err := repo.AbortMergeTransaction(in.Target, in.TransactionID); err != nil {
-					return nil, err
-				}
-				return map[string]any{"aborted": true}, nil
-			})
+			session, err := rt.requireSession(ctx)
+			if err != nil {
+				return nil, err
+			}
+			if err := session.AbortMerge(in.TransactionID); err != nil {
+				return nil, err
+			}
+			return map[string]any{"aborted": true}, nil
 		},
 	}
 }
 
-func toolMergeFinalize(stateDirProvider func() (string, error)) Tool {
+func toolMergeFinalize(rt *runtime) Tool {
 	return Tool{
 		Name:        "spl_merge_finalize",
-		Description: "Finalize an active merge transaction after resolving conflicts.",
+		Description: "Finalize a resolved file-graph merge via short-lived branch + PR.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"target": map[string]any{
-					"type":        "string",
-					"description": "Target branch of the merge",
-				},
-				"transaction_id": map[string]any{
-					"type":        "string",
-					"description": "Transaction ID to finalize",
-				},
+				"transaction_id": map[string]any{"type": "string"},
+				"author":         map[string]any{"type": "string"},
+				"message":        map[string]any{"type": "string"},
 			},
-			"required": []string{"target", "transaction_id"},
+			"required": []string{"transaction_id"},
 		},
-		Handler: func(_ context.Context, args json.RawMessage) (any, error) {
+		Handler: func(ctx context.Context, args json.RawMessage) (any, error) {
 			var in struct {
-				Target        string `json:"target"`
 				TransactionID string `json:"transaction_id"`
+				Author        string `json:"author"`
+				Message       string `json:"message"`
 			}
 			if err := json.Unmarshal(args, &in); err != nil {
 				return nil, err
 			}
-			return withRepo(stateDirProvider, func(repo *repository.Repository) (any, error) {
-				commit, err := repo.FinalizeMergeTransaction(in.Target, in.TransactionID)
-				if err != nil {
-					return nil, err
-				}
-				return map[string]any{"commit": commit}, nil
-			})
+			session, err := rt.requireSession(ctx)
+			if err != nil {
+				return nil, err
+			}
+			return session.FinalizeMerge(ctx, in.TransactionID, in.Author, in.Message)
 		},
 	}
 }

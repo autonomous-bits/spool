@@ -3,14 +3,8 @@ package mcp
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
-	"sync"
-	"time"
 
-	"github.com/autonomous-bits/spool/internal/ctxgit"
-	"github.com/autonomous-bits/spool/internal/repository"
-	"github.com/autonomous-bits/spool/internal/resolve"
+	"github.com/autonomous-bits/spool/internal/surface"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -23,108 +17,6 @@ type Tool struct {
 	Description string         `json:"description"`
 	InputSchema map[string]any `json:"inputSchema"`
 	Handler     ToolHandler    `json:"-"`
-}
-
-var repoMu sync.Mutex
-
-type budgetInput struct {
-	MaxRows          *int `json:"max_rows,omitempty"`
-	MaxResponseBytes *int `json:"max_response_bytes,omitempty"`
-	MaxDepth         *int `json:"max_depth,omitempty"`
-	MaxVisited       *int `json:"max_visited,omitempty"`
-	TimeoutMs        *int `json:"timeout_ms,omitempty"`
-}
-
-func (b *budgetInput) toBudget() resolve.QueryBudgetRequest {
-	if b == nil {
-		return resolve.QueryBudgetRequest{}
-	}
-	req := resolve.QueryBudgetRequest{
-		MaxRows:          b.MaxRows,
-		MaxResponseBytes: b.MaxResponseBytes,
-		MaxDepth:         b.MaxDepth,
-		MaxVisited:       b.MaxVisited,
-	}
-	if b.TimeoutMs != nil {
-		d := time.Duration(*b.TimeoutMs) * time.Millisecond
-		req.Timeout = &d
-	}
-	return req
-}
-
-var budgetSchema = map[string]any{
-	"type":        "object",
-	"description": "Optional query budget constraints",
-	"properties": map[string]any{
-		"max_rows": map[string]any{
-			"type":        "integer",
-			"description": "Maximum rows to return",
-		},
-		"max_response_bytes": map[string]any{
-			"type":        "integer",
-			"description": "Maximum response size in bytes",
-		},
-		"max_depth": map[string]any{
-			"type":        "integer",
-			"description": "Maximum traversal depth",
-		},
-		"max_visited": map[string]any{
-			"type":        "integer",
-			"description": "Maximum visited nodes",
-		},
-		"timeout_ms": map[string]any{
-			"type":        "integer",
-			"description": "Maximum query duration in milliseconds",
-		},
-	},
-}
-
-func withRepo[T any](stateDirProvider func() (string, error), fn func(repo *repository.Repository) (T, error)) (res T, err error) {
-	repoMu.Lock()
-	defer repoMu.Unlock()
-
-	stateDir, err := stateDirProvider()
-	if err != nil {
-		return res, fmt.Errorf("resolve repository state directory: %w", err)
-	}
-	repo, err := repository.OpenRepository(stateDir)
-	if err != nil {
-		return res, fmt.Errorf("open repository: %w", err)
-	}
-	defer func() {
-		if closeErr := repo.Close(); closeErr != nil {
-			if err == nil {
-				err = fmt.Errorf("close repository: %w", closeErr)
-			} else {
-				err = errors.Join(err, fmt.Errorf("close repository: %w", closeErr))
-			}
-		}
-	}()
-	return fn(repo)
-}
-
-func withTool[T any](stateDirProvider func() (string, error), fn func(tool *resolve.ResolveTool) (T, error)) (res T, err error) {
-	repoMu.Lock()
-	defer repoMu.Unlock()
-
-	stateDir, err := stateDirProvider()
-	if err != nil {
-		return res, fmt.Errorf("resolve repository state directory: %w", err)
-	}
-	repo, err := repository.OpenRepository(stateDir)
-	if err != nil {
-		return res, fmt.Errorf("open repository: %w", err)
-	}
-	defer func() {
-		if closeErr := repo.Close(); closeErr != nil {
-			if err == nil {
-				err = fmt.Errorf("close repository: %w", closeErr)
-			} else {
-				err = errors.Join(err, fmt.Errorf("close repository: %w", closeErr))
-			}
-		}
-	}()
-	return fn(resolve.NewResolveTool(repo))
 }
 
 func wrapHandler(fn ToolHandler) mcp.ToolHandler {
@@ -171,80 +63,34 @@ func wrapHandler(fn ToolHandler) mcp.ToolHandler {
 	}
 }
 
-var legacyContextSoTTools = map[string]bool{
-	"spl_remote_set":       true,
-	"spl_remote_show":      true,
-	"spl_remote_remove":    true,
-	"spl_remote_branch":    true,
-	"spl_push":             true,
-	"spl_pull":             true,
-	"spl_clone":            true,
-	"spl_workspace_init":   true,
-	"spl_workspace_attach": true,
-}
+// KeepToolNames is the MCP tool surface after the git-SoT command cut.
+var KeepToolNames = surface.KeepMCPTools
 
-// RegisterAllTools registers all 43 Spool tools onto the given official MCP server.
+// RegisterAllTools registers KEEP-only Spool tools onto the official MCP server.
 func RegisterAllTools(s *mcp.Server, rt *runtime) {
 	if rt == nil {
 		rt = newRuntime(ServerOptions{})
 	}
-	stateDirProvider := rt.stateDir
 	tools := []Tool{
-		toolStatus(rt),
-		toolAdd(rt),
-		toolCommit(rt),
 		toolResolve(rt),
 		toolSearch(rt),
-		toolSearchExpand(stateDirProvider),
+		toolSearchExpand(rt),
 		toolFilter(rt),
-		toolContext(stateDirProvider),
-		toolDiff(stateDirProvider),
-		toolHistory(stateDirProvider),
-		toolBranchesContaining(stateDirProvider),
+		toolQueryContext(rt),
 		toolGraph(rt),
 		toolContextExport(rt),
-		toolBranchList(stateDirProvider),
-		toolBranchCreate(stateDirProvider),
-		toolBranchDelete(stateDirProvider),
-		toolSwitch(stateDirProvider),
-		toolMergePreview(stateDirProvider),
-		toolMergeApply(stateDirProvider),
-		toolMergeConflicts(stateDirProvider),
-		toolMergeResolve(stateDirProvider),
-		toolMergeAbort(stateDirProvider),
-		toolMergeFinalize(stateDirProvider),
-		toolCherryPick(stateDirProvider),
-		toolSchemaMigrate(stateDirProvider),
-		toolValidate(stateDirProvider),
-		toolInit(stateDirProvider),
-		toolPrune(stateDirProvider),
-		toolFsck(stateDirProvider),
-		toolGC(stateDirProvider),
-		toolMigrate(stateDirProvider),
+		toolMergePreview(rt),
+		toolMergeApply(rt),
+		toolMergeConflicts(rt),
+		toolMergeResolve(rt),
+		toolMergeAbort(rt),
+		toolMergeFinalize(rt),
+		toolSchemaMigrate(rt),
+		toolValidate(rt),
+		toolPrune(rt),
 		toolAssetAdd(rt),
 		toolAssetRead(rt),
-		toolWorkspaceInit(),
-		toolWorkspaceAttach(),
-		toolRemoteSet(stateDirProvider),
-		toolRemoteShow(stateDirProvider),
-		toolRemoteRemove(stateDirProvider),
-		toolRemoteBranch(stateDirProvider),
-		toolPush(stateDirProvider),
-		toolPull(stateDirProvider),
-		toolClone(),
 		toolVersion(),
-	}
-
-	for i, t := range tools {
-		if !legacyContextSoTTools[t.Name] {
-			continue
-		}
-		name := t.Name
-		t.Description = t.Description + " Deprecated and unsupported for solution context — bind each code repo with .spool/context.toml (or `spl context init --remote`) and sync with stock git clone/PR/history. Leftover `.spl`/Rack is migration-only (`spl context export`), not a parallel SoT."
-		t.Handler = func(_ context.Context, _ json.RawMessage) (any, error) {
-			return nil, ctxgit.LegacyContextSoTError(name)
-		}
-		tools[i] = t
 	}
 
 	for _, t := range tools {

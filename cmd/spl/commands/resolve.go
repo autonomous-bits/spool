@@ -1,67 +1,38 @@
-// Package commands defines the spl CLI subcommands.
 package commands
 
 import (
-	"encoding/json"
 	"fmt"
 
-	"github.com/autonomous-bits/spool/internal/resolve"
+	"github.com/autonomous-bits/spool/internal/ctxgit"
 	"github.com/spf13/cobra"
 )
 
-// NewResolveCommandWithTool creates the resolve subcommand with a concrete tool.
-func NewResolveCommandWithTool(tool *resolve.ResolveTool) *cobra.Command {
-	return NewResolveCommand(func() (*resolve.ResolveTool, error) {
-		return tool, nil
-	})
-}
-
-// NewResolveCommand creates the resolve command with a lazy repository tool provider.
-func NewResolveCommand(toolProvider func() (*resolve.ResolveTool, error)) *cobra.Command {
-	var branch, commit, nodeID string
-	var budgetFlags queryBudgetFlags
+// NewResolveCommand creates the bound-only resolve command.
+func NewResolveCommand(opts ctxgit.Options) *cobra.Command {
+	var nodeID string
 	command := &cobra.Command{
 		Use:          "resolve",
-		Short:        "Resolve a node from a branch snapshot",
-		Long:         "Resolve a stable node ID from a branch snapshot or an explicitly selected reachable commit. The result includes snapshot and projection metadata as JSON.",
-		Example:      "  spl resolve --branch main --node 11111111-1111-4111-8111-111111111111\n  spl resolve --branch main --commit <commit-id> --node <node-id>",
+		Short:        "Resolve a node from the bound context checkout",
+		Long:         "Resolve a stable node ID from the bound context-git projection. Unbound workspaces are refused.",
+		Example:      "  spl resolve --node idea-1",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(command *cobra.Command, _ []string) error {
 			if nodeID == "" {
 				return fmt.Errorf("node is required")
 			}
-			tool, err := toolProvider()
+			session, err := startBoundSession(command, opts)
 			if err != nil {
 				return err
 			}
-			selector := resolve.SnapshotSelector{Branch: branch}
-			if command.Flags().Changed("commit") {
-				selector.Commit = &commit
-			}
-			result, err := tool.SPLResolve(command.Context(), resolve.ResolveRequest{
-				Selector: selector,
-				NodeID:   nodeID,
-				Budget:   budgetFlags.request(command),
-			})
+			result, err := session.ResolveResult(nodeID)
 			if err != nil {
 				return err
 			}
-			data, err := json.Marshal(result)
-			if err != nil {
-				return err
-			}
-			if _, err := command.OutOrStdout().Write(data); err != nil {
-				return fmt.Errorf("write resolve result: %w", err)
-			}
-			return nil
+			return writeJSON(command, result, "resolve")
 		},
 	}
-	command.Flags().StringVar(&branch, "branch", "", "branch to resolve")
-	command.Flags().StringVar(&commit, "commit", "", "commit to resolve")
 	command.Flags().StringVar(&nodeID, "node", "", "stable node entity ID")
-	budgetFlags.addReadBudgetFlags(command)
-	budgetFlags.addTraversalBudgetFlags(command)
-	_ = command.MarkFlagRequired("branch")
+	_ = command.MarkFlagRequired("node")
 	return command
 }

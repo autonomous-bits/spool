@@ -1,48 +1,18 @@
 # Branches and history
 
-Create a branch from exactly one existing branch or commit, list branches, delete an inactive
-non-default branch, or switch the active branch:
+Spool does not wrap git branch, switch, history, or diff. Use stock git on the context remote:
 
 ```sh
-spl branch create feature --from-branch main
-spl branch create review --from-commit <commit-id>
-spl branch list
-spl switch feature
-spl branch delete feature
+git branch
+git switch feature
+git log -- nodes/ edges/
+git diff main...feature -- nodes edges schema.toml
 ```
 
-Trace commits that changed an entity, including all merge parents when needed:
+MCP writes still create short-lived `spool/mcp/<stamp>-<nonce>` branches and open pull requests
+into the protected branch. Do not push the protected branch except during `spl context init`.
 
-```sh
-spl history --branch main --entity-id <node-id>
-spl history --branch main --commit <commit-id> --entity-id <node-id> --all-parents
-```
+File-graph merge of two git revisions remains a Spool KEEP command (`spl merge *`). See
+[Merges](merges.md).
 
-Find branches using one selector: an entity ID, exact snapshot ID, or schema-defined natural key.
-
-```sh
-spl branches-containing --entity-id <node-id>
-spl branches-containing --snapshot-id <snapshot-id>
-spl branches-containing --natural-key <key>
-```
-
-Compare two snapshots selected by branch, optionally pinning either side to a reachable commit:
-
-```sh
-spl diff --base-branch main --target-branch feature
-spl diff --base-branch main --base-commit <base-id> \
-  --target-branch feature --target-commit <target-id> --max-rows 100
-```
-
-Use `--node-id`, `--edge-id`, `--node-title-contains`, `--one-hop`, `--continuation`,
-`--max-rows`, and `--max-response-bytes` to constrain `diff`. Use `--continuation`,
-`--max-rows`, `--max-response-bytes`, and `--timeout` to bound `branches-containing`.
-
-Surgically transplant an individual commit's graph delta onto a target branch:
-
-```sh
-spl cherry-pick --commit <commit-id> --target-branch main --dry-run
-spl cherry-pick --commit <commit-id> --target-branch main --author "Alice <alice@example.com>" --message "Transplant fix"
-```
-
-`cherry-pick` validates referential integrity and schema rules against the candidate target snapshot, performs 3-way property merging, and advances the target branch linearly while retaining provenance metadata.
+`cherry-pick`, `history`, `diff`, `branches-containing`, `branch`, and `switch` are removed.

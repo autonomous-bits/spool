@@ -168,7 +168,53 @@ func (s *Session) Commit(ctx context.Context, author, message string) (WriteResu
 	if err != nil {
 		return WriteResult{}, err
 	}
+	if len(s.staged.SchemaTOML) > 0 {
+		after.SchemaTOML = append([]byte(nil), s.staged.SchemaTOML...)
+	}
+	return s.commitGraphDiff(ctx, base, after, overlaps, author, message, s.Bind.ProtectedBranch)
+}
 
+func (s *Session) finishWrite(ctx context.Context, after *Graph, branch, sha string, pr PullRequest, overlaps []Overlap, written, warnings []string) (WriteResult, error) {
+	s.graph = after
+	if rebuildErr := s.rebuildProjection(ctx, sha); rebuildErr != nil {
+		warnings = append(warnings, "projection rebuild after write: "+rebuildErr.Error())
+	}
+	return WriteResult{
+		Branch:          branch,
+		Commit:          sha,
+		ProtectedBranch: s.Bind.ProtectedBranch,
+		Remote:          s.Bind.Remote,
+		PR:              pr,
+		Overlaps:        overlaps,
+		Written:         written,
+		Warnings:        warnings,
+	}, nil
+}
+
+// CommitGraph writes after as one git commit on a short-lived branch from the
+// current checkout HEAD and opens a pull request to prBase (protected branch
+// when empty). It does not use in-process staging.
+func (s *Session) CommitGraph(ctx context.Context, after *Graph, author, message, prBase string) (WriteResult, error) {
+	if s == nil || !s.Bound() {
+		return WriteResult{}, UnboundError()
+	}
+	if after == nil {
+		return WriteResult{}, repository.ErrInvalidMutationBatch
+	}
+	if strings.TrimSpace(message) == "" {
+		return WriteResult{}, fmt.Errorf("commit message is required")
+	}
+	if strings.TrimSpace(prBase) == "" {
+		prBase = s.Bind.ProtectedBranch
+	}
+	base, err := LoadGraph(s.CheckoutDir)
+	if err != nil {
+		return WriteResult{}, err
+	}
+	return s.commitGraphDiff(ctx, base, after, nil, author, message, prBase)
+}
+
+func (s *Session) commitGraphDiff(ctx context.Context, base, after *Graph, overlaps []Overlap, author, message, prBase string) (WriteResult, error) {
 	branch, err := shortLivedBranch()
 	if err != nil {
 		return WriteResult{}, err
@@ -178,24 +224,22 @@ func (s *Session) Commit(ctx context.Context, author, message string) (WriteResu
 	}
 
 	var warnings []string
-	for _, blob := range s.staged.Assets {
-		if blob.Warn != "" {
-			warnings = append(warnings, blob.Warn)
-		}
-		if err := persistAsset(ctx, s.git, s.CheckoutDir, blob); err != nil {
-			return WriteResult{}, err
+	if s.staged != nil {
+		for _, blob := range s.staged.Assets {
+			if blob.Warn != "" {
+				warnings = append(warnings, blob.Warn)
+			}
+			if err := persistAsset(ctx, s.git, s.CheckoutDir, blob); err != nil {
+				return WriteResult{}, err
+			}
 		}
 	}
 	written, deleted, err := persistGraphDiff(s.CheckoutDir, base, after)
 	if err != nil {
 		return WriteResult{}, err
 	}
-	if len(s.staged.SchemaTOML) > 0 {
-		if err := writeSchemaFile(s.CheckoutDir, s.staged.SchemaTOML); err != nil {
-			return WriteResult{}, err
-		}
-		after.SchemaTOML = append([]byte(nil), s.staged.SchemaTOML...)
-		written = append(written, schemaFileName)
+	if err := persistSchema(s.CheckoutDir, after.SchemaTOML); err != nil {
+		return WriteResult{}, err
 	}
 	for _, rel := range written {
 		if shouldWarnLargeText(rel, fileSize(s.CheckoutDir, rel)) {
@@ -217,6 +261,26 @@ func (s *Session) Commit(ctx context.Context, author, message string) (WriteResu
 	if err := s.assertCachedPathsAllowed(ctx); err != nil {
 		return WriteResult{}, err
 	}
+	status, err := s.git.Run(ctx, s.CheckoutDir, "status", "--porcelain")
+	if err != nil {
+		return WriteResult{}, err
+	}
+	if strings.TrimSpace(status) == "" {
+		if _, checkoutErr := s.git.Run(ctx, s.CheckoutDir, "checkout", s.Bind.ProtectedBranch); checkoutErr != nil {
+			warnings = append(warnings, "checkout protected branch after no-op: "+checkoutErr.Error())
+		} else if _, delErr := s.git.Run(ctx, s.CheckoutDir, "branch", "-D", branch); delErr != nil {
+			warnings = append(warnings, "delete unused short-lived branch: "+delErr.Error())
+		}
+		warnings = append(warnings, "no changes")
+		s.staged = nil
+		sha := s.head
+		if sha == "" {
+			if resolved, revErr := s.git.Run(ctx, s.CheckoutDir, "rev-parse", "HEAD"); revErr == nil {
+				sha = resolved
+			}
+		}
+		return s.finishWrite(ctx, after, s.Bind.ProtectedBranch, sha, PullRequest{}, overlaps, written, warnings)
+	}
 	commitArgs := []string{"-c", "commit.gpgsign=false"}
 	if name, email := parseAuthor(author); name != "" {
 		commitArgs = append(commitArgs, "-c", "user.name="+name, "-c", "user.email="+email)
@@ -233,33 +297,22 @@ func (s *Session) Commit(ctx context.Context, author, message string) (WriteResu
 		return WriteResult{}, fmt.Errorf("push short-lived branch (stock git only): %w", err)
 	}
 
+	var export *ExportSummary
+	if s.staged != nil {
+		export = s.staged.Export
+	}
 	pr, err := s.prs.OpenPR(ctx, OpenPRRequest{
 		Remote: s.Bind.Remote,
 		Head:   branch,
-		Base:   s.Bind.ProtectedBranch,
+		Base:   prBase,
 		Title:  message,
-		Body:   prBody(s.Bind, overlaps, written, deleted, warnings, s.staged.Export),
+		Body:   prBody(s.Bind, overlaps, written, deleted, warnings, export),
 	})
 	if err != nil {
 		return WriteResult{}, err
 	}
-
 	s.staged = nil
-	s.graph = after
-	if rebuildErr := s.rebuildProjection(ctx, sha); rebuildErr != nil {
-		warnings = append(warnings, "projection rebuild after write: "+rebuildErr.Error())
-	}
-
-	return WriteResult{
-		Branch:          branch,
-		Commit:          sha,
-		ProtectedBranch: s.Bind.ProtectedBranch,
-		Remote:          s.Bind.Remote,
-		PR:              pr,
-		Overlaps:        overlaps,
-		Written:         written,
-		Warnings:        warnings,
-	}, nil
+	return s.finishWrite(ctx, after, branch, sha, pr, overlaps, written, warnings)
 }
 
 func shortLivedBranch() (string, error) {

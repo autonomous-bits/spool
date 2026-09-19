@@ -54,9 +54,9 @@ func (b Bind) LFSThreshold() int64 {
 	return DefaultLFSThreshold
 }
 
-// UnboundError is the fail-closed envelope returned to write tools.
+// UnboundError is the fail-closed envelope returned to bound context-management tools.
 func UnboundError() error {
-	return fmt.Errorf("%w: write tools are refused until %s exists with solution_id, remote, and protected_branch (no auto-discovery)", ErrUnbound, BindRelPath)
+	return fmt.Errorf("%w: context-management commands require %s with solution_id, remote, and protected_branch (no auto-discovery)", ErrUnbound, BindRelPath)
 }
 
 // LoadBindFile parses an explicit bind file. It does not search ancestors.

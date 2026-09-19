@@ -164,6 +164,39 @@ func TestAssetWriteAndRead(t *testing.T) {
 	_ = reader2.Close()
 }
 
+func TestSchemaMigrateNoOpDoesNotOpenPR(t *testing.T) {
+	ctx := context.Background()
+	codeRoot, _, cache := setupBoundWorkspace(t)
+	recorder := &RecordingPROpener{}
+	session, err := Start(ctx, Options{WorkspaceDir: codeRoot, CacheDir: cache, Git: isolatedGit(), PROpener: recorder})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	result, err := session.MigrateSchema(ctx, SchemaMigrateRequest{
+		SchemaTOML: []byte(defaultSchemaTOML),
+		Message:    "Identical schema",
+	})
+	if err != nil {
+		t.Fatalf("MigrateSchema no-op: %v", err)
+	}
+	if result.PR.URL != "" || len(recorder.Requests) != 0 {
+		t.Fatalf("identical schema must not open a PR: %#v requests=%#v", result, recorder.Requests)
+	}
+	if result.Branch != "main" {
+		t.Fatalf("no-op branch = %q, want protected main", result.Branch)
+	}
+	foundNoChanges := false
+	for _, warning := range result.Warnings {
+		if strings.Contains(warning, "no changes") {
+			foundNoChanges = true
+			break
+		}
+	}
+	if !foundNoChanges {
+		t.Fatalf("no-op warnings = %#v, want no changes", result.Warnings)
+	}
+}
+
 func setupBoundWorkspace(t *testing.T) (codeRoot, remote, cache string) {
 	t.Helper()
 	root := t.TempDir()

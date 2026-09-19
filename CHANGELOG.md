@@ -25,9 +25,20 @@ generated from commits since the preceding `v*` tag. Commits prefixed with `docs
 - Bind resolution looks only for `.spool/context.toml` in the code repo (stopping
   at a nested git work tree). It does not infer remotes from directory names,
   monorepo layout, `go.work`, leftover `.spl` state, git `origin`, or Rack config.
-- MCP Rack remote / clone / workspace tools and, when a bind is present, CLI
-  `init` / `workspace` / `remote` / `push` / `pull` / `clone` fail closed with
-  guidance to bind + stock git.
+- Git is the durable source of truth for solution context. Bound context-management
+  commands require `.spool/context.toml` and write through short-lived
+  `spool/mcp/<stamp>-<nonce>` branches plus pull requests. They never push the
+  protected branch except `spl context init` onboarding.
+- The query verb `context` is renamed to `query-context` (CLI and MCP
+  `spl_query_context`). The `context` namespace is only `init`, `export`, and
+  `migrate-once`. There is no alias.
+- `spl prune` / `spl_prune` is bound graph cleanup of `Ephemeral` nodes and
+  cascading edges (short-lived branch + PR). It is not pack/CAS garbage collection.
+  Unbound workspaces are refused.
+- Identical schema migrations are a no-op (no empty commit or PR).
+- MCP advertises the KEEP tool set only. `spl --help` matches that surface. A golden KEEP/REMOVE
+  list fails `make check` if a removed CLI name or MCP tool reappears (including `spl_context` and
+  Spool VCS wrappers `add`/`status`/`commit`/`branch`/`switch`).
 - **Sunset stop-list for solution context:** Spool-as-VCS, Rack sync, `.spl` as
   durable SoT, and pack wire-compat are stopped. Bind + stock git is the **only**
   durable SoT. Every agent write is a short-lived branch + PR (not push-clean to
@@ -37,6 +48,21 @@ generated from commits since the preceding `v*` tag. Commits prefixed with `docs
   hatch (`spl context export`). No dual-run and no Rack wire-compat.
 - Context asset policy: Git LFS default threshold **512 KiB**; text/JSON/TOML
   stay plain git (warn above ~1 MiB).
+
+### Removed
+
+CLI and MCP (deleted; no quiet aliases or deprecation stubs):
+
+- `init`, `workspace *`, `remote *`, `push`, `pull`, `clone`, old `migrate`
+- `fsck`, `gc`, pack prune, `cherry-pick`
+- `add`, `status`, `commit`, `branch`, `switch`
+- `history`, `diff`, `branches-containing`
+- All Rack/workspace MCP twins of the above, including `spl_add`, `spl_status`,
+  `spl_commit`, `spl_init`, `spl_context`, `spl_push`, `spl_pull`, `spl_clone`,
+  `spl_fsck`, `spl_gc`, `spl_workspace_*`, `spl_remote_*`, `spl_branch_*`,
+  `spl_switch`, `spl_diff`, `spl_history`
+
+Use stock git on the context remote for history and diff.
 
 ## [1.10.0] - 2026-09-12
 

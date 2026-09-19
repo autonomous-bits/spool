@@ -76,7 +76,7 @@ Link atomic product ideas using explicit, semantic product relationships:
 
 ## 4. Batch Authoring Example
 
-Create a purely business-oriented `spl add` batch JSON file:
+Create a purely business-oriented mutation-batch JSON file:
 
 ```json
 [
@@ -113,19 +113,13 @@ Create a purely business-oriented `spl add` batch JSON file:
 ]
 ```
 
-Stage and commit the batch:
+Write the batch through a schema migration (short-lived branch + PR):
 
-- **MCP (Default)**: Call `spl_add` directly with the mutations array (no temporary file on disk needed), inspect status with `spl_status`, and commit with `spl_commit`:
-  ```json
-  // spl_add: {"branch": "main", "mutations": [ ... ]}
-  // spl_status: {"branch": "main"}
-  // spl_commit: {"branch": "main", "author": "Product Manager <pm@example.com>", "message": "Record deferred billing address requirement"}
-  ```
+- **MCP (Default)**: Call `spl_schema_migrate` with the current `schema.toml` (or inline TOML) and `operations`.
 - **CLI (Fallback)**:
   ```sh
-  spl add --branch main --batch product-batch.json
-  spl status --branch main
-  spl commit --branch main --author "Product Manager <pm@example.com>" --message "Record deferred billing address requirement"
+  spl schema migrate --schema schema.toml --batch product-batch.json \
+    --author "Product Manager <pm@example.com>" --message "Record deferred billing address requirement"
   ```
 
 ---
@@ -135,26 +129,17 @@ Stage and commit the batch:
 Discover and traverse product knowledge using Spool MCP tools by default, falling back to CLI commands:
 
 - **MCP (Default)**:
-  - `spl_search(branch: "main", query: "billing address")`
-  - `spl_filter(branch: "main", labels: ["Problem"])`
-  - `spl_filter(branch: "main", labels: ["Persona"])`
-  - `spl_resolve(branch: "main", node: "req-deferred-billing-address")`
-  - `spl_context(branch: "main", query: "billing address", direction: "both", max_depth: 2)`
+  - `spl_search(query: "billing address")`
+  - `spl_filter(labels: ["Problem"])`
+  - `spl_filter(labels: ["Persona"])`
+  - `spl_resolve(node: "req-deferred-billing-address")`
+  - `spl_query_context(query: "billing address", direction: "both")`
 
 - **CLI (Fallback)**:
   ```sh
-  # Search for product requirements related to billing
-  spl search --branch main --query "billing address"
-
-  # Filter for all open product problems
-  spl filter --branch main --label Problem
-
-  # Filter for all product personas
-  spl filter --branch main --label Persona
-
-  # Resolve a specific requirement by its exact ID
-  spl resolve --branch main --node req-deferred-billing-address
-
-  # Inspect context around a product domain concept
-  spl context --branch main --query "billing address" --direction both --max-depth 2
+  spl search --query "billing address"
+  spl filter --label Problem
+  spl filter --label Persona
+  spl resolve --node req-deferred-billing-address
+  spl query-context --query "billing address" --direction both
   ```
