@@ -13,8 +13,11 @@ func NewContextInitCommand() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "init",
 		Short: "Bind this code repo to a solution context git remote and seed its layout",
-		Long: "Write .spool/context.toml, create the human-diffable context layout on the remote when empty, " +
-			"and seed a CodeRepository node for this code repo. MCP writes still open a short-lived branch and PR.",
+		Long: "Write .spool/context.toml in this code repo, create the human-diffable context layout " +
+			"(schema.toml, nodes/, edges/, assets/) on the remote when empty, and seed a CodeRepository " +
+			"node from this bind. Repeat in each code repo that shares the same context remote. " +
+			"MCP writes still open a short-lived branch and PR. Context sync is stock git clone/PR/history — " +
+			"not Rack or `.spl`.",
 		Example:      "  spl context init --remote https://github.com/org/solution-context.git",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,

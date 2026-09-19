@@ -96,6 +96,38 @@ func TestMCPBoundWriteOpensPR(t *testing.T) {
 	}
 }
 
+func TestMCPRefusesRackAndWorkspaceSoT(t *testing.T) {
+	ctx := context.Background()
+	server := NewSpoolServerWithOptions(ServerOptions{
+		StateDir:     func() (string, error) { return t.TempDir(), nil },
+		WorkspaceDir: func() (string, error) { return t.TempDir(), nil },
+	})
+	session := connectMCP(t, ctx, server)
+	defer func() { _ = session.Close() }()
+
+	for _, name := range []string{"spl_remote_set", "spl_push", "spl_pull", "spl_clone", "spl_workspace_init"} {
+		res, err := session.CallTool(ctx, &officialmcp.CallToolParams{
+			Name: name,
+			Arguments: map[string]any{
+				"endpoint":     "https://rack.example.invalid",
+				"auth_mode":    "bearer",
+				"workspace_id": "x",
+				"branch":       "main",
+				"name":         "demo",
+			},
+		})
+		if err != nil {
+			t.Fatalf("%s CallTool: %v", name, err)
+		}
+		if !res.IsError {
+			t.Fatalf("%s must refuse Rack/.spl context SoT: %s", name, toolText(res))
+		}
+		if !strings.Contains(toolText(res), ".spool/context.toml") {
+			t.Fatalf("%s error = %s, want bind guidance", name, toolText(res))
+		}
+	}
+}
+
 func setupMCPBound(t *testing.T) (codeRoot, remote, cache string, recorder *ctxgit.RecordingPROpener) {
 	t.Helper()
 	root := t.TempDir()

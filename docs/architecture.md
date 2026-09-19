@@ -10,54 +10,53 @@ agent pair-programming and tool integration). Commands produce JSON on standard
 output for machine integration; errors are structured JSON logs on standard
 error.
 
+The runtime prefers an explicit `.spool/context.toml` bind to a solution
+context git remote. Graph writes go to that remote as human-diffable files on a
+short-lived branch plus pull request. Local SQLite/FTS projections rebuild from
+the current checkout on every MCP/process start and are never source of truth.
+
+For **local** graph-VCS (not shared solution context), the runtime resolves a
+state directory before running a command. An explicit `--state-dir` takes
+priority, followed by `SPOOL_DIR`, then a validated ancestor `.spl/config.toml`
+workspace manifest. A manifest resolves its immutable workspace ID through the
+detached-state catalog; malformed manifests and unknown IDs are errors. Without
+a manifest, the system discovers the nearest parent `.spl` directory; `spl init`
+creates local state at the directory containing `go.work`, or at the current
+directory when none exists. Those `.spl` / Rack paths are refused when a
+context bind is present.
+
 ```mermaid
 flowchart LR
     Agent[AI Agent / MCP Host] --> MCP[spl mcp official go-sdk]
     Client[CLI client or automation] --> CLI[spl Cobra commands]
+    MCP --> Bind[".spool/context.toml"]
+    CLI --> Bind
+    Bind --> CtxGit[internal/ctxgit]
+    CtxGit --> GitRemote[Context git remote]
+    CtxGit --> Projection["local cache projection.db"]
     MCP --> Repository[repository.Repository]
-    MCP --> Tool[resolve.ResolveTool]
     CLI --> Repository
-    CLI --> Tool
-    Tool --> Contextual[internal/contextual]
-    Tool --> Repository
-    Contextual --> Repository
-    Repository --> Memory[In-memory graph and ref indexes]
-    Repository --> Objects["state-dir/objects/{loose,pack,info}"]
-    Repository --> Assets["state-dir/assets/loose"]
-    Repository --> Projection["state-dir/graph.db (derived SQLite/FTS5)"]
-    Repository --> State["state-dir/config.toml, reflog-retention, HEAD, refs, staged, logs"]
-    Repository --> Merge["state-dir/merge/<hashed-branch>.json"]
-    Repository --> Lock["state-dir/repository.lock"]
+    Repository --> State["state-dir .spl local graph-VCS"]
 ```
-
-The runtime resolves a state directory before running a command or handling an
-MCP tool request. An explicit `--state-dir` takes priority, followed by
-`SPOOL_DIR`, then a validated ancestor `.spl/config.toml` workspace manifest. A
-manifest resolves its immutable workspace ID through the detached-state
-catalog; malformed manifests and unknown IDs are errors. Without a manifest,
-the system discovers the nearest parent `.spl` directory; `spl init` creates
-local state at the directory containing `go.work`, or at the current directory
-when none exists. Subsequent commands open the resolved repository, acquire its
-process lock, perform the operation, persist any state change, and release the
-lock at process exit.
 
 ## Components
 
 | Component | Responsibility |
 | --- | --- |
-| `cmd/spl` | Cobra command definitions, flag and argument validation, repository discovery, JSON output, and error logging. |
+| `cmd/spl` | Cobra command definitions, flag and argument validation, bind-aware command gating, JSON output, and error logging. |
+| `internal/ctxgit` | Explicit `.spool/context.toml` bind resolution, stock-git context checkout, human-diffable layout, short-lived branch + PR writes, and local projection rebuild. Git is the durable solution-context SoT. |
 | `internal/mcp` | Native Model Context Protocol server exposing 42 typed tools over stdio using `github.com/modelcontextprotocol/go-sdk`, with serialized repository locking, in-memory mutation staging, and error envelopes. |
 | `internal/resolve` | Context-aware, policy-constrained adapter for read-only graph queries. It applies query budgets, pins a branch snapshot, and exposes public retrieval results with provenance and completion metadata. |
 | `internal/contextual` | Go use cases that combine branch-head lexical or typed-filter evidence with bounded, deterministic expansion of a pinned graph snapshot. |
-| `internal/repository` | Authoritative graph storage, commits, branches, staging, query implementations, durable state, locking, and recovery. |
+| `internal/repository` | Authoritative **local** graph storage, commits, branches, staging, query implementations, durable state, locking, and recovery. Not the shared solution-context SoT. |
 | `internal/repository/branch` | Branch request validation and lifecycle service boundary. |
 | `internal/repository/fsck` | Non-opening repository diagnostic and integrity verification service boundary. |
 | `internal/repository/initialization` | Repository initialization service boundary. |
 | `internal/repository/merge` | Merge transaction lifecycle service boundary. The repository supplies its durable, atomic store contract. |
 | `internal/repository/prune` | Graph pruning and ephemeral node excision service boundary. |
-| `internal/workspace` | Central detached-workspace provisioning plus manifest validation/discovery/writing and immutable workspace-ID lookup. Exposed to the CLI through the repository facade. |
+| `internal/workspace` | Central detached-workspace provisioning plus manifest validation/discovery/writing and immutable workspace-ID lookup. Independent of any single repository's `.spl` state; not the N→1 context bind. |
 | `internal/repository/asset` | Content-addressed reference-asset blob storage, locator parsing, MIME detection, and local cache lifecycle. |
-| `internal/remote` | Rack remote configuration, native history synchronization, and asset negotiation, upload, and on-demand retrieval. |
+| `internal/remote` | Rack remote configuration, native history synchronization, and asset negotiation, upload, and on-demand retrieval. Out of the solution-context happy path. |
 
 ## CLI command surface
 
@@ -71,6 +70,7 @@ operation:
 | Branches | `branch create/list/delete`, `switch` |
 | Schemas | `schema migrate`, `validate` |
 | Reads | `resolve`, `graph`, `search`, `filter`, `search-expand`, `context` |
+| Context bind | `context init` |
 | History and comparison | `history`, `branches-containing`, `diff` |
 | Merge lifecycle | `merge preview/apply/conflicts/resolve/finalize/abort` |
 | Maintenance | `fsck`, `gc`, `prune` |
@@ -331,10 +331,10 @@ preferences, or `SPOOL_WORKSPACE`.
 
 ## Extension points and current scope
 
-The repository package is the storage authority. New lifecycle behavior belongs
-there or in a focused service package with an explicit repository contract.
+The repository package is the storage authority for **local** graph-VCS.
+Solution context is stored in git via `internal/ctxgit`; Rack wire transport
+and `.spl` packs are out of that happy path. New lifecycle behavior belongs
+in `repository/` or in a focused service package with an explicit contract.
 `resolve` is deliberately a query/tool adapter rather than another storage
 layer, and `contextual` owns bounded evidence-and-expansion use cases rather
-than projection persistence. Spool currently operates locally: there is no
-network transport, authentication service, remote synchronization, or
-server-side component.
+than projection persistence.

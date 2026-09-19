@@ -1,11 +1,13 @@
 # Spool
 
-Spool is a local, content-addressed version-control system for graph data. It keeps immutable
-snapshots of nodes and edges, lets you stage and commit graph mutations, and provides local
-branching, history, and snapshot comparison through the `spl` command-line interface.
+Spool is a graph version-control tool for shared **solution context**. N code
+repositories bind to **one** context git remote; git is the durable source of
+truth. Spool MCP/CLI validates mutations, writes human-diffable JSON, opens a
+short-lived branch and pull request, and rebuilds a local query projection.
 
-It is designed for machine integration: successful commands emit JSON to standard output, while
-failures are structured JSON logs on standard error.
+Successful commands emit JSON to standard output; failures are structured JSON
+logs on standard error. There is no Spool-specific remote protocol: clone, PR,
+and history use stock git and GitHub.
 
 ## Install
 
@@ -51,32 +53,54 @@ go build -o dist/spl ./cmd/spl
 
 ## Quick start
 
-Create a central detached workspace, then explicitly bind each repository:
+Bind each code repo to the shared solution context remote. Spool does not
+auto-discover remotes from directory names, monorepo layout, or leftover `.spl`
+or Rack config.
 
-```sh
-spl workspace init my-project
-spl workspace attach --workspace my-project --repository-id github.com/acme/my-project .
+```toml
+# .spool/context.toml in every participating code repo
+solution_id = "my-solution"
+remote = "https://github.com/org/my-solution-context.git"
+protected_branch = "main"
+# repository_id = "github.com/org/svc-api"  # optional; namespaces node IDs
 ```
 
-`workspace init` creates the detached state in the user's central workspace
-catalog. `workspace attach` writes the checkout's portable `.spl/config.toml`
-manifest, binding its repository ID to the workspace's immutable ID. Commit the
-manifest so clones, worktrees, and CI runners resolve the same state. Repeat
-`workspace attach` for each repository that belongs to the workspace. It does
-not persist host-path attachments. If the checkout already uses
-`.spl/config.toml` for local Spool state, do not overwrite it with a workspace
-manifest. Repositories that ignore `.spl` must add a `.gitignore` exception for
-`.spl/config.toml` before committing the manifest.
+Or write that file with onboarding:
 
-To create a local, non-workspace graph repository instead, run `spl init` from the desired
-directory. It creates `.spl` in the nearest directory at or above the current directory that
-already contains `.spl` or `go.work`, or in the current directory if neither is found.
+```sh
+# In each code repo; same --remote and --solution-id, distinct --repository-id
+spl context init --remote https://github.com/org/my-solution-context.git \
+  --solution-id my-solution \
+  --repository-id github.com/org/svc-api
+```
 
-All commands accept the global `--state-dir <path>` override. State selection
-precedence is `--state-dir`, `SPOOL_DIR`, a discovered checkout manifest, then
-local `.spl`/`go.work` discovery. An empty `--state-dir` is invalid. A malformed
-manifest or unregistered workspace ID is an error; checkouts without a manifest
-continue to use local repository discovery.
+`context init` creates `schema.toml`, `nodes/`, `edges/`, and `assets/` on an
+empty remote and seeds a `CodeRepository` node from **this** bind. Repeat in
+other code repos. MCP writes fail closed until a bind exists; after that they
+commit on a short-lived branch and open a PR to `protected_branch`. Sync is
+stock `git clone` / GitHub PR / history.
+
+See [docs/context-bind.md](docs/context-bind.md) for the bind format and
+multi-repo story.
+
+### Local graph repository (not the shared context SoT)
+
+`.spl` packs, detached workspaces, and Rack remotes are out of the happy path
+for solution context. They still exist for local graph-VCS and migration. When
+`.spool/context.toml` is present, `spl init`, `spl workspace …`, `spl remote`,
+`spl push`, `spl pull`, and `spl clone` refuse with an error pointing at the
+bind file and stock git.
+
+To create a local, non-shared graph repository instead, run `spl init` from an
+**unbound** directory. It creates `.spl` in the nearest directory at or above
+the current directory that already contains `.spl` or `go.work`, or in the
+current directory if neither is found.
+
+All commands accept the global `--state-dir <path>` override for that local
+state. State selection precedence is `--state-dir`, `SPOOL_DIR`, a discovered
+checkout manifest, then local `.spl`/`go.work` discovery. An empty `--state-dir`
+is invalid. A malformed manifest or unregistered workspace ID is an error;
+checkouts without a manifest continue to use local repository discovery.
 
 ## Storage and integrity
 
@@ -264,6 +288,11 @@ until finalization or abort.
 
 ## Detached workspaces
 
+`workspace init` / `workspace attach` provision local `.spl` detached state.
+They are **not** how N code repos bind to shared solution context — use
+[`.spool/context.toml`](docs/context-bind.md) for that. These commands are
+refused when a context bind is present.
+
 `workspace init` provisions a central detached workspace. `workspace attach`
 explicitly writes a repository manifest for it. Repository resolution uses only
 that committed manifest's immutable `workspace_id`; it does not use host-path
@@ -271,7 +300,13 @@ attachments, `SPOOL_WORKSPACE`, or active-workspace preferences.
 
 ## Remote configuration and synchronization
 
-Spool connects to a remote Spool Rack service to push, pull, and coordinate graph history across team members.
+**Solution context** syncs with stock git against the bind file's `remote`
+(clone, fetch, short-lived branch, GitHub pull request, history). There is no
+Spool-specific remote protocol.
+
+Rack `remote` / `push` / `pull` / `clone` commands below configure a Spool Rack
+service for **local graph-VCS** only. They are not the durable solution-context
+source of truth and are refused when `.spool/context.toml` is present.
 
 ### Remote configuration
 
@@ -378,7 +413,9 @@ Spool includes a native Model Context Protocol (MCP) server built on the officia
 
 ### Configuration Examples
 
-To connect an AI assistant or MCP client to Spool, add the server to your client configuration:
+To connect an AI assistant or MCP client to Spool, add the server to your client configuration.
+Run `spl mcp` from a code repo that contains `.spool/context.toml` (or after `spl context init --remote`).
+Do not point `--state-dir` at `.spl` for solution context — that path is not the durable store.
 
 #### Claude Desktop / Claude Code (`claude_desktop_config.json`)
 ```json
@@ -392,17 +429,8 @@ To connect an AI assistant or MCP client to Spool, add the server to your client
 }
 ```
 
-To explicitly pin a repository state directory:
-```json
-{
-  "mcpServers": {
-    "spool": {
-      "command": "spl",
-      "args": ["mcp", "--state-dir", "/path/to/project/.spl"]
-    }
-  }
-}
-```
+Run the server from a bound code repo. `--state-dir` is only for local `.spl`
+graph-VCS, not shared solution context.
 
 #### VS Code / Cursor (`mcp.json`)
 ```json
@@ -419,11 +447,8 @@ To explicitly pin a repository state directory:
 ### Manual Execution
 
 ```sh
-# Start the MCP server over standard I/O
+# Start the MCP server over standard I/O from a bound code repo
 spl mcp
-
-# Start with an explicit repository state directory
-spl mcp --state-dir /path/to/.spl
 ```
 
 ## CLI command reference
@@ -449,6 +474,7 @@ The command and flag inventory is:
 | `search` | `--branch`, `--query` (required), `--commit`, `--continuation`, `--max-rows`, `--max-response-bytes`, `--timeout` |
 | `filter` | `--branch` (required), `--commit`, repeatable `--label`/property predicates, `--continuation`, `--max-rows`, `--max-response-bytes`, `--timeout` |
 | `search-expand`, `context` | `--branch` (required), `--commit`, query or typed filters, `--direction`, repeatable `--edge-type`, `--seed-limit`, `--max-depth`, `--max-visited`, `--max-rows`, `--max-response-bytes`, `--timeout` |
+| `context init` | `--remote` (required), `--solution-id`, `--protected-branch`, `--repository-id`, `--author` |
 | `history` | `--branch`, `--entity-id` (required), `--commit`, `--all-parents`, `--continuation`, `--max-rows`, `--max-response-bytes`, `--timeout` |
 | `branches-containing` | exactly one selector (`--entity-id`, `--snapshot-id`, `--natural-key`), `--continuation`, `--max-rows`, `--max-response-bytes`, `--timeout` |
 | `diff` | `--base-branch`, `--target-branch` (required), optional commits, repeatable `--node-id`/`--edge-id`, `--node-title-contains`, `--one-hop`, `--continuation`, `--max-rows`, `--max-response-bytes`, `--timeout` |
@@ -487,6 +513,7 @@ reference. Every command also accepts `-h, --help` and the global `--state-dir`.
 
 ## Learn more
 
+- [`docs/context-bind.md`](docs/context-bind.md) documents the bind file and N-repos → one context remote.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) explains how to build, test, and contribute to Spool.
 - [`docs/architecture.md`](docs/architecture.md) describes the high-level system architecture.
 - [`CHANGELOG.md`](CHANGELOG.md) explains how release notes are generated.

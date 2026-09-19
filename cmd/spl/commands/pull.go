@@ -22,11 +22,16 @@ func NewPullCommand(repoProvider func() (*repository.Repository, error)) *cobra.
 			"ID, then downloads and installs any new commits as a fast-forward extension of local history. " +
 			"Pull only supports fast-forward installs: it fails if the local branch has no history in " +
 			"common with what Rack reports (a from-scratch bootstrap), and reports divergence rather than " +
-			"attempting a merge if Rack's branch head is not a descendant of the local branch.",
+			"attempting a merge if Rack's branch head is not a descendant of the local branch.\n\n" +
+			"Not the solution-context source of truth: when `.spool/context.toml` is present, this command " +
+			"is refused. Bind code repos and sync context with stock git clone/PR/history.",
 		Example:      "  spl pull --branch main",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(command *cobra.Command, args []string) error {
+			if err := refuseLegacyContextSoT("spl pull"); err != nil {
+				return err
+			}
 			ctx := command.Context()
 			repo, err := repoProvider()
 			if err != nil {

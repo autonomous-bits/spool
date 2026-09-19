@@ -22,14 +22,15 @@ type InitRequest struct {
 
 // InitResult is the JSON payload for `spl context init`.
 type InitResult struct {
-	BindPath        string `json:"bindPath"`
-	SolutionID      string `json:"solutionId"`
-	Remote          string `json:"remote"`
-	ProtectedBranch string `json:"protectedBranch"`
-	RepositoryID    string `json:"repositoryId"`
-	Checkout        string `json:"checkout"`
-	SeededNode      string `json:"seededNode,omitempty"`
-	Pushed          bool   `json:"pushed"`
+	BindPath        string   `json:"bindPath"`
+	SolutionID      string   `json:"solutionId"`
+	Remote          string   `json:"remote"`
+	ProtectedBranch string   `json:"protectedBranch"`
+	RepositoryID    string   `json:"repositoryId"`
+	Checkout        string   `json:"checkout"`
+	SeededNode      string   `json:"seededNode,omitempty"`
+	SeededNodes     []string `json:"seededNodes,omitempty"`
+	Pushed          bool     `json:"pushed"`
 }
 
 // Init writes the explicit bind, creates the agreed layout on an empty remote,
@@ -74,7 +75,7 @@ func Init(ctx context.Context, req InitRequest, git GitRunner) (InitResult, erro
 		return InitResult{}, err
 	}
 
-	opts := Options{WorkspaceDir: workspace, Git: git, PROpener: &RecordingPROpener{}}
+	opts := Options{WorkspaceDir: workspace, Git: git}
 	if cache := strings.TrimSpace(os.Getenv("SPOOL_CONTEXT_CACHE")); cache != "" {
 		opts.CacheDir = filepath.Join(cache, sanitizeCacheSegment(bind.SolutionID))
 	}
@@ -86,9 +87,15 @@ func Init(ctx context.Context, req InitRequest, git GitRunner) (InitResult, erro
 		return InitResult{}, err
 	}
 
-	seeded, err := seedCodeRepository(session.CheckoutDir, bind)
+	// Seed CodeRepository nodes from explicit binds only — never by scanning
+	// sibling directories, monorepo layout, or leftover .spl/Rack config.
+	seeded, err := seedCodeRepositories(session.CheckoutDir, []Bind{bind})
 	if err != nil {
 		return InitResult{}, err
+	}
+	seededNode := ""
+	if len(seeded) > 0 {
+		seededNode = seeded[0]
 	}
 
 	pushed := false
@@ -129,9 +136,24 @@ func Init(ctx context.Context, req InitRequest, git GitRunner) (InitResult, erro
 		ProtectedBranch: bind.ProtectedBranch,
 		RepositoryID:    bind.RepositoryID,
 		Checkout:        session.CheckoutDir,
-		SeededNode:      seeded,
+		SeededNode:      seededNode,
+		SeededNodes:     seeded,
 		Pushed:          pushed,
 	}, nil
+}
+
+func seedCodeRepositories(root string, binds []Bind) ([]string, error) {
+	var seeded []string
+	for _, bind := range binds {
+		id, err := seedCodeRepository(root, bind)
+		if err != nil {
+			return seeded, err
+		}
+		if id != "" {
+			seeded = append(seeded, id)
+		}
+	}
+	return seeded, nil
 }
 
 func seedCodeRepository(root string, bind Bind) (string, error) {
@@ -148,8 +170,10 @@ func seedCodeRepository(root string, bind Bind) (string, error) {
 		Title:  bind.RepositoryID,
 		Labels: []string{"CodeRepository"},
 		Properties: map[string]repository.PropertyValue{
-			"repositoryId": repository.StringPropertyValue(bind.RepositoryID),
-			"solutionId":   repository.StringPropertyValue(bind.SolutionID),
+			"repositoryId":    repository.StringPropertyValue(bind.RepositoryID),
+			"solutionId":      repository.StringPropertyValue(bind.SolutionID),
+			"remote":          repository.StringPropertyValue(bind.Remote),
+			"protectedBranch": repository.StringPropertyValue(bind.ProtectedBranch),
 		},
 	}
 	normalized, err := node.Normalize()

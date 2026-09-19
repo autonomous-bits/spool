@@ -28,11 +28,16 @@ func NewPushCommand(repoProvider func() (*repository.Repository, error)) *cobra.
 			"merge engine, and retries the push with the resulting fast-forward-eligible commit. If that " +
 			"merge finds conflicts, push leaves both --branch and the reconciliation branch untouched and " +
 			"reports the conflicts instead of retrying; resolve them with `spl merge preview/apply/conflicts/" +
-			"resolve/finalize` against --branch and the reconciliation branch, then retry.",
+			"resolve/finalize` against --branch and the reconciliation branch, then retry.\n\n" +
+			"Not the solution-context source of truth: when `.spool/context.toml` is present, this command " +
+			"is refused. Bind code repos and sync context with stock git clone/PR/history.",
 		Example:      "  spl push --branch main --base-commit <last-known-wire-commit-id>\n  spl push --branch main\n  spl push --branch main --reconcile",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(command *cobra.Command, args []string) error {
+			if err := refuseLegacyContextSoT("spl push"); err != nil {
+				return err
+			}
 			ctx := command.Context()
 			repo, err := repoProvider()
 			if err != nil {

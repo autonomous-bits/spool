@@ -8,6 +8,22 @@ generated from commits since the preceding `v*` tag. Commits prefixed with `docs
 
 ## [Unreleased]
 
+### Added
+
+- Documented `.spool/context.toml` bind format and the N-code-repos → one
+  context git remote happy path (`docs/context-bind.md`).
+- `spl context init --remote` seeds `CodeRepository` nodes from explicit binds
+  (repeat per code repo; sibling directories are not scanned).
+
+### Changed
+
+- Bind resolution looks only for `.spool/context.toml` in the code repo (stopping
+  at a nested git work tree). It does not infer remotes from directory names,
+  monorepo layout, `go.work`, leftover `.spl` state, git `origin`, or Rack config.
+- MCP Rack remote / clone / workspace tools and, when a bind is present, CLI
+  `init` / `workspace` / `remote` / `push` / `pull` / `clone` fail closed with
+  guidance to bind + stock git. `.spl` and Rack are not the durable context SoT.
+
 ## [1.10.0] - 2026-09-12
 
 ### Added

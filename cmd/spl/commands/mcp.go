@@ -15,8 +15,8 @@ func NewMCPCommand(stateDirProvider func() (string, error)) *cobra.Command {
 	command := &cobra.Command{
 		Use:          "mcp",
 		Short:        "Start an MCP (Model Context Protocol) server over standard I/O",
-		Long:         "Start an official MCP server over stdin/stdout, allowing AI agents to interact with the Spool repository via structured, typed tools.",
-		Example:      "  spl mcp\n  spl mcp --state-dir /path/to/.spl",
+		Long:         "Start an official MCP server over stdin/stdout. Graph writes require an explicit .spool/context.toml bind to a solution context git remote; `.spl` and Rack remotes are not the durable context source of truth.",
+		Example:      "  spl mcp\n  spl context init --remote https://github.com/org/solution-context.git",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(command *cobra.Command, _ []string) error {
