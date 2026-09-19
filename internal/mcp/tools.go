@@ -183,7 +183,7 @@ var legacyContextSoTTools = map[string]bool{
 	"spl_workspace_attach": true,
 }
 
-// RegisterAllTools registers all 42 Spool tools onto the given official MCP server.
+// RegisterAllTools registers all 43 Spool tools onto the given official MCP server.
 func RegisterAllTools(s *mcp.Server, rt *runtime) {
 	if rt == nil {
 		rt = newRuntime(ServerOptions{})
@@ -202,6 +202,7 @@ func RegisterAllTools(s *mcp.Server, rt *runtime) {
 		toolHistory(stateDirProvider),
 		toolBranchesContaining(stateDirProvider),
 		toolGraph(rt),
+		toolContextExport(rt),
 		toolBranchList(stateDirProvider),
 		toolBranchCreate(stateDirProvider),
 		toolBranchDelete(stateDirProvider),

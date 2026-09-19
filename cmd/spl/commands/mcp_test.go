@@ -141,8 +141,8 @@ func TestMCPCommand_FullWorkflow(t *testing.T) {
 		t.Fatalf("resp2 missing tools: %#v", resp2)
 	}
 	toolsList := toolsMap["tools"].([]any)
-	if len(toolsList) != 42 {
-		t.Fatalf("expected 42 tools, got %d", len(toolsList))
+	if len(toolsList) != 43 {
+		t.Fatalf("expected 43 tools, got %d", len(toolsList))
 	}
 
 	// 4. status on main (initially empty; unbound workspaces still read .spl)

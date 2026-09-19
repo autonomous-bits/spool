@@ -194,6 +194,13 @@ func encodePrettyJSON(v any) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+func writeSchemaFile(root string, data []byte) error {
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(root, schemaFileName), data, 0o644)
+}
+
 func writeJSONFile(root, rel string, v any) error {
 	abs := filepath.Join(root, filepath.FromSlash(rel))
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {

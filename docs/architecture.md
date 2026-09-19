@@ -45,7 +45,7 @@ flowchart LR
 | --- | --- |
 | `cmd/spl` | Cobra command definitions, flag and argument validation, bind-aware command gating, JSON output, and error logging. |
 | `internal/ctxgit` | Explicit `.spool/context.toml` bind resolution, stock-git context checkout, human-diffable layout, short-lived branch + PR writes, and local projection rebuild. Git is the durable solution-context SoT. |
-| `internal/mcp` | Native Model Context Protocol server exposing 42 typed tools over stdio using `github.com/modelcontextprotocol/go-sdk`, with serialized repository locking, in-memory mutation staging, and error envelopes. |
+| `internal/mcp` | Native Model Context Protocol server exposing 43 typed tools over stdio using `github.com/modelcontextprotocol/go-sdk`, with serialized repository locking, in-memory mutation staging, and error envelopes. |
 | `internal/resolve` | Context-aware, policy-constrained adapter for read-only graph queries. It applies query budgets, pins a branch snapshot, and exposes public retrieval results with provenance and completion metadata. |
 | `internal/contextual` | Go use cases that combine branch-head lexical or typed-filter evidence with bounded, deterministic expansion of a pinned graph snapshot. |
 | `internal/repository` | Authoritative **local** graph storage, commits, branches, staging, query implementations, durable state, locking, and recovery. Not the shared solution-context SoT. |
@@ -71,6 +71,7 @@ operation:
 | Schemas | `schema migrate`, `validate` |
 | Reads | `resolve`, `graph`, `search`, `filter`, `search-expand`, `context` |
 | Context bind | `context init` |
+| Context export | `context export` (`migrate-once`) |
 | History and comparison | `history`, `branches-containing`, `diff` |
 | Merge lifecycle | `merge preview/apply/conflicts/resolve/finalize/abort` |
 | Maintenance | `fsck`, `gc`, `prune` |
@@ -338,3 +339,8 @@ in `repository/` or in a focused service package with an explicit contract.
 `resolve` is deliberately a query/tool adapter rather than another storage
 layer, and `contextual` owns bounded evidence-and-expansion use cases rather
 than projection persistence.
+
+One-shot `.spl` → context git export is migrate-once (`spl context export` /
+`spl_context_export`): keep nodes/edges/schema/assets, drop packs/Rack
+remotes/reflogs/merge leases/projections, one batch → one commit → PR. See
+[context-git-migration.md](context-git-migration.md).

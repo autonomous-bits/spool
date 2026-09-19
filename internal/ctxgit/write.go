@@ -15,7 +15,17 @@ import (
 type StagedBatch struct {
 	Operations []repository.MutationOperation `json:"operations"`
 	Assets     []StagedAsset                  `json:"-"`
+	SchemaTOML []byte                         `json:"-"`
+	Export     *ExportSummary                 `json:"-"`
 	BaseCommit string                         `json:"baseCommit"`
+}
+
+// ExportSummary is honesty metadata attached to a migrate-once export commit.
+type ExportSummary struct {
+	Kept    []string `json:"kept"`
+	Skipped []string `json:"skipped"`
+	Lossy   bool     `json:"lossy"`
+	Note    string   `json:"note"`
 }
 
 // StageResult summarizes a validated, not-yet-committed batch.
@@ -147,6 +157,9 @@ func (s *Session) Commit(ctx context.Context, author, message string) (WriteResu
 	if err != nil {
 		return WriteResult{}, err
 	}
+	if len(s.staged.SchemaTOML) > 0 {
+		base.SchemaTOML = append([]byte(nil), s.staged.SchemaTOML...)
+	}
 	s.graph = base
 	if err := validateBatch(base, s.staged.Operations); err != nil {
 		return WriteResult{}, err
@@ -177,16 +190,32 @@ func (s *Session) Commit(ctx context.Context, author, message string) (WriteResu
 	if err != nil {
 		return WriteResult{}, err
 	}
+	if len(s.staged.SchemaTOML) > 0 {
+		if err := writeSchemaFile(s.CheckoutDir, s.staged.SchemaTOML); err != nil {
+			return WriteResult{}, err
+		}
+		after.SchemaTOML = append([]byte(nil), s.staged.SchemaTOML...)
+		written = append(written, schemaFileName)
+	}
 	for _, rel := range written {
 		if shouldWarnLargeText(rel, fileSize(s.CheckoutDir, rel)) {
 			warnings = append(warnings, fmt.Sprintf("%s exceeds ~1 MiB and stays in plain git", rel))
 		}
+	}
+	if err := rejectForbiddenPaths(written); err != nil {
+		return WriteResult{}, err
+	}
+	if err := rejectForbiddenPaths(deleted); err != nil {
+		return WriteResult{}, err
 	}
 
 	if _, err := s.git.Run(ctx, s.CheckoutDir, "add", "-A", "schema.toml", "nodes", "edges", "assets", "README.md", ".gitignore", ".gitattributes"); err != nil {
 		if _, addErr := s.git.Run(ctx, s.CheckoutDir, "add", "-A"); addErr != nil {
 			return WriteResult{}, addErr
 		}
+	}
+	if err := s.assertCachedPathsAllowed(ctx); err != nil {
+		return WriteResult{}, err
 	}
 	commitArgs := []string{"-c", "commit.gpgsign=false"}
 	if name, email := parseAuthor(author); name != "" {
@@ -209,7 +238,7 @@ func (s *Session) Commit(ctx context.Context, author, message string) (WriteResu
 		Head:   branch,
 		Base:   s.Bind.ProtectedBranch,
 		Title:  message,
-		Body:   prBody(s.Bind, overlaps, written, deleted, warnings),
+		Body:   prBody(s.Bind, overlaps, written, deleted, warnings, s.staged.Export),
 	})
 	if err != nil {
 		return WriteResult{}, err
@@ -261,10 +290,45 @@ func parseAuthor(author string) (name, email string) {
 	return author, "spool-mcp@localhost"
 }
 
-func prBody(bind Bind, overlaps []Overlap, written, deleted, warnings []string) string {
+func (s *Session) assertCachedPathsAllowed(ctx context.Context) error {
+	listed, err := s.git.Run(ctx, s.CheckoutDir, "diff", "--cached", "--name-only")
+	if err != nil {
+		return err
+	}
+	var paths []string
+	for _, line := range strings.Split(listed, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			paths = append(paths, line)
+		}
+	}
+	return rejectForbiddenPaths(paths)
+}
+
+func prBody(bind Bind, overlaps []Overlap, written, deleted, warnings []string, export *ExportSummary) string {
 	var b strings.Builder
-	b.WriteString("Spool MCP context write (one mutation batch → one git commit).\n\n")
-	fmt.Fprintf(&b, "- Solution: `%s`\n- Protected branch: `%s`\n\n", bind.SolutionID, bind.ProtectedBranch)
+	if export != nil {
+		b.WriteString("One-shot `.spl` → context git export (`export` / `migrate-once`). Not sync.\n\n")
+		b.WriteString("Lossy is OK. Re-run is overwrite-at-own-risk. No dual-SoT window. Rack remotes are not configured as a side effect.\n\n")
+		fmt.Fprintf(&b, "- Solution: `%s`\n- Protected branch: `%s`\n\n", bind.SolutionID, bind.ProtectedBranch)
+		if len(export.Kept) > 0 {
+			b.WriteString("## Kept\n\n")
+			for _, item := range export.Kept {
+				fmt.Fprintf(&b, "- %s\n", item)
+			}
+			b.WriteString("\n")
+		}
+		if len(export.Skipped) > 0 {
+			b.WriteString("## Skipped\n\n")
+			for _, item := range export.Skipped {
+				fmt.Fprintf(&b, "- %s\n", item)
+			}
+			b.WriteString("\n")
+		}
+	} else {
+		b.WriteString("Spool MCP context write (one mutation batch → one git commit).\n\n")
+		fmt.Fprintf(&b, "- Solution: `%s`\n- Protected branch: `%s`\n\n", bind.SolutionID, bind.ProtectedBranch)
+	}
 	if len(overlaps) > 0 {
 		b.WriteString("## Overlaps (human review required — no silent overwrite)\n\n")
 		for _, overlap := range overlaps {

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/autonomous-bits/spool/internal/ctxgit"
+	"github.com/autonomous-bits/spool/internal/repository"
 	officialmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -38,6 +39,91 @@ func TestMCPWriteRequiresBind(t *testing.T) {
 	}
 	if !strings.Contains(toolText(res), "not bound") {
 		t.Fatalf("error = %s, want unbound message", toolText(res))
+	}
+}
+
+func TestMCPContextExportRequiresBind(t *testing.T) {
+	ctx := context.Background()
+	server := NewSpoolServerWithOptions(ServerOptions{
+		StateDir:     func() (string, error) { return t.TempDir(), nil },
+		WorkspaceDir: func() (string, error) { return t.TempDir(), nil },
+	})
+	session := connectMCP(t, ctx, server)
+	defer func() { _ = session.Close() }()
+
+	res, err := session.CallTool(ctx, &officialmcp.CallToolParams{
+		Name:      "spl_context_export",
+		Arguments: map[string]any{"branch": "main"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("unbound spl_context_export must fail closed")
+	}
+	if !strings.Contains(toolText(res), "not bound") {
+		t.Fatalf("error = %s, want unbound message", toolText(res))
+	}
+}
+
+func TestMCPContextExportOpensPR(t *testing.T) {
+	ctx := context.Background()
+	codeRoot, _, cache, recorder := setupMCPBound(t)
+	stateDir := filepath.Join(codeRoot, ".spl")
+	repo, err := repository.InitializeRepository(stateDir)
+	if err != nil {
+		t.Fatalf("InitializeRepository: %v", err)
+	}
+	if _, err := repo.StageMutationBatch(repository.StageMutationRequest{
+		Branch: "main",
+		Operations: []repository.MutationOperation{
+			{Action: "add", Entity: "node", ID: "idea-export", Title: "Exported idea", Labels: []string{"Requirement"}},
+		},
+	}); err != nil {
+		_ = repo.Close()
+		t.Fatalf("StageMutationBatch: %v", err)
+	}
+	if _, err := repo.CommitStagedMutations("main"); err != nil {
+		_ = repo.Close()
+		t.Fatalf("commit: %v", err)
+	}
+	if err := repo.Close(); err != nil {
+		t.Fatalf("close seed repo: %v", err)
+	}
+
+	server := NewSpoolServerWithOptions(ServerOptions{
+		StateDir:     func() (string, error) { return stateDir, nil },
+		WorkspaceDir: func() (string, error) { return codeRoot, nil },
+		CacheDir:     cache,
+		PROpener:     recorder,
+		Git:          isolatedMCPGit(),
+	})
+	session := connectMCP(t, ctx, server)
+	defer func() { _ = session.Close() }()
+
+	res, err := session.CallTool(ctx, &officialmcp.CallToolParams{
+		Name: "spl_context_export",
+		Arguments: map[string]any{
+			"branch":  "main",
+			"author":  "agent",
+			"message": "One-shot export",
+		},
+	})
+	if err != nil || res.IsError {
+		t.Fatalf("spl_context_export: err=%v res=%s", err, toolText(res))
+	}
+	text := toolText(res)
+	if !strings.Contains(text, `"entrypoint":"export/migrate-once"`) {
+		t.Fatalf("missing export entrypoint: %s", text)
+	}
+	if !strings.Contains(text, `"branch":"spool/mcp/`) || len(recorder.Requests) != 1 {
+		t.Fatalf("missing PR path: %s requests=%#v", text, recorder.Requests)
+	}
+	if !strings.Contains(text, `"kept"`) || !strings.Contains(text, `"skipped"`) {
+		t.Fatalf("missing kept/skipped: %s", text)
+	}
+	if strings.Contains(strings.ToLower(text), "sync from") {
+		t.Fatalf("must not describe Rack sync: %s", text)
 	}
 }
 

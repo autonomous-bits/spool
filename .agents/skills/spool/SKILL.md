@@ -86,6 +86,7 @@ Add an MCP server entry pointing to `spl mcp` in your global or workspace config
 | **Staging** | `spl_add` | `spl add --branch <b\> --batch <f\>` | **MCP Advantage**: accepts `mutations` JSON array directly in-memory; no disk file needed. Bound workspaces commit via context git PR. |
 | **Commits** | `spl_commit` | `spl commit --branch <b\> --author <a\> --message <m\>` | Bound: one batch = one git commit on a short-lived branch + PR. Unbound writes fail closed. |
 | **Bind** | — | `spl context init --remote <url\>` | Writes `.spool/context.toml`, layout/schema, and a `CodeRepository` node from this bind. |
+| **Export** | `spl_context_export` | `spl context export` / `spl context migrate-once` | One-shot `.spl` → context git (lossy, not sync). Requires bind. One batch → one commit → PR. |
 | **Branches** | `spl_branch_list` | `spl branch list` | Lists all local branches and marks active HEAD. |
 | **Branches** | `spl_branch_create` | `spl branch create <n\> --from-branch <b\>` | Creates a branch from existing branch or commit. |
 | **Branches** | `spl_branch_delete` | `spl branch delete <n\>` | Deletes an inactive branch. |

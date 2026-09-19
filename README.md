@@ -81,7 +81,9 @@ commit on a short-lived branch and open a PR to `protected_branch`. Sync is
 stock `git clone` / GitHub PR / history.
 
 See [docs/context-bind.md](docs/context-bind.md) for the bind format and
-multi-repo story.
+multi-repo story. Existing `.spl` graphs move with
+[`spl context export`](docs/context-git-migration.md) (alias `migrate-once`) —
+one-shot, lossy, overwrite-at-own-risk; not sync.
 
 ### Local graph repository (not the shared context SoT)
 
@@ -404,7 +406,7 @@ spl workspace migrate --from 1 --to 2
 
 ## MCP server (`spl mcp`)
 
-Spool includes a native Model Context Protocol (MCP) server built on the official Go SDK ([`github.com/modelcontextprotocol/go-sdk`](https://github.com/modelcontextprotocol/go-sdk)). It exposes 100% of Spool commands as **42 structured, typed MCP tools (`spl_*`)** over standard I/O for AI agent pair-programming and tool integration.
+Spool includes a native Model Context Protocol (MCP) server built on the official Go SDK ([`github.com/modelcontextprotocol/go-sdk`](https://github.com/modelcontextprotocol/go-sdk)). It exposes 100% of Spool commands as **43 structured, typed MCP tools (`spl_*`)** over standard I/O for AI agent pair-programming and tool integration.
 
 ### Default vs Fallback Behavior for AI Agents
 
@@ -475,6 +477,7 @@ The command and flag inventory is:
 | `filter` | `--branch` (required), `--commit`, repeatable `--label`/property predicates, `--continuation`, `--max-rows`, `--max-response-bytes`, `--timeout` |
 | `search-expand`, `context` | `--branch` (required), `--commit`, query or typed filters, `--direction`, repeatable `--edge-type`, `--seed-limit`, `--max-depth`, `--max-visited`, `--max-rows`, `--max-response-bytes`, `--timeout` |
 | `context init` | `--remote` (required), `--solution-id`, `--protected-branch`, `--repository-id`, `--author` |
+| `context export` (`migrate-once`) | `--branch`, `--author`, `--message` |
 | `history` | `--branch`, `--entity-id` (required), `--commit`, `--all-parents`, `--continuation`, `--max-rows`, `--max-response-bytes`, `--timeout` |
 | `branches-containing` | exactly one selector (`--entity-id`, `--snapshot-id`, `--natural-key`), `--continuation`, `--max-rows`, `--max-response-bytes`, `--timeout` |
 | `diff` | `--base-branch`, `--target-branch` (required), optional commits, repeatable `--node-id`/`--edge-id`, `--node-title-contains`, `--one-hop`, `--continuation`, `--max-rows`, `--max-response-bytes`, `--timeout` |

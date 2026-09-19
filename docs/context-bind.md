@@ -54,7 +54,9 @@ This command:
 
 Repeat in every other code repo with the same `--remote` and `--solution-id`. Each init seeds that repo’s `CodeRepository` without discovering the others.
 
-## Sync
+Existing `.spl` graphs move with a **one-shot** export (`spl context export` / `spl context migrate-once` / MCP `spl_context_export`). That path is lossy migrate-once, not sync. See [context-git-migration.md](context-git-migration.md).
+
+## Context history (stock git)
 
 Context history is ordinary git/GitHub:
 
