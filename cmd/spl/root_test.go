@@ -71,6 +71,7 @@ func TestKeepCommandsAreRegistered(t *testing.T) {
 		{"asset", "add"},
 		{"asset", "read"},
 		{"merge", "preview"},
+		{"mutate"},
 		{"prune"},
 		{"mcp"},
 		{"version"},
@@ -99,6 +100,7 @@ func TestCommandHelpIncludesExamples(t *testing.T) {
 		{[]string{"search", "--help"}, "spl search --query incident"},
 		{[]string{"search-expand", "--help"}, "spl search-expand --query incident"},
 		{[]string{"prune", "--help"}, "spl prune"},
+		{[]string{"mutate", "--help"}, "spl mutate --batch"},
 	}
 	for _, testCase := range testCases {
 		t.Run(strings.Join(testCase.path, " "), func(t *testing.T) {

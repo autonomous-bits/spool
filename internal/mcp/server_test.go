@@ -64,8 +64,14 @@ func TestSpoolMCPServerKeepToolsOnly(t *testing.T) {
 	if !containsTool(toolsList.Tools, "spl_query_context") {
 		t.Fatal("KEEP tools must include spl_query_context")
 	}
+	if !containsTool(toolsList.Tools, "spl_mutate") {
+		t.Fatal("KEEP tools must include spl_mutate")
+	}
 	if containsTool(toolsList.Tools, "spl_context") {
 		t.Fatal("old spl_context query tool must not be registered")
+	}
+	if containsTool(toolsList.Tools, "spl_add") || containsTool(toolsList.Tools, "spl_commit") {
+		t.Fatal("removed add/commit MCP twins must not be registered")
 	}
 
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "spl_version"})

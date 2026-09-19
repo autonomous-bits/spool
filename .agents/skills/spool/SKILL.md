@@ -81,6 +81,7 @@ Spool includes a native MCP server via `spl mcp`.
 | **Reads** | `spl_query_context` | `spl query-context --query <q>` | Replaces former `spl_context` / `spl context` query. |
 | **Reads** | `spl_search_expand` | `spl search-expand --query <q>` | Seed retrieval + graph traversal. |
 | **Graph** | `spl_graph` | `spl graph` | Full bound snapshot. |
+| **Mutate** | `spl_mutate` | `spl mutate --batch <f>` | One node/edge ops batch → short-lived branch + PR. Bound-only. |
 | **Merge** | `spl_merge_preview` | `spl merge preview --source <s> --target <t>` | File-graph three-way preview. |
 | **Merge** | `spl_merge_apply` | `spl merge apply ...` | Clean apply → short-lived branch + PR. |
 | **Merge** | `spl_merge_conflicts` | `spl merge conflicts --transaction <tx>` | Cache-backed conflict state. |
@@ -110,6 +111,13 @@ Context-management KEEP tools require `.spool/context.toml`. If unbound, fail cl
 
 Writes never push the protected branch. They open `spool/mcp/<stamp>-<nonce>` and a host PR. Identical schema writes are a no-op (no empty PR).
 
+Routine node/edge writes:
+
+- **MCP**: `spl_mutate(operations: [...], author, message)`.
+- **CLI**: `spl mutate --batch mutations.json --author ... --message ...`.
+
+Do not call removed `spl_add` / `spl_commit`. Use `schema migrate` only when changing `schema.toml`.
+
 Before pruning ephemeral planning data:
 
 - **MCP**: `spl_prune(dry_run: true)`, then `spl_prune(author, message)`.
@@ -136,9 +144,9 @@ Before pruning ephemeral planning data:
 | Commands | Reference |
 | :--- | :--- |
 | `context init`, `context export` / `migrate-once` | [Working changes](references/working-changes.md) |
-| Authoring mutation batches for `schema migrate` | [Batch authoring](references/batch-authoring.md) |
+| Authoring mutation batches for `mutate` | [Batch authoring](references/batch-authoring.md) |
 | History and diff (stock git); file-graph `merge` | [Branches and history](references/branches-and-history.md) |
-| `schema migrate`, `validate` | [Schemas](references/schemas.md) |
+| `mutate`, `schema migrate`, `validate` | [Schemas](references/schemas.md) |
 | `resolve`, `search`, `filter`, `search-expand`, `query-context` | [Reading graphs](references/reading-graphs.md) |
 | `merge` cycle | [Merges](references/merges.md) |
 | `prune` | [Maintenance](references/maintenance.md) |

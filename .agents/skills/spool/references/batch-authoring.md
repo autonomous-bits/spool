@@ -1,8 +1,9 @@
 # Batch authoring
 
-A mutation batch is a JSON array. Pass it to `spl schema migrate --batch` (or MCP
-`spl_schema_migrate` `operations`) so the candidate graph is validated against the target schema
-and written through a short-lived branch + PR. There is no public `spl add` / `spl commit`.
+A mutation batch is a JSON array. Pass it to `spl mutate --batch` (or MCP `spl_mutate`
+`operations`) so the bound context graph is written through a short-lived branch + PR.
+There is no public `spl add` / `spl commit`. Use `schema migrate` only when changing
+`schema.toml`.
 
 ```json
 [
@@ -20,7 +21,17 @@ and written through a short-lived branch + PR. There is no public `spl add` / `s
 ```
 
 ```sh
-spl schema migrate --schema schema.toml --batch mutations.json --message "Record rate limit"
+spl mutate --batch mutations.json --message "Record rate limit"
+```
+
+MCP:
+
+```json
+{
+  "operations": [ ... ],
+  "author": "agent <agent@example.com>",
+  "message": "Record rate limit"
+}
 ```
 
 Each node represents one atomic idea: one fact, decision, requirement, question, or task. Its title
@@ -57,5 +68,5 @@ Use stable, descriptive IDs. Add edges when a relationship matters:
 ```
 
 Properties are typed values: `null`, `bool`, `integer`, `float`, `string`, `list`, or `map`.
-`list` and `map` values recursively contain typed values. Use `spl schema migrate --help` for the
+`list` and `map` values recursively contain typed values. Use `spl mutate --help` for the
 current operation contract before authoring unfamiliar fields.

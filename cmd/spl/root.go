@@ -32,6 +32,7 @@ func newRootCommandWithOptions(stdout io.Writer, opts ctxgit.Options) *cobra.Com
 	root.AddCommand(commands.NewValidateCommand(opts))
 	root.AddCommand(commands.NewAssetCommand(opts))
 	root.AddCommand(commands.NewMergeCommand(opts))
+	root.AddCommand(commands.NewMutateCommand(opts))
 	root.AddCommand(commands.NewPruneCommand(opts))
 	return root
 }
