@@ -44,6 +44,7 @@ type WriteResult struct {
 	PR              PullRequest `json:"pullRequest"`
 	Overlaps        []Overlap   `json:"overlaps,omitempty"`
 	Written         []string    `json:"written,omitempty"`
+	Deleted         []string    `json:"deleted,omitempty"`
 	Warnings        []string    `json:"warnings,omitempty"`
 }
 
@@ -174,7 +175,7 @@ func (s *Session) Commit(ctx context.Context, author, message string) (WriteResu
 	return s.commitGraphDiff(ctx, base, after, overlaps, author, message, s.Bind.ProtectedBranch)
 }
 
-func (s *Session) finishWrite(ctx context.Context, after *Graph, branch, sha string, pr PullRequest, overlaps []Overlap, written, warnings []string) (WriteResult, error) {
+func (s *Session) finishWrite(ctx context.Context, after *Graph, branch, sha string, pr PullRequest, overlaps []Overlap, written, deleted, warnings []string) (WriteResult, error) {
 	s.graph = after
 	if rebuildErr := s.rebuildProjection(ctx, sha); rebuildErr != nil {
 		warnings = append(warnings, "projection rebuild after write: "+rebuildErr.Error())
@@ -187,6 +188,7 @@ func (s *Session) finishWrite(ctx context.Context, after *Graph, branch, sha str
 		PR:              pr,
 		Overlaps:        overlaps,
 		Written:         written,
+		Deleted:         deleted,
 		Warnings:        warnings,
 	}, nil
 }
@@ -279,7 +281,7 @@ func (s *Session) commitGraphDiff(ctx context.Context, base, after *Graph, overl
 				sha = resolved
 			}
 		}
-		return s.finishWrite(ctx, after, s.Bind.ProtectedBranch, sha, PullRequest{}, overlaps, written, warnings)
+		return s.finishWrite(ctx, after, s.Bind.ProtectedBranch, sha, PullRequest{}, overlaps, written, deleted, warnings)
 	}
 	commitArgs := []string{"-c", "commit.gpgsign=false"}
 	if name, email := parseAuthor(author); name != "" {
@@ -312,7 +314,7 @@ func (s *Session) commitGraphDiff(ctx context.Context, base, after *Graph, overl
 		return WriteResult{}, err
 	}
 	s.staged = nil
-	return s.finishWrite(ctx, after, branch, sha, pr, overlaps, written, warnings)
+	return s.finishWrite(ctx, after, branch, sha, pr, overlaps, written, deleted, warnings)
 }
 
 func shortLivedBranch() (string, error) {

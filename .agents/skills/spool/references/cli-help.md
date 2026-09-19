@@ -67,18 +67,20 @@ The `context` namespace is **not** the query verb. Use `query-context`.
 ## Mutate
 
 ```sh
-spl mutate --batch mutations.json --message "Record requirement"
+spl mutate --operations mutations.json --message "Record requirement"
 ```
 
 ```text
 mutate
-  --batch <path>   JSON mutation-operation array (required)
+  --operations <path|->  JSON mutation-operation array (required; - reads stdin)
   --author <text>
   --message <text>
 ```
 
 `mutate` is bound-only and refuses unbound workspaces. One ops batch becomes one git commit on a
-short-lived branch plus pull request. Use `schema migrate` when changing `schema.toml`.
+short-lived branch plus pull request. Pass `-` to `--operations` to read stdin. Identical or empty
+effective diffs do not open a PR. Use `schema migrate` when changing `schema.toml`. There are no
+aliases to `add` / `commit` / `status` / `stage` / `write`.
 
 ## Reading graphs
 

@@ -118,7 +118,7 @@ Write the batch through `mutate` (short-lived branch + PR):
 - **MCP (Default)**: Call `spl_mutate` with the `operations` array.
 - **CLI (Fallback)**:
   ```sh
-  spl mutate --batch product-batch.json \
+  spl mutate --operations product-batch.json \
     --author "Product Manager <pm@example.com>" --message "Record deferred billing address requirement"
   ```
 

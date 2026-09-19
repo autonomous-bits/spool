@@ -25,14 +25,15 @@ There is no public `spl add` / `spl commit`. Routine node and edge writes use `s
 pull request:
 
 ```sh
-spl mutate --batch mutations.json --message "Record requirement"
+spl mutate --operations mutations.json --message "Record requirement"
 spl schema migrate --schema schema.toml --batch mutations.json
 spl asset add --file docs/architecture.md --title "Architecture notes"
 spl prune --author alice --message "Prune transient plan"
 ```
 
 `mutate` is bound-only and refuses unbound workspaces. Use `schema migrate` when changing
-`schema.toml`. Identical schema content is a no-op (no empty PR).
+`schema.toml`. Identical mutate or schema content is a no-op (no empty PR). There are no aliases
+to `add` / `commit` / `status` / `stage` / `write`.
 
 ## History and diff
 

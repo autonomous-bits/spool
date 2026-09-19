@@ -112,7 +112,7 @@ Write the batch through `mutate` (short-lived branch + PR):
 - **MCP (Default)**: Call `spl_mutate` with the `operations` array.
 - **CLI (Fallback)**:
   ```sh
-  spl mutate --batch standards-batch.json \
+  spl mutate --operations standards-batch.json \
     --author "Staff Engineer <standards@example.com>" --message "Record RFC 7807 error standard and anti-pattern"
   ```
 

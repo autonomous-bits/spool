@@ -82,11 +82,11 @@ Use stock git on the context remote for history and diff. Spool does not wrap `g
 Write routine node and edge mutations (one JSON batch → short-lived branch + PR):
 
 ```sh
-spl mutate --batch mutations.json --message "Record requirement"
+spl mutate --operations mutations.json --message "Record requirement"
 ```
 
-`mutate` requires `.spool/context.toml` and refuses unbound workspaces. Use `schema migrate` when
-changing `schema.toml`.
+`mutate` requires `.spool/context.toml` and refuses unbound workspaces. Identical or empty
+effective diffs do not open a PR. Use `schema migrate` when changing `schema.toml`.
 
 ## Context bind, export, and migrate-once
 
@@ -107,7 +107,7 @@ The `context` namespace is **only** init/export/migrate-once. Graph queries use 
 Write routine node and edge mutations as one JSON batch. Bound-only; opens a short-lived branch + PR:
 
 ```sh
-spl mutate --batch mutations.json --author alice --message "Record requirement"
+spl mutate --operations mutations.json --author alice --message "Record requirement"
 ```
 
 Author a schema in TOML and apply conforming graph mutations:

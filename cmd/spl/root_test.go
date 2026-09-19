@@ -100,7 +100,7 @@ func TestCommandHelpIncludesExamples(t *testing.T) {
 		{[]string{"search", "--help"}, "spl search --query incident"},
 		{[]string{"search-expand", "--help"}, "spl search-expand --query incident"},
 		{[]string{"prune", "--help"}, "spl prune"},
-		{[]string{"mutate", "--help"}, "spl mutate --batch"},
+		{[]string{"mutate", "--help"}, "spl mutate --operations"},
 	}
 	for _, testCase := range testCases {
 		t.Run(strings.Join(testCase.path, " "), func(t *testing.T) {
@@ -146,6 +146,25 @@ func TestContextNamespaceIsInitExportOnly(t *testing.T) {
 		case "init", "export", "migrate-once", "help":
 		default:
 			t.Errorf("unexpected context subcommand %q", child.Name())
+		}
+	}
+}
+
+func TestMutateHasNoVCSAliases(t *testing.T) {
+	command := newRootCommand(&bytes.Buffer{})
+	found, _, err := command.Find([]string{"mutate"})
+	if err != nil {
+		t.Fatalf("find mutate: %v", err)
+	}
+	if found.Name() != "mutate" {
+		t.Fatalf("mutate resolved to %q", found.Name())
+	}
+	if len(found.Aliases) != 0 {
+		t.Fatalf("mutate aliases = %v, want none", found.Aliases)
+	}
+	for _, name := range []string{"add", "commit", "status", "stage", "write"} {
+		if _, _, findErr := command.Find([]string{name}); findErr == nil {
+			t.Errorf("%q must not be registered as a command or mutate alias", name)
 		}
 	}
 }

@@ -21,8 +21,10 @@ type MutateResult struct {
 }
 
 // Mutate applies one mutation-operation batch to the bound context graph and
-// opens a short-lived branch + PR via Stage then Commit. Bound-only: FindBind
-// fail-closed. Empty batches are rejected. This is not schema migrate.
+// opens a short-lived branch + PR via Stage then Commit (one-shot; no
+// user-facing stage/commit). Bound-only: FindBind fail-closed. Empty batches
+// are rejected. Identical / empty effective diffs do not open a PR. Projection
+// is rebuilt after a successful write. This is not schema migrate.
 func (s *Session) Mutate(ctx context.Context, request MutateRequest) (MutateResult, error) {
 	if s == nil || s.CodeRoot == "" {
 		return MutateResult{}, UnboundError()

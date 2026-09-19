@@ -81,7 +81,7 @@ Spool includes a native MCP server via `spl mcp`.
 | **Reads** | `spl_query_context` | `spl query-context --query <q>` | Replaces former `spl_context` / `spl context` query. |
 | **Reads** | `spl_search_expand` | `spl search-expand --query <q>` | Seed retrieval + graph traversal. |
 | **Graph** | `spl_graph` | `spl graph` | Full bound snapshot. |
-| **Mutate** | `spl_mutate` | `spl mutate --batch <f>` | One node/edge ops batch → short-lived branch + PR. Bound-only. |
+| **Mutate** | `spl_mutate` | `spl mutate --operations <f>` | One node/edge ops batch → short-lived branch + PR. Bound-only. |
 | **Merge** | `spl_merge_preview` | `spl merge preview --source <s> --target <t>` | File-graph three-way preview. |
 | **Merge** | `spl_merge_apply` | `spl merge apply ...` | Clean apply → short-lived branch + PR. |
 | **Merge** | `spl_merge_conflicts` | `spl merge conflicts --transaction <tx>` | Cache-backed conflict state. |
@@ -109,14 +109,14 @@ History and diff: use **stock git** on the context remote (`git log`, `git diff`
 
 Context-management KEEP tools require `.spool/context.toml`. If unbound, fail closed and tell the user to run `spl context init --remote`.
 
-Writes never push the protected branch. They open `spool/mcp/<stamp>-<nonce>` and a host PR. Identical schema writes are a no-op (no empty PR).
+Writes never push the protected branch. They open `spool/mcp/<stamp>-<nonce>` and a host PR. Identical schema or mutate diffs are a no-op (no empty PR).
 
-Routine node/edge writes:
+Routine node/edge writes (same `MutationOperation` shape as schema migrate):
 
 - **MCP**: `spl_mutate(operations: [...], author, message)`.
-- **CLI**: `spl mutate --batch mutations.json --author ... --message ...`.
+- **CLI**: `spl mutate --operations mutations.json --author ... --message ...` (`--operations -` reads stdin).
 
-Do not call removed `spl_add` / `spl_commit`. Use `schema migrate` only when changing `schema.toml`.
+Do not call removed `spl_add` / `spl_commit` / `spl_status`. There are no aliases to `add` / `commit` / `status` / `stage` / `write`. Use `schema migrate` only when changing `schema.toml`.
 
 Before pruning ephemeral planning data:
 

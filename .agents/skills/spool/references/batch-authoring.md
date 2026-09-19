@@ -1,6 +1,6 @@
 # Batch authoring
 
-A mutation batch is a JSON array. Pass it to `spl mutate --batch` (or MCP `spl_mutate`
+A mutation batch is a JSON array. Pass it to `spl mutate --operations` (or MCP `spl_mutate`
 `operations`) so the bound context graph is written through a short-lived branch + PR.
 There is no public `spl add` / `spl commit`. Use `schema migrate` only when changing
 `schema.toml`.
@@ -21,7 +21,8 @@ There is no public `spl add` / `spl commit`. Use `schema migrate` only when chan
 ```
 
 ```sh
-spl mutate --batch mutations.json --message "Record rate limit"
+spl mutate --operations mutations.json --message "Record rate limit"
+cat mutations.json | spl mutate --operations - --message "Record rate limit"
 ```
 
 MCP:

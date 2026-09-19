@@ -119,6 +119,12 @@ func TestMCPBoundMutateOpensPR(t *testing.T) {
 	if !strings.Contains(text, `"operations":1`) {
 		t.Fatalf("mutate missing operations count: %s", text)
 	}
+	if !strings.Contains(text, `"written"`) {
+		t.Fatalf("mutate missing written summary: %s", text)
+	}
+	if !strings.Contains(text, `"pullRequest"`) {
+		t.Fatalf("mutate missing pullRequest: %s", text)
+	}
 }
 
 func setupMCPBound(t *testing.T) (codeRoot, remote, cache string, recorder *ctxgit.RecordingPROpener) {

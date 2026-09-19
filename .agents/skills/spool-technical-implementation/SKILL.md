@@ -189,7 +189,7 @@ Write the batch through `mutate` (short-lived branch + PR):
 - **MCP (Default)**: Call `spl_mutate` with the `operations` array.
 - **CLI (Fallback)**:
   ```sh
-  spl mutate --batch implementation-batch.json \
+  spl mutate --operations implementation-batch.json \
     --author "Engineer <eng@example.com>" --message "Record ephemeral technical spec for outbox relay worker"
   ```
 

@@ -127,7 +127,7 @@ Write the batch through `mutate` (short-lived branch + PR):
 - **MCP (Default)**: Call `spl_mutate` with the `operations` array.
 - **CLI (Fallback)**:
   ```sh
-  spl mutate --batch arch-batch.json \
+  spl mutate --operations arch-batch.json \
     --author "Architect <arch@example.com>" --message "Record transactional outbox architecture decision"
   ```
 
