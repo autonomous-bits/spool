@@ -18,7 +18,6 @@ type ServerOptions struct {
 }
 
 type runtime struct {
-	stateDir     func() (string, error)
 	workspaceDir func() (string, error)
 	cacheDir     string
 	prOpener     ctxgit.PROpener
@@ -29,14 +28,10 @@ type runtime struct {
 }
 
 func newRuntime(opts ServerOptions) *runtime {
-	if opts.StateDir == nil {
-		opts.StateDir = func() (string, error) { return "", os.ErrNotExist }
-	}
 	if opts.WorkspaceDir == nil {
 		opts.WorkspaceDir = os.Getwd
 	}
 	return &runtime{
-		stateDir:     opts.StateDir,
 		workspaceDir: opts.WorkspaceDir,
 		cacheDir:     opts.CacheDir,
 		prOpener:     opts.PROpener,
@@ -82,13 +77,4 @@ func (rt *runtime) requireSession(ctx context.Context) (*ctxgit.Session, error) 
 		return nil, ctxgit.UnboundError()
 	}
 	return session, nil
-}
-
-func (rt *runtime) boundSession() *ctxgit.Session {
-	rt.mu.Lock()
-	defer rt.mu.Unlock()
-	if rt.session != nil && rt.session.Bound() {
-		return rt.session
-	}
-	return nil
 }

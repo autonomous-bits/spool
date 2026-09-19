@@ -92,7 +92,7 @@ func toolSearchExpand(rt *runtime) Tool {
 		Name:        "spl_search_expand",
 		Description: "Select lexical or typed-filter seed evidence, then expand bounded graph context from the bound checkout.",
 		InputSchema: queryContextSchema(),
-		Handler:     queryContextHandler(rt, false),
+		Handler:     queryContextHandler(rt),
 	}
 }
 
@@ -129,7 +129,7 @@ func toolQueryContext(rt *runtime) Tool {
 		Name:        "spl_query_context",
 		Description: "Assemble evidence-focused bounded graph context from the bound checkout. Replaces the former spl_context query tool.",
 		InputSchema: queryContextSchema(),
-		Handler:     queryContextHandler(rt, true),
+		Handler:     queryContextHandler(rt),
 	}
 }
 
@@ -148,7 +148,7 @@ func queryContextSchema() map[string]any {
 	}
 }
 
-func queryContextHandler(rt *runtime, _ bool) ToolHandler {
+func queryContextHandler(rt *runtime) ToolHandler {
 	return func(ctx context.Context, args json.RawMessage) (any, error) {
 		var in struct {
 			Query      string                         `json:"query,omitempty"`
@@ -168,7 +168,7 @@ func queryContextHandler(rt *runtime, _ bool) ToolHandler {
 		if in.Query == "" && in.Label == "" && len(in.Labels) == 0 && len(in.Predicates) == 0 {
 			return nil, errors.New("either query, label, labels, or predicates must be specified")
 		}
-		dir := contextual.DirectionOut
+		var dir contextual.Direction
 		switch in.Direction {
 		case "", "out":
 			dir = contextual.DirectionOut
