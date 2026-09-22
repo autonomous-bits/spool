@@ -11,7 +11,7 @@ require (
 require (
 	github.com/danieljoos/wincred v1.2.3 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/fxamacker/cbor/v2 v2.9.3 // indirect
+	github.com/fxamacker/cbor/v2 v2.9.4 // indirect
 	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/gofrs/flock v0.13.1 // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect
