@@ -28,19 +28,19 @@ Remotes are never inferred from directory names or leftover `.spl` state.
 Mutations write a short-lived `spool/mcp/<stamp>-<nonce>` branch and open a pull request into the
 protected branch. They never push the protected branch except `spl context init` onboarding.
 
-Private `.spl` readers remain only for `spl context export` / `migrate-once`. They are not public
-VCS commands and do not reopen Rack or `.spl` as source of truth.
+Private `.spl` readers remain only for the one-shot `spl context export` / `migrate-once` escape hatch.
+They are not a second source of truth.
 
 ## Components
 
 | Component | Responsibility |
 | --- | --- |
 | `cmd/spl` | KEEP Cobra commands. The `context` namespace is init/export/migrate-once only. Graph queries use `query-context`. |
-| `internal/mcp` | KEEP MCP tools (20) over stdio. No Rack/workspace twins of removed commands. |
+| `internal/mcp` | KEEP MCP tools (20) over stdio. Only `KeepMCPTools` is registered. |
 | `internal/ctxgit` | Bind file, checkout, graph load/store, projection rebuild, short-lived branch + PR writes (including `mutate`), bound queries, file-graph merge, graph prune, leftover `.spl` export. |
 | `internal/resolve` | Query-budget and retrieval result shapes used by bound ctxgit reads. |
 | `internal/contextual` | Direction and evidence-expansion types used by `query-context` / `search-expand`. |
-| `internal/repository` | **Private library.** Historical CAS/Rack graph storage. No public CLI/MCP wrappers. Used internally by leftover `.spl` export. |
+| `internal/repository` | **Private library.** Used internally by leftover `.spl` export. No public CLI/MCP wrappers. |
 | `internal/workspace`, `internal/remote` | **Private libraries.** Not exposed as commands. |
 
 ## CLI and MCP KEEP surface
@@ -55,14 +55,11 @@ VCS commands and do not reopen Rack or `.spl` as source of truth.
 
 The former query verb `context` is **`query-context`** (MCP: `spl_query_context`). There is no alias.
 
-### Removed (deleted from CLI and MCP; no aliases)
+### Names that are not commands
 
-`init`, `workspace *`, `remote *`, `push`, `pull`, `clone`, old `migrate`, `fsck`, `gc`, pack prune,
-`cherry-pick`, `add`, `status`, `commit`, `branch`, `switch`, `history`, `diff`,
-`branches-containing`, and all Rack/workspace MCP twins (`spl_add`, `spl_commit`, `spl_init`,
-`spl_context`, `spl_push`, …).
-
-History and snapshot comparison are **stock git** (`git log`, `git diff`) on the context remote.
+Deleted names are `RemovedCLITopLevel` and `RemovedMCPTools` in [`internal/surface`](../internal/surface/surface.go).
+They are not registered and have no aliases. History, diff, and pull-request review are **stock git**
+and GitHub on the context remote.
 
 ## Data model (context git)
 
@@ -111,9 +108,9 @@ already exist.
 
 `merge preview` loads graphs at two git revisions (via `git archive`) and runs
 `graphcontract.ThreeWayMerge`. Clean apply commits the merged files through ctxgit. Conflicted
-state lives in the ctxgit cache directory, not `.spl/merge/`.
+state lives in the ctxgit cache directory.
 
 ## Extension points
 
 New public behavior belongs on `internal/ctxgit` and KEEP CLI/MCP registration. `internal/repository`
-stays a private library: do not re-expose Rack, CAS packs, or `.spl` as source of truth.
+stays a private library used only by the one-shot export escape hatch.

@@ -2,11 +2,11 @@
 
 Spool’s only supported path is **N code repositories bound to one solution context git remote**. Git is the **only** durable source of truth for shared context. Spool MCP/CLI validates mutations, writes human-diffable files, opens a short-lived branch and pull request, and rebuilds a **local** query projection.
 
-Unbound leftover `.spl` and Rack remotes are **unsupported** for solution context. They are deprecated / migration-only (`spl context export`), not a parallel happy path.
+A leftover `.spl` store is **unsupported** as a second source of truth. If one remains, export once, then stop.
 
 ## Bind file
 
-Each code repo that participates in a solution must contain an **explicit** bind file at `.spool/context.toml`. Spool never infers the context remote from directory names, monorepo layout, `go.work`, leftover `.spl` state, git `origin` URLs, or Rack config.
+Each code repo that participates in a solution must contain an **explicit** bind file at `.spool/context.toml`. Spool never infers the context remote from directory names, monorepo layout, `go.work`, leftover local state, or git `origin` URLs.
 
 ```toml
 solution_id = "my-solution"
@@ -52,33 +52,20 @@ This command:
 2. Ensures the context remote is reachable with **stock git** (stock git credentials only; never a Spool-specific token).
 3. Creates `schema.toml`, `nodes/`, `edges/`, `assets/`, and `README.md` when the remote is empty.
 4. Seeds a `CodeRepository` node from **this** bind. Sibling directories are not scanned.
-5. Leaves the workspace ready for MCP writes. **Every** agent write is a short-lived branch + PR to `protected_branch`. Do not push cleanly to the working or protected branch.
+5. Leaves the checkout ready for MCP writes. **Every** agent write is a short-lived branch + PR to `protected_branch`. Do not push cleanly to the working or protected branch.
 
 Repeat in every other code repo with the same `--remote` and `--solution-id`. Each init seeds that repo’s `CodeRepository` without discovering the others.
 
-Existing `.spl` graphs move with a **one-shot** export (`spl context export` / `spl context migrate-once` / MCP `spl_context_export`). That path is the documented escape hatch: lossy migrate-once, not sync, not dual-run. See [context-git-migration.md](context-git-migration.md).
+If you still have a leftover `.spl` store, run `context export` / `migrate-once` once into the bound context git remote, then stop using `.spl`. Export is lossy; re-run is overwrite-at-own-risk. See [context-git-migration.md](context-git-migration.md).
 
 ## Context history (stock git)
 
-Context history is ordinary git/GitHub:
+History, diff, and pull-request review of the context remote use stock git and GitHub. Names absent from `spl --help` are not commands.
 
 - `git clone` / `git fetch` the bind `remote`
 - Agents write via MCP: one mutation batch → one commit on a short-lived branch → pull request to `protected_branch`
-- Humans review overlapping edits on the PR; there is no silent overwrite and no Spool-specific remote protocol
+- Humans review overlapping edits on the PR; there is no silent overwrite and no second remote protocol
 
 Local SQLite/FTS projections rebuild from the current checkout on every MCP/process start. They are never committed, pushed, or treated as a second store.
 
 Assets use Git LFS at or above **512 KiB** (configurable via `lfs_threshold_kib`). Text, JSON, and TOML stay plain git, with a warning above ~1 MiB.
-
-## Deprecated / migration-only (unsupported SoT)
-
-Do **not** treat the following as a supported parallel store for solution context:
-
-- `spl init` / `.spl` object packs (Spool-as-VCS)
-- `spl workspace init` / `workspace attach` (detached `.spl` workspaces)
-- `spl remote set`, `spl push`, `spl pull`, `spl clone` against Rack (Rack sync / pack wire-compat)
-
-These commands and their MCP twins are **deleted** (no aliases, no deprecation stubs). Use stock
-git (`git log`, `git diff`, `git branch`) on the bind remote, and bind with
-`spl context init --remote`. Unbound leftover `.spl` exists only so `spl context export` can
-migrate once.

@@ -2,8 +2,7 @@
 
 A mutation batch is a JSON array. Pass it to `spl mutate --operations` (or MCP `spl_mutate`
 `operations`) so the bound context graph is written through a short-lived branch + PR.
-There is no public `spl add` / `spl commit`. Use `schema migrate` only when changing
-`schema.toml`.
+Use `schema migrate` only when changing `schema.toml`.
 
 ```json
 [

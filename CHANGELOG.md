@@ -31,6 +31,13 @@ generated from commits since the preceding `v*` tag. Commits prefixed with `docs
 
 ### Changed
 
+- Agent skills under `.agents/skills` teach only the KEEP surface: bind
+  (`spl context init --remote`), `spl mcp`, `mutate` / `spl_mutate` (branch + PR),
+  bound reads (`query-context`, `search`, `search-expand`, `filter`, `resolve`,
+  `graph`), `schema` / `validate`, `asset *`, file-graph `merge *`, and `prune`.
+  History, diff, and pull-request review of context remotes use stock git and
+  GitHub. A leftover `.spl` store is a lossy one-shot `context export` /
+  `migrate-once` into the bound context remote, then stop.
 - Bind resolution looks only for `.spool/context.toml` in the code repo (stopping
   at a nested git work tree). It does not infer remotes from directory names,
   monorepo layout, `go.work`, leftover `.spl` state, git `origin`, or Rack config.

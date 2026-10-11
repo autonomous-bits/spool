@@ -5,7 +5,7 @@ description: Author, synthesize, and query technical implementation knowledge in
 
 # Spool Technical Implementation
 
-Use this skill when preparing, designing, authoring, or executing **technical implementation specifications, execution plans, and code-level technical tasks** in a Spool workspace.
+Use this skill when preparing, designing, authoring, or executing **technical implementation specifications, execution plans, and code-level technical tasks** in a Spool graph.
 
 > [!IMPORTANT]
 > **Core Implementation Invariants**
@@ -23,7 +23,7 @@ Use this skill when preparing, designing, authoring, or executing **technical im
 | --- | --- | --- |
 | `Implementation` | Top-level domain tag applied to all technical implementation nodes | *(Used with sub-labels)* |
 | `TechnicalSpec` | High-level technical execution design or component specification | `Implement atomic batch staging and commit rollback in repository engine` |
-| `Plan` | Structured sequence of technical execution phases or tasks | `Multi-phase rollout plan for atomic workspace directory migration` |
+| `Plan` | Structured sequence of technical execution phases or tasks | `Multi-phase rollout plan for atomic directory layout migration` |
 | `Ephemeral` | **Mandatory tag** for transient spec/plan nodes that will be superseded by code | *(Applied alongside `Implementation` / `TechnicalSpec` / `Plan`)* |
 | `Spike` | Time-boxed technical exploration or prototype finding | `Spike findings on SQLite WAL mode concurrency under concurrent readers` |
 | `Task` / `Step` | Atomic technical execution unit during active development | `Add lock acquisition timeout handler to repository mutex wrapper` |
@@ -64,7 +64,7 @@ flowchart TD
     D --> E["5. Verify (Tests, Lint, Standards Compliance)"]
     E --> F{"New Durable Concepts Discovered?"}
     F -- Yes --> G["Author Permanent ADR / Standard / Contract Nodes"]
-    F -- No --> H["Commit Code & Complete Goal"]
+    F -- No --> H["Land code on a pull request"]
     G --> H
 ```
 
@@ -108,7 +108,7 @@ implementation nodes and their incident edges:
 
 - **MCP (Default)**:
   - Preview: `spl_prune(dry_run: true)`
-  - Commit: `spl_prune(author: "<author>", message: "Prune transient implementation knowledge")`
+  - Apply: `spl_prune(author: "<author>", message: "Prune transient implementation knowledge")`
 
 - **CLI (Fallback)**:
   ```sh
@@ -117,7 +117,8 @@ implementation nodes and their incident edges:
   ```
 
 The JSON preview reports every removed `Ephemeral` node, cascading edge, and durable node left
-without connections. Unbound workspaces are refused. This is graph cleanup, not pack/CAS GC.
+without connections. A checkout without `.spool/context.toml` is refused. Prune deletes `Ephemeral`
+nodes and incident edges; it does not collect git objects.
 
 ---
 
