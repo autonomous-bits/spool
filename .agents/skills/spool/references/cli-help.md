@@ -12,14 +12,14 @@ spl merge --help
 ```
 
 `spl --help` lists the KEEP surface only. Context-management commands require
-`.spool/context.toml` (`solution_id`, `remote`, `protected_branch`) and refuse unbound workspaces.
+`.spool/context.toml` (`solution_id`, `remote`, `protected_branch`) and refuse a checkout without it.
 
 ## Command index
 
 | Command | Purpose |
 | --- | --- |
 | `context init` | Bind this code repo to a context git remote |
-| `context export`, `context migrate-once` | Export leftover `.spl` into bound context git |
+| `context export`, `context migrate-once` | One-shot lossy export of a leftover `.spl` store, then stop |
 | `query-context` | Evidence-focused bounded graph context |
 | `search`, `filter`, `search-expand`, `resolve`, `graph` | Query the bound checkout |
 | `mutate` | Write node/edge mutations (one batch → branch+PR) |
@@ -31,11 +31,7 @@ spl merge --help
 | `version` | Print build provenance as JSON |
 | `completion`, `help` | Shell completion and command help |
 
-### Removed (deleted; no aliases)
-
-`init`, `workspace *`, `remote *`, `push`, `pull`, `clone`, old `migrate`, `fsck`, `gc`, pack prune,
-`cherry-pick`, `add`, `status`, `commit`, `branch`, `switch`, `history`, `diff`,
-`branches-containing`. Use stock git for history and diff.
+Names absent from `spl --help` are not commands. History, diff, and pull-request review of the context remote use stock git and GitHub.
 
 All commands accept `-h, --help`.
 
@@ -43,6 +39,11 @@ All commands accept `-h, --help`.
 
 ```sh
 spl context init --remote https://github.com/org/solution-context.git
+```
+
+If you still have a leftover `.spl` store, run `context export` / `migrate-once` once into the bound context git remote, then stop using `.spl`. Export is lossy; re-run is overwrite-at-own-risk.
+
+```sh
 spl context export
 spl context migrate-once
 ```
@@ -57,7 +58,7 @@ context init
 
 context export / migrate-once
   --from <path>              leftover .spl state directory
-  --branch <name>            leftover .spl branch to export
+  --branch <name>            snapshot name inside the leftover store (default: that store's default)
   --author <text>
   --message <text>
 ```
@@ -77,10 +78,9 @@ mutate
   --message <text>
 ```
 
-`mutate` is bound-only and refuses unbound workspaces. One ops batch becomes one git commit on a
-short-lived branch plus pull request. Pass `-` to `--operations` to read stdin. Identical or empty
-effective diffs do not open a PR. Use `schema migrate` when changing `schema.toml`. There are no
-aliases to `add` / `commit` / `status` / `stage` / `write`.
+`mutate` is bound-only and refuses a checkout without `.spool/context.toml`. One ops batch becomes
+one git commit on a short-lived branch plus pull request. Pass `-` to `--operations` to read stdin.
+Identical or empty effective diffs do not open a PR. Use `schema migrate` when changing `schema.toml`.
 
 ## Reading graphs
 
@@ -159,7 +159,7 @@ asset read [locator-or-node-id]
 
 ## Merges
 
-File-graph merge of two git branches. Not a Rack/.spl lease.
+File-graph merge of two git branches on the context remote.
 
 ```sh
 spl merge preview --source feature --target main
@@ -180,7 +180,8 @@ spl prune --author alice --message "Prune transient plan"
 ```
 
 Graph cleanup of `Ephemeral` nodes and cascading edges on the bound checkout. Writes a
-short-lived branch + PR. Unbound workspaces are refused. This is not pack/CAS GC.
+short-lived branch + PR. A checkout without `.spool/context.toml` is refused. Prune does not
+collect git objects.
 
 ## MCP, version, completion
 

@@ -1,7 +1,7 @@
 # Merges
 
 Always preview before applying. Preserve and reuse the preview ID and a caller-owned transaction ID.
-This is a **file-graph** merge of two context-git branches, not a Rack/.spl lease.
+This is a **file-graph** merge of two context-git branches.
 
 ```sh
 spl merge preview --source feature --target main

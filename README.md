@@ -96,9 +96,9 @@ spl context export
 spl context migrate-once
 ```
 
-`context export` and `context migrate-once` read leftover private `.spl` graph state internally and
-write human-diffable nodes/edges through a short-lived branch and pull request. They are not Spool
-VCS commands. `migrate-once` skips the write when titles are already present.
+If you still have a leftover `.spl` store, run `context export` / `migrate-once` once into the bound
+context git remote, then stop using `.spl`. Export is lossy; re-run is overwrite-at-own-risk.
+`migrate-once` skips the write when titles are already present.
 
 The `context` namespace is **only** init/export/migrate-once. Graph queries use `query-context`.
 
@@ -139,7 +139,7 @@ spl asset add --file docs/architecture.md --title "Architecture notes"
 spl asset read --node notes > architecture.md
 ```
 
-Preview and apply a three-way **file-graph** merge (not a Rack/.spl lease):
+Preview and apply a three-way **file-graph** merge of two context-git branches:
 
 ```sh
 spl merge preview --source feature --target main
@@ -198,8 +198,8 @@ The installed surface, including generated help, is documented in
 | Command | Purpose |
 | --- | --- |
 | `context init` | Bind this code repo to a context git remote (`--remote` required) |
-| `context export`, `context migrate-once` | Export leftover `.spl` into bound context git |
-| `query-context` | Evidence-focused bounded graph context (replaces query-`context`) |
+| `context export`, `context migrate-once` | One-shot lossy export of a leftover `.spl` store, then stop |
+| `query-context` | Evidence-focused bounded graph context |
 | `search`, `search-expand`, `filter`, `resolve`, `graph` | Bound checkout reads |
 | `mutate` | Routine node/edge writes (one batch → branch+PR) |
 | `schema migrate`, `validate` | Schema write (branch+PR) and validation |
@@ -209,15 +209,9 @@ The installed surface, including generated help, is documented in
 | `mcp` | MCP stdio server (KEEP tools only) |
 | `version`, `help`, `completion` | Provenance, help, and shell completion |
 
-### Removed
-
-These commands and their MCP twins are **deleted** (no aliases):
-
-`init`, `workspace *`, `remote *`, `push`, `pull`, `clone`, old `migrate`, `fsck`, `gc`, pack prune,
-`cherry-pick`, `add`, `status`, `commit`, `branch`, `switch`, `history`, `diff`,
-`branches-containing`.
-
-Use stock git for history and diff on the context remote.
+Names absent from `spl --help` are not commands. History, diff, and pull-request review of the
+context remote use stock git and GitHub. The deleted-name list lives in `internal/surface` and
+the changelog; it is not a workflow.
 
 ## Learn more
 

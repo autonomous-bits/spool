@@ -96,3 +96,78 @@ func TestSunsetCopyClosesSoftDoor(t *testing.T) {
 		}
 	}
 }
+
+func TestAgentSkillsDoNotTeachRemovedSurface(t *testing.T) {
+	t.Parallel()
+	root := repoRoot(t)
+	skills := filepath.Join(root, ".agents", "skills")
+	forbidden := []string{
+		"Rack",
+		"spl add",
+		"spl commit",
+		"spl status",
+		"spl push",
+		"spl pull",
+		"spl clone",
+		"spl init",
+		"spl workspace",
+		"spl remote",
+		"spl history",
+		"spl diff",
+		"spl fsck",
+		"spl gc",
+		"spl cherry-pick",
+		"spl branch",
+		"spl switch",
+		"branches-containing",
+		"spl_add",
+		"spl_commit",
+		"spl_status",
+		"spl_init",
+		"spl_push",
+		"spl_pull",
+		"spl_clone",
+		"spl_history",
+		"spl_diff",
+		"spl_fsck",
+		"spl_gc",
+		"spl_workspace",
+		"spl_remote",
+		"spl_branch",
+		"spl_switch",
+		"spl_cherry_pick",
+		"spl_migrate",
+		"pack prune",
+		"one-shot or repeatable",
+	}
+	err := filepath.WalkDir(skills, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || !strings.HasSuffix(path, ".md") {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		text := string(data)
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			rel = path
+		}
+		for _, phrase := range forbidden {
+			if strings.Contains(text, phrase) {
+				t.Errorf("%s teaches removed surface %q", rel, phrase)
+			}
+		}
+		stripped := strings.ReplaceAll(text, "spl_context_export", "")
+		if strings.Contains(stripped, "spl_context") {
+			t.Errorf("%s teaches removed tool spl_context", rel)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}

@@ -8,21 +8,16 @@ spl context init --remote https://github.com/org/solution-context.git
 
 That writes `.spool/context.toml`. Context-management commands refuse to run without it.
 
-Export leftover private `.spl` graph files into the bound context remote (one-shot or repeatable):
+If you still have a leftover `.spl` store, run `context export` / `migrate-once` once into the bound context git remote, then stop using `.spl`. Export is lossy; re-run is overwrite-at-own-risk.
 
 ```sh
 spl context export
 spl context migrate-once
 ```
 
-These commands read leftover `.spl` internally. They are not Spool VCS commands and do not reopen
-Rack or `.spl` as source of truth.
-
 ## Graph writes
 
-There is no public `spl add` / `spl commit`. Routine node and edge writes use `spl mutate`
-(MCP: `spl_mutate`). Bound writes open a short-lived `spool/mcp/<stamp>-<nonce>` branch and a
-pull request:
+Routine node and edge writes use `spl mutate` (MCP: `spl_mutate`). Bound writes open a short-lived `spool/mcp/<stamp>-<nonce>` branch and a pull request:
 
 ```sh
 spl mutate --operations mutations.json --message "Record requirement"
@@ -31,17 +26,15 @@ spl asset add --file docs/architecture.md --title "Architecture notes"
 spl prune --author alice --message "Prune transient plan"
 ```
 
-`mutate` is bound-only and refuses unbound workspaces. Use `schema migrate` when changing
-`schema.toml`. Identical mutate or schema content is a no-op (no empty PR). There are no aliases
-to `add` / `commit` / `status` / `stage` / `write`.
+`mutate` is bound-only and refuses a checkout without `.spool/context.toml`. Use `schema migrate` when changing `schema.toml`. Identical mutate or schema content is a no-op (no empty PR).
 
-## History and diff
+## History, diff, and review
 
-Use stock git on the context remote:
+Use stock git and GitHub on the context remote:
 
 ```sh
 git log
 git diff
 ```
 
-Spool does not wrap `history` or `diff`.
+Review the pull request on the host.

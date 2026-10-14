@@ -4,7 +4,7 @@
 
 See the [architecture guide](../../docs/architecture.md) for the system-level
 component boundaries, data model, and persistence design. Solution context is
-bind + stock git (always branch+PR). Do not teach Rack or `.spl` as a parallel SoT.
+bind + stock git (always branch+PR). Teach only commands in `internal/surface` `KeepCLITopLevel`.
 
 Commands:
 

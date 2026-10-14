@@ -1,4 +1,4 @@
-# Bind and leftover `.spl`
+# Bind and one-shot export
 
 Bind each code repository to a solution context remote:
 
@@ -6,16 +6,11 @@ Bind each code repository to a solution context remote:
 spl context init --remote https://github.com/org/solution-context.git
 ```
 
-That writes `.spool/context.toml` with `solution_id`, `remote`, and `protected_branch`. Context
-management is bound-only. There is no `spl workspace` catalog and no Rack remote protocol.
+That writes `.spool/context.toml` with `solution_id`, `remote`, and `protected_branch`. Context management is bound-only.
 
-Export leftover private `.spl` graph files into the bound context git:
+If you still have a leftover `.spl` store, run `context export` / `migrate-once` once into the bound context git remote, then stop using `.spl`. Export is lossy; re-run is overwrite-at-own-risk.
 
 ```sh
 spl context export
 spl context migrate-once
 ```
-
-Private `.spl` readers exist only for that export path. They are not public VCS commands.
-
-`workspace init/attach`, `migrate`, `remote *`, `clone`, `push`, and `pull` are removed.
